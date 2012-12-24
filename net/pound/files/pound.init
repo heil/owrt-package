@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+START=99
+
+DAEMON=/usr/sbin/pound
+CFGFILE=/etc/pound.cfg
+PIDFILE=/var/run/pound.pid
+
+start() {
+        
+        echo 'Pound is starting...'
+        start-stop-daemon -S -q -x "$DAEMON" -- -f "$CFGFILE" -p "$PIDFILE"
+}
+
+stop() {
+        echo 'Pound is stopping...'
+        start-stop-daemon -K -q -x "$DAEMON"
+}
+
+restart() {
+        stop
+        start
+}

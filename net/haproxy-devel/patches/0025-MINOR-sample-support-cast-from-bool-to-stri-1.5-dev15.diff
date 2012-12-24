@@ -1,0 +1,27 @@
+From d167e6d9fb6125dc3f4138aa8bc764aa88a8bc6a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 21 Dec 2012 17:38:05 +0100
+Subject: MINOR: sample: support cast from bool to string
+
+Samples could be converted from bool to int and from int to string but
+not from bool to string. Let's add this.
+---
+ src/sample.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index a7d02e5..f5828fa 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -263,7 +263,7 @@ static int c_str2int(struct sample *smp)
+ typedef int (*sample_cast_fct)(struct sample *smp);
+ static sample_cast_fct sample_casts[SMP_TYPES][SMP_TYPES] = {
+ /*            to:  BOOL       UINT       SINT       IPV4      IPV6        STR         BIN        CSTR        CBIN   */
+-/* from: BOOL */ { c_none,    c_none,    c_none,    NULL,     NULL,       NULL,       NULL,      NULL,       NULL   },
++/* from: BOOL */ { c_none,    c_none,    c_none,    NULL,     NULL,       c_int2str,  NULL,      c_int2str,  NULL   },
+ /*       UINT */ { c_none,    c_none,    c_none,    c_int2ip, NULL,       c_int2str,  NULL,      c_int2str,  NULL   },
+ /*       SINT */ { c_none,    c_none,    c_none,    c_int2ip, NULL,       c_int2str,  NULL,      c_int2str,  NULL   },
+ /*       IPV4 */ { NULL,      c_ip2int,  c_ip2int,  c_none,   c_ip2ipv6,  c_ip2str,   NULL,      c_ip2str,   NULL   },
+-- 
+1.7.1
+

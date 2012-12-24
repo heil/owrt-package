@@ -1,0 +1,37 @@
+From b01658706809693e8a018999a93948828b3a14ff Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 15 Dec 2012 10:12:39 +0100
+Subject: BUG/MINOR: stream_interface: don't return when the fd is already set
+
+Back in the days where polling was made with select() where all FDs
+were checked at once, stream_int_chk_snd_conn() used to check whether
+the file descriptor it was passed was ready or not, so that it did
+not perform the work for nothing.
+
+Right now FDs are checked just before calling the I/O handler so this
+test never matches at best, or may return false information at worst.
+
+Since conn_fd_handler() always clears the flags upon exit, it looks
+like a missed event cannot happen right now. Still, better remove
+this outdated check than wait for it to cause issues.
+---
+ src/stream_interface.c |    3 +--
+ 1 files changed, 1 insertions(+), 2 deletions(-)
+
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 32cd211..5f6d85d 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -795,8 +795,7 @@ static void stream_int_chk_snd_conn(struct stream_interface *si)
+ 		return;
+ 
+ 	if (!ob->pipe &&                          /* spliced data wants to be forwarded ASAP */
+-	    (!(si->flags & SI_FL_WAIT_DATA) ||    /* not waiting for data */
+-	     (fdtab[si->conn->t.sock.fd].ev & FD_POLL_OUT)))   /* we'll be called anyway */
++	    !(si->flags & SI_FL_WAIT_DATA))       /* not waiting for data */
+ 		return;
+ 
+ 	if (!(si->conn->flags & (CO_FL_HANDSHAKE|CO_FL_WAIT_L4_CONN|CO_FL_WAIT_L6_CONN))) {
+-- 
+1.7.1
+

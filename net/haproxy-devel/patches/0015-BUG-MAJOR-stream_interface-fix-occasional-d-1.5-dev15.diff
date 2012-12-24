@@ -1,0 +1,50 @@
+From 66572768712e014045dc5029da2facc1e12f73f0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 19 Dec 2012 17:34:17 +0100
+Subject: BUG/MAJOR: stream_interface: fix occasional data transfer freezes
+
+Since the changes in connection management, it became necessary to re-enable
+polling after a fast-forward transfer would complete.
+
+One such issue was addressed after dev12 by commit 9f7c6a18 (BUG/MAJOR:
+stream_interface: certain workloads could cause get stuck) but unfortunately,
+it was incomplete as very subtle cases would occasionally remain unaddressed
+when a buffer was marked with the NOEXP flag, which is used during POST
+uploads. The wake up must be performed even when the flag is there, the
+flag is used only to refresh the timeout.
+
+Too many conditions need to be hit together for the situation to be
+reproducible, but it systematically appears for some users.
+
+It is particularly important to credit Sander Klein and John Rood from
+Picturae ICT ( http://picturae.com/ ) for reporting this bug on the mailing
+list, providing configs and countless traces showing the bug in action, and
+for their patience testing litteraly tens of snapshots and versions of
+supposed fixes during a full week to narrow the commit range until the bug
+was really knocked down! As a side effect of their numerous tests, several
+other bugs were fixed.
+---
+ src/stream_interface.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index bba52e7..7e525a9 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -571,11 +571,11 @@ static int si_conn_wake_cb(struct connection *conn)
+ 		__conn_data_stop_recv(conn);
+ 		si->ib->rex = TICK_ETERNITY;
+ 	}
+-	else if ((si->ib->flags & (CF_SHUTR|CF_READ_PARTIAL|CF_DONT_READ|CF_READ_NOEXP)) == CF_READ_PARTIAL &&
++	else if ((si->ib->flags & (CF_SHUTR|CF_READ_PARTIAL|CF_DONT_READ)) == CF_READ_PARTIAL &&
+ 		 !channel_full(si->ib)) {
+ 		/* we must re-enable reading if si_chk_snd() has freed some space */
+ 		__conn_data_want_recv(conn);
+-		if (tick_isset(si->ib->rex))
++		if (!(si->ib->flags & CF_READ_NOEXP) && tick_isset(si->ib->rex))
+ 			si->ib->rex = tick_add_ifset(now_ms, si->ib->rto);
+ 	}
+ 
+-- 
+1.7.1
+

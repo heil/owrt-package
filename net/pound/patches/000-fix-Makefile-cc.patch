@@ -1,0 +1,16 @@
+Index: pound/patches/000-fix-makefile-cc
+===================================================================
+--- pound/patches/000-fix-makefile-cc (revision 0)
++++ pound/patches/000-fix-makefile-cc (revision 0)
+@@ -0,0 +1,11 @@
++--- a/Makefile.in
+++++ b/Makefile.in
++@@ -63,7 +63,7 @@
++ $(OBJS):       pound.h config.h
++ 
++ svc.o:         svc.c dh512.h dh1024.h
++-               gcc ${CFLAGS} -c -o svc.o svc.c
+++               ${CC} ${CFLAGS} -c -o svc.o svc.c
++ 
++ install:       all
++                @INSTALL@ -d ${DESTDIR}@sbindir@

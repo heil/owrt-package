@@ -1,0 +1,8 @@
+#!/bin/sh
+
+if [ "$ACTION" = add ]; then
+
+        /etc/init.d/stud enabled && \
+                /etc/init.d/stud start
+fi
+

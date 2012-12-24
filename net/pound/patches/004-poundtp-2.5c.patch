@@ -1,0 +1,450 @@
+Index: Pound-2.5/config.c
+===================================================================
+--- Pound-2.5.orig/config.c
++++ Pound-2.5/config.c
+@@ -78,6 +78,9 @@ static regex_t  Service, ServiceName, UR
+ static regex_t  Redirect, RedirectN, TimeOut, Session, Type, TTL, ID, DynScale;
+ static regex_t  ClientCert, AddHeader, Ciphers, CAlist, VerifyList, CRLlist, NoHTTPS11;
+ static regex_t  Grace, Include, ConnTO, IgnoreCase, HTTPS, HTTPSCert;
++#ifdef TPROXY_ENABLE
++static regex_t  TProxy;
++#endif
+ 
+ static regmatch_t   matches[5];
+ 
+@@ -194,6 +197,10 @@ parse_be(const int is_emergency)
+     res->next = NULL;
+     res->ctx = NULL;
+     has_addr = has_port = 0;
++#ifdef TPROXY_ENABLE
++    res->tp_enabled = 0;
++#endif
++
+     pthread_mutex_init(&res->mut, NULL);
+     while(conf_fgets(lin, MAXBUF)) {
+         if(strlen(lin) > 0 && lin[strlen(lin) - 1] == '\n')
+@@ -319,6 +326,10 @@ parse_be(const int is_emergency)
+             if((res->addr.ai_family == AF_INET || res->addr.ai_family == AF_INET6) && !has_port)
+                 conf_err("BackEnd missing Port - aborted");
+             return res;
++#ifdef TPROXY_ENABLE
++        } else if(!regexec(&TProxy, lin, 4, matches, 0)) {
++	    if (enable_tproxy && have_tproxy) res->tp_enabled = atoi(lin + matches[1].rm_so);
++#endif
+         } else {
+             conf_err("unknown directive");
+         }
+@@ -1099,6 +1110,13 @@ parse_file(void)
+                     ;
+                 svc->next = parse_service(lin + matches[1].rm_so);
+             }
++#ifdef TPROXY_ENABLE
++        } else if(!regexec(&TProxy, lin, 4, matches, 0)) {
++	    if (have_tproxy)
++                enable_tproxy = atoi(lin + matches[1].rm_so);
++	    else
++		enable_tproxy = 0;
++#endif
+         } else {
+             conf_err("unknown directive - aborted");
+         }
+@@ -1175,6 +1193,9 @@ config_parse(const int argc, char **cons
+     || regcomp(&IgnoreCase, "^[ \t]*IgnoreCase[ \t]+([01])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+     || regcomp(&HTTPS, "^[ \t]*HTTPS[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+     || regcomp(&HTTPSCert, "^[ \t]*HTTPS[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
++#ifdef TPROXY_ENABLE
++    || regcomp(&TProxy, "^[ \t]*TProxy[ \t]+([01])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
++#endif
+     ) {
+         logmsg(LOG_ERR, "bad config Regex - aborted");
+         exit(1);
+@@ -1329,6 +1350,9 @@ config_parse(const int argc, char **cons
+     regfree(&IgnoreCase);
+     regfree(&HTTPS);
+     regfree(&HTTPSCert);
++#ifdef TPROXY_ENABLE
++    regfree(&TProxy);
++#endif
+ 
+     /* set the facility only here to ensure the syslog gets opened if necessary */
+     log_facility = def_facility;
+Index: Pound-2.5/http.c
+===================================================================
+--- Pound-2.5.orig/http.c
++++ Pound-2.5/http.c
+@@ -781,7 +781,11 @@ thr_http(void *arg)
+                 clean_all();
+                 pthread_exit(NULL);
+             }
+-            if(connect_nb(sock, &backend->addr, backend->conn_to) < 0) {
++#ifdef TPROXY_ENABLE
++	    if(connect_nb(sock, &backend->addr, backend->conn_to, backend->tp_enabled ? &from_host : NULL) < 0) {
++#else
++	    if(connect_nb(sock, &backend->addr, backend->conn_to) < 0) {
++#endif
+                 str_be(buf, MAXBUF - 1, backend);
+                 logmsg(LOG_WARNING, "(%lx) backend %s connect: %s", pthread_self(), buf, strerror(errno));
+                 shutdown(sock, 2);
+Index: Pound-2.5/Makefile.in
+===================================================================
+--- Pound-2.5.orig/Makefile.in
++++ Pound-2.5/Makefile.in
+@@ -32,10 +32,19 @@ C_OWNER="@C_OWNER@"
+ C_GROUP="@C_GROUP@"
+ C_SUPER="@C_SUPER@"
+ C_CERT1L="@C_CERT1L@"
++C_TPROXY=
++
++TPROXY=0
++
++ifeq (${TPROXY}, 1)
++  $(if $(findstring "@target_os@", "linux-gnu"),,$(error TPROXY can be used just with Linux))
++  C_TPROXY=-DTPROXY_ENABLE
++endif
++
+ 
+ CFLAGS=-DF_CONF=\"$(F_CONF)\" -DVERSION=\"${VERSION}\" -DC_SSL=\"${C_SSL}\" -DC_T_RSA=\"${C_T_RSA}\" \
+ 	-DC_MAXBUF=\"${C_MAXBUF}\" -DC_OWNER=\"${C_OWNER}\" -DC_GROUP=\"${C_GROUP}\" -DC_SUPER=\"${C_SUPER}\" \
+-	-DC_CERT1L=\"${C_CERT1L}\" @CFLAGS@ @PTHREAD_CFLAGS@ @CPPFLAGS@
++	-DC_CERT1L=\"${C_CERT1L}\" @CFLAGS@ @PTHREAD_CFLAGS@ @CPPFLAGS@ ${C_TPROXY}
+ LIBS=@LIBS@ @PTHREAD_LIBS@
+ 
+ prefix=@prefix@
+Index: Pound-2.5/pound.c
+===================================================================
+--- Pound-2.5.orig/pound.c
++++ Pound-2.5/pound.c
+@@ -40,6 +40,10 @@ int         alive_to,           /* check
+             print_log,          /* print log messages to stdout/stderr */
+             grace,              /* grace period before shutdown */
+             control_sock;       /* control socket */
++#ifdef TPROXY_ENABLE
++int	    have_tproxy,	/* is transparent proxy available */
++	    enable_tproxy;	/* is tproxy enabled */
++#endif
+ 
+ SERVICE     *services;          /* global services (if any) */
+ 
+@@ -164,11 +168,23 @@ main(const int argc, char **argv)
+ #ifndef SOL_TCP
+     struct protoent     *pe;
+ #endif
++#ifdef TPROXY_ENABLE
++    typedef struct __user_cap_header_struct	tp_cap_header_t;
++    typedef struct __user_cap_data_struct	tp_cap_data_t;
++    tp_cap_header_t	tp_cap_header;
++    tp_cap_data_t	tp_cap_data;
++#endif
+ 
+     print_log = 0;
+     (void)umask(077);
+     control_sock = -1;
+     log_facility = -1;
++#ifdef TPROXY_ENABLE
++    have_tproxy = 0;
++    tp_cap_header.version = _LINUX_CAPABILITY_VERSION;
++    tp_cap_header.pid = 0;
++    tp_cap_data.effective = tp_cap_data.permitted = tp_cap_data.inheritable = 0;
++#endif
+     logmsg(LOG_NOTICE, "starting...");
+ 
+     signal(SIGHUP, h_shut);
+@@ -208,6 +224,19 @@ main(const int argc, char **argv)
+     }
+     SOL_TCP = pe->p_proto;
+ #endif
++ 
++#ifdef TPROXY_ENABLE
++    if (! detect_tproxy()) {
++	if (geteuid() == 0) {
++	    have_tproxy = 1;
++	    logmsg(LOG_INFO, "tproxy: available");
++	} else {
++	    logmsg(LOG_ERR, "tproxy: disabled. you must start pound with root privileges. later it will drop privileges.");
++	}
++    } else {
++	logmsg(LOG_INFO, "tproxy: not supported or not enough privileges");
++    }
++#endif
+ 
+     /* read config */
+     config_parse(argc, argv);
+@@ -325,6 +354,36 @@ main(const int argc, char **argv)
+         }
+     }
+ 
++#ifdef TPROXY_ENABLE
++    if (enable_tproxy)
++    {
++        if (capget(&tp_cap_header, &tp_cap_data) != 0)
++	{
++            logmsg(LOG_ERR, "capabilities: can't get capabilities");
++            exit(1);
++	}
++	if (prctl(PR_SET_KEEPCAPS, 1) < 0)
++	{
++            logmsg(LOG_ERR, "capabilities: can't enable keep capabilities");
++            exit(1);
++	}
++	
++	tp_cap_data.effective = tp_cap_data.permitted = tp_cap_data.inheritable = 0;
++	tp_cap_data.effective |= (1 << CAP_NET_ADMIN);
++	tp_cap_data.effective |= (1 << CAP_SETUID);
++	tp_cap_data.effective |= (1 << CAP_SETGID);
++	tp_cap_data.permitted |= (1 << CAP_NET_ADMIN);
++	tp_cap_data.permitted |= (1 << CAP_SETUID);
++	tp_cap_data.permitted |= (1 << CAP_SETGID);
++
++	if (capset(&tp_cap_header, &tp_cap_data) != 0)
++	{
++            logmsg(LOG_ERR, "capabilities: can't set capabilities");
++            exit(1);
++	}
++    }
++#endif
++
+     if(group)
+         if(setgid(group_id) || setegid(group_id)) {
+             logmsg(LOG_ERR, "setgid: %s - aborted", strerror(errno));
+@@ -336,6 +395,32 @@ main(const int argc, char **argv)
+             exit(1);
+         }
+ 
++#ifdef TPROXY_ENABLE
++    if (enable_tproxy)
++    {
++        if (capget(&tp_cap_header, &tp_cap_data) != 0)
++	{
++            logmsg(LOG_ERR, "user capabilities: can't get capabilities");
++            exit(1);
++	}
++	if (prctl(PR_SET_KEEPCAPS, 1) < 0)
++	{
++            logmsg(LOG_ERR, "user capabilities: can't enable keep capabilities");
++            exit(1);
++	}
++
++	tp_cap_data.effective = tp_cap_data.permitted = tp_cap_data.inheritable = 0;
++	tp_cap_data.effective |= (1 << CAP_NET_ADMIN);
++	tp_cap_data.permitted |= (1 << CAP_NET_ADMIN);
++
++	if (capset(&tp_cap_header, &tp_cap_data) != 0)
++	{
++            logmsg(LOG_ERR, "user capabilities: can't set capabilities");
++            exit(1);
++	}
++    }
++#endif
++
+     /* split off into monitor and working process if necessary */
+     for(;;) {
+ #ifdef  UPER
+Index: Pound-2.5/pound.h
+===================================================================
+--- Pound-2.5.orig/pound.h
++++ Pound-2.5/pound.h
+@@ -235,6 +235,14 @@
+ #define const
+ #endif
+ 
++#ifdef TPROXY_ENABLE
++#include <sys/prctl.h>
++#include <linux/capability.h>
++#ifndef IP_TRANSPARENT 
++#define IP_TRANSPARENT 19
++#endif
++#endif
++
+ #ifndef NO_EXTERNALS
+ /*
+  * Global variables needed by everybody
+@@ -253,6 +261,11 @@ extern int  alive_to,           /* check
+             grace,              /* grace period before shutdown */
+             control_sock;       /* control socket */
+ 
++#ifdef TPROXY_ENABLE
++extern int  have_tproxy,	/* is tproxy available */
++	    enable_tproxy;	/* is tproxy enabled */
++#endif
++
+ extern regex_t  HEADER,     /* Allowed header */
+                 CHUNK_HEAD, /* chunk header line */
+                 RESP_SKIP,  /* responses for which we skip response */
+@@ -298,6 +311,9 @@ typedef struct _backend {
+     int                 to;         /* read/write time-out */
+     int                 conn_to;    /* connection time-out */
+     struct addrinfo     ha_addr;    /* HA address/port */
++#ifdef TPROXY_ENABLE
++    int			tp_enabled; /* TProxy is enabled */
++#endif
+     char                *url;       /* for redirectors */
+     int                 redir_req;  /* the redirect should include the request path */
+     SSL_CTX             *ctx;       /* CTX for SSL connections */
+@@ -522,7 +538,12 @@ extern void upd_be(SERVICE *const svc, B
+  * Non-blocking version of connect(2). Does the same as connect(2) but
+  * ensures it will time-out after a much shorter time period CONN_TO.
+  */
++#ifdef TPROXY_ENABLE
++extern int  detect_tproxy(void);
++extern int  connect_nb(const int, const struct addrinfo *, const int, const struct addrinfo *);
++#else
+ extern int  connect_nb(const int, const struct addrinfo *, const int);
++#endif
+ 
+ /*
+  * Parse arguments/config file
+Index: Pound-2.5/svc.c
+===================================================================
+--- Pound-2.5.orig/svc.c
++++ Pound-2.5/svc.c
+@@ -296,6 +296,40 @@ addr2str(char *const res, const int res_
+     return;
+ }
+ 
++#ifdef TPROXY_ENABLE
++/*
++ * detect_tproxy
++ * check for TPROXY
++ *
++ * Thanks to Loadbalancer.org, Inc. especially to Malcolm Turnbull for sponsorship
++ * Thanks to Sianet Business Hosting especially to Rodrigo L. L. Jorge for sponsorship
++ *
++ */
++int
++detect_tproxy(void)
++{
++    int sock, tp_val;
++
++    tp_val = 1;
++
++    sock = socket(AF_INET, SOCK_STREAM, 0);
++    if (sock < 0) {
++        logmsg(LOG_WARNING, "detect_tproxy(): socket SOCK_STREAM failed: %s", strerror(errno));
++        return 1;
++    }
++    if (setsockopt(sock, SOL_IP, IP_TRANSPARENT, &tp_val, sizeof(tp_val)) < 0) {
++        logmsg(LOG_INFO, "detect_tproxy(): tproxy is not available");
++        close(sock);
++        return 1;
++    }
++
++    close(sock);
++    logmsg(LOG_INFO, "detect_tproxy(): tproxy is is detected");
++
++    return 0;
++}
++#endif
++
+ /*
+  * Parse a header
+  * return a code and possibly content in the arg
+@@ -827,12 +861,26 @@ need_rewrite(const int rewr_loc, char *c
+  * Non-blocking connect(). Does the same as connect(2) but ensures
+  * it will time-out after a much shorter time period SERVER_TO
+  */
++#ifdef TPROXY_ENABLE
+ int
+-connect_nb(const int sockfd, const struct addrinfo *serv_addr, const int to)
+-{
++connect_nb(const int sockfd, const struct addrinfo *serv_addr, const int to, const struct addrinfo *tp_addr) {
++#else
++int
++connect_nb(const int sockfd, const struct addrinfo *serv_addr, const int to) {
++#endif
+     int             flags, res, error;
+     socklen_t       len;
+     struct pollfd   p;
++#ifdef TPROXY_ENABLE
++    int tp_val = 1;
++    struct sockaddr_in in;
++#endif
++
++    if (! serv_addr->ai_addr)
++    {
++	logmsg(LOG_ERR, "connect_nb: wrong serv_addr->ai_addr");
++	return -1;
++    }
+ 
+     if((flags = fcntl(sockfd, F_GETFL, 0)) < 0) {
+         logmsg(LOG_WARNING, "(%lx) connect_nb: fcntl GETFL failed: %s", pthread_self(), strerror(errno));
+@@ -842,6 +890,24 @@ connect_nb(const int sockfd, const struc
+         logmsg(LOG_WARNING, "(%lx) connect_nb: fcntl SETFL failed: %s", pthread_self(), strerror(errno));
+         return -1;
+     }
++ 
++#ifdef TPROXY_ENABLE
++    if (tp_addr) {
++	memcpy(&in, tp_addr->ai_addr, sizeof(in));
++	in.sin_port = 0;
++	if (setsockopt(sockfd, SOL_IP, IP_TRANSPARENT, &tp_val, sizeof(tp_val)) < 0) {
++	    logmsg(LOG_ERR, "(%lx) connect_nb: cannot set TProxy IP_TRANSPARENT socket option. Error: %d, %s.", pthread_self(),
++			     error, strerror(error));
++	    return -1;
++	}
++
++	if (bind(sockfd, (struct sockaddr *) &in, sizeof(in)) < 0) {
++  	    logmsg(LOG_ERR, "(%lx) connect_nb: cannot bind to TProxy IP. Error: %d, %s.", pthread_self(),
++			     error, strerror(error));
++	    return -1;
++	}
++    }
++#endif
+ 
+     error = 0;
+     if((res = connect(sockfd, serv_addr->ai_addr, serv_addr->ai_addrlen)) < 0)
+@@ -941,7 +1007,12 @@ do_resurect(void)
+         default:
+             continue;
+         }
+-        if(connect_nb(sock, &be->ha_addr, be->conn_to) != 0) {
++#ifdef TPROXY_ENABLE
++        if(connect_nb(sock, &be->ha_addr, be->conn_to, NULL) != 0)
++#else
++        if(connect_nb(sock, &be->ha_addr, be->conn_to) != 0)
++#endif
++	{
+             kill_be(svc, be, BE_KILL);
+             str_be(buf, MAXBUF - 1, be);
+             logmsg(LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
+@@ -977,7 +1048,12 @@ do_resurect(void)
+         default:
+             continue;
+         }
+-        if(connect_nb(sock, &be->ha_addr, be->conn_to) != 0) {
++#ifdef TPROXY_ENABLE
++        if(connect_nb(sock, &be->ha_addr, be->conn_to, NULL) != 0)
++#else
++	if(connect_nb(sock, &be->ha_addr, be->conn_to) != 0)
++#endif
++	{
+             kill_be(svc, be, BE_KILL);
+             str_be(buf, MAXBUF - 1, be);
+             logmsg(LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
+@@ -1032,7 +1108,12 @@ do_resurect(void)
+                 }
+                 addr = &be->ha_addr;
+             }
+-            if(connect_nb(sock, addr, be->conn_to) == 0) {
++#ifdef TPROXY_ENABLE
++	    if(connect_nb(sock, addr, be->conn_to, NULL) != 0)
++#else
++	    if(connect_nb(sock, addr, be->conn_to) != 0)
++#endif
++	    {
+                 be->resurrect = 1;
+                 modified = 1;
+             }
+@@ -1101,7 +1182,12 @@ do_resurect(void)
+                 }
+                 addr = &be->ha_addr;
+             }
+-            if(connect_nb(sock, addr, be->conn_to) == 0) {
++#ifdef TPROXY_ENABLE
++	    if(connect_nb(sock, addr, be->conn_to, NULL) == 0)
++#else
++	    if(connect_nb(sock, addr, be->conn_to) == 0)
++#endif
++	    {
+                 be->resurrect = 1;
+                 modified = 1;
+             }

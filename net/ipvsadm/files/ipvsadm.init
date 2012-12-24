@@ -1,0 +1,20 @@
+START=99
+STOP=80
+
+IPVSADM_BIN="/usr/sbin/ipvsadm"
+
+start_service () {
+	ipvsadm -C
+	ipvsadm-restore < /etc/ipvsadm.rules
+}
+
+boot() {
+        # Do nothing on boot
+        exit 0
+}
+
+stop() {
+	ipvsadm-save > /var/lib/ipvsadm/rules-save
+	#now clear Rules
+	ipvsadm -C
+}

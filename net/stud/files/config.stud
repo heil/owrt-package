@@ -1,0 +1,23 @@
+config stud
+	option name 'config1'
+	option enabled '1'
+        option frontend_address '0.0.0.0,443'
+	option backend_address '127.0.0.1,81'
+        option tls_only '0'
+        option ciphers 'ALL:!ADH:!EXPORT56:RC4+RSA:HIGH:MEDIUM:!LOW:!SSLv2:+EXP:!eNUL:!EXP-DES-CBC-SHA:!EXP-RC2-CBC-MD5:!EXP-RC4-MD5:!EXP-DES-CBC-SHA:!EXP-RC2-CBC-MD5:!EXP-RC4-MD5:!EXP-EDH-RSA-DES-CBC-SHA:!EXP-EDH-RSA-DES-CBC-SHA:!EXP-EDH-RSA-DES-CBC-SHA'
+        option engine ''
+        option workers '2'
+	option backlog '10000'
+	option setuid_user 'nobody'
+	option shared_cache_sessions '10000'
+	option cache_update_accept ''
+	option cache_update_send ''
+	option cache_update_iface ''
+	option client_tcp_keepalive_sec ''
+	option syslog '0'
+	option write_ip ''
+	option write_proxy '1'
+	option ulimit_n '16384'
+	option cert '/etc/ssl/all-in-one.pem'
+
+

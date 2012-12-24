@@ -1,0 +1,28 @@
+From 1c646867881894c5f3c81b0eb5d928ce1cca5b82 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Fri, 14 Dec 2012 12:33:41 +0100
+Subject: BUG/MINOR: ssl: error is not reported if it occurs simultaneously with peer close detection.
+
+---
+ src/ssl_sock.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 7415b75..99f22f6 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1078,6 +1078,11 @@ static int ssl_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 		else if (ret == 0) {
+ 			ret =  SSL_get_error(conn->xprt_ctx, ret);
+ 			if (ret != SSL_ERROR_ZERO_RETURN) {
++				/* error on protocol or underlying transport */
++				if ((ret != SSL_ERROR_SYSCALL)
++				     || (errno && (errno != EAGAIN)))
++					conn->flags |= CO_FL_ERROR;
++
+ 				/* Clear openssl global errors stack */
+ 				ERR_clear_error();
+ 			}
+-- 
+1.7.1
+

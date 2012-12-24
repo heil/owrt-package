@@ -1,0 +1,39 @@
+From f26b252ee4190415d80363a9487477ee476184b0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 14 Dec 2012 08:33:14 +0100
+Subject: MINOR: http: make resp_ver and status ACLs check for the presence of a response
+
+The two ACL fetches "resp_ver" and "status", if used in a request despite
+the warning, would return a match of zero length. This is inappropriate,
+better return a non-match to be more consistent with other ACL processing.
+---
+ src/proto_http.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 89b55b3..6ec1d64 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8187,6 +8187,9 @@ acl_fetch_stver(struct proxy *px, struct session *l4, void *l7, unsigned int opt
+ 
+ 	CHECK_HTTP_MESSAGE_FIRST();
+ 
++	if (txn->rsp.msg_state < HTTP_MSG_BODY)
++		return 0;
++
+ 	len = txn->rsp.sl.st.v_l;
+ 	ptr = txn->rsp.chn->buf->p;
+ 
+@@ -8213,6 +8216,9 @@ acl_fetch_stcode(struct proxy *px, struct session *l4, void *l7, unsigned int op
+ 
+ 	CHECK_HTTP_MESSAGE_FIRST();
+ 
++	if (txn->rsp.msg_state < HTTP_MSG_BODY)
++		return 0;
++
+ 	len = txn->rsp.sl.st.c_l;
+ 	ptr = txn->rsp.chn->buf->p + txn->rsp.sl.st.c;
+ 
+-- 
+1.7.1
+

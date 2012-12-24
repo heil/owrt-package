@@ -1,0 +1,10 @@
+Index: stud-0.3.27/Makefile
+===================================================================
+--- stud-0.3.27.orig/Makefile
++++ stud-0.3.27/Makefile
+@@ -1,5 +1,4 @@
+ # [g]make USE_xxxx=1
+-#
+ # USE_SHARED_CACHE   :   enable/disable a shared session cache (disabled by default)
+ 
+ DESTDIR =

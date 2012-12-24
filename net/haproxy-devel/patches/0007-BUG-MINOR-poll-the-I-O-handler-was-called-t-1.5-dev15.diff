@@ -1,0 +1,96 @@
+From 39ebef82aae86976fc5e1bc293bcb677a064d3ee Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 14 Dec 2012 00:17:03 +0100
+Subject: BUG/MINOR: poll: the I/O handler was called twice for polled I/Os
+
+When a polled I/O event is detected, the event is added to the updates
+list and the I/O handler is called. Upon return, if the event handler
+did not experience an EAGAIN, the event remains in the updates list so
+that it will be processed later. But if the event was already in the
+spec list, its state is updated and it will be called again immediately
+upon exit, by fd_process_spec_events(), so this creates unfairness
+between speculative events and polled events.
+
+So don't call the I/O handler upon I/O detection when the FD already is
+in the spec list. The fd events are still updated so that the spec list
+is up to date with the possible I/O change.
+---
+ src/ev_epoll.c  |    5 +++++
+ src/ev_kqueue.c |    7 +++++++
+ src/ev_poll.c   |    7 +++++++
+ src/ev_select.c |    7 +++++++
+ 4 files changed, 26 insertions(+), 0 deletions(-)
+
+diff --git a/src/ev_epoll.c b/src/ev_epoll.c
+index 5f7b7c3..90efaee 100644
+--- a/src/ev_epoll.c
++++ b/src/ev_epoll.c
+@@ -179,6 +179,11 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
++			if (fdtab[fd].spec_p) {
++				/* This fd was already scheduled for being called as a speculative I/O */
++				continue;
++			}
++
+ 			/* Save number of updates to detect creation of new FDs. */
+ 			old_updt = fd_nbupdt;
+ 			fdtab[fd].iocb(fd);
+diff --git a/src/ev_kqueue.c b/src/ev_kqueue.c
+index 36a7b7f..2142132 100644
+--- a/src/ev_kqueue.c
++++ b/src/ev_kqueue.c
+@@ -158,6 +158,13 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
++			if (fdtab[fd].spec_p) {
++				/* This fd was already scheduled for being
++				 * called as a speculative I/O.
++				 */
++				continue;
++			}
++
+ 			fdtab[fd].iocb(fd);
+ 		}
+ 	}
+diff --git a/src/ev_poll.c b/src/ev_poll.c
+index c09232e..e3ea4db 100644
+--- a/src/ev_poll.c
++++ b/src/ev_poll.c
+@@ -181,6 +181,13 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
++			if (fdtab[fd].spec_p) {
++				/* This fd was already scheduled for being
++				 * called as a speculative I/O
++				 */
++				continue;
++			}
++
+ 			fdtab[fd].iocb(fd);
+ 		}
+ 	}
+diff --git a/src/ev_select.c b/src/ev_select.c
+index 48a62da..dba5928 100644
+--- a/src/ev_select.c
++++ b/src/ev_select.c
+@@ -167,6 +167,13 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 				if (fdtab[fd].ev & FD_POLL_OUT)
+ 					fd_ev_set(fd, DIR_WR);
+ 
++				if (fdtab[fd].spec_p) {
++					/* This fd was already scheduled for being
++					 * called as a speculative I/O.
++					 */
++					continue;
++				}
++
+ 				fdtab[fd].iocb(fd);
+ 			}
+ 		}
+-- 
+1.7.1
+

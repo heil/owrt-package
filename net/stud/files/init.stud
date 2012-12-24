@@ -1,0 +1,76 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2010-2011 OpenWrt.org
+
+START=80
+
+section_enabled() {
+	config_get_bool enable  "$1" 'enable'  0
+	config_get_bool enabled "$1" 'enabled' 0
+	[ $enable -gt 0 ] || [ $enabled -gt 0 ]
+}
+
+
+start_instance () {
+        local section="$1"
+	section_enabled "$section" || return 1
+
+        config_get name	"$section" name
+        config_get enabled	"$section" enabled
+        config_get frontend_address "$section" frontend_address
+        config_get backend_address "$section" backend_address
+        config_get tls_only "$section" tls_only
+        config_get ciphers "$section" ciphers
+        config_get engine "$section" engine
+        config_get workers "$section" workers
+        config_get backlog "$section" backlog
+        config_get setuid_user "$section" setuid_user
+        config_get shared_cache_sessions "$section" shared_cache_sessions
+        config_get cache_update_accept "$section" cache_update_accept
+        config_get cache_update_send "$section" cache_update_send
+        config_get cache_update_iface "$section" cache_update_iface
+        config_get client_tcp_keepalive_sec "$section" client_tcp_keepalive_sec
+        config_get syslog "$section" syslog
+        config_get write_ip "$section" write_ip
+        config_get write_proxy "$section" write_proxy
+        config_get ulimit_n "$section" ulimit_n
+        config_get cert "$section" cert
+
+	ulimit -n ${ulimit_n:-131072}
+	opts="-q -O"
+
+	if [ "${tls_only}" = "1" ]; then
+    		opts="${opts} --tls"
+  	else
+    		opts="${opts} --ssl"
+  	fi
+	
+	echo "Starting Stud instance $name"
+	start-stop-daemon -S -x /usr/sbin/stud -p /var/run/${name:+stud-$name.pid} -m -b -- $opts ${shared_cache_sessions:+-C $shared_cache_sessions} \
+		${frontend_address:+-f $frontend_address} ${backend_address:+-b $backend_address}  \
+		${cache_update_accept:+-U $cache_update_accept} ${cache_update_send:+-P $cache_update_send}  \
+		${engine:+-e $engine} ${workers:+ -n $workers} ${backlog:+-B $backlog} ${ciphers:+-c ${ciphers}} \
+		${write_ip:+--write-ip} ${write_proxy:+--write-proxy} $cert
+
+}
+
+stop_instance () {
+        local section="$1"
+        config_get name	"$section" name
+        start-stop-daemon -p /var/run/${name:+stud-$name.pid} -K
+	echo "Stopping Stud instance $name"
+	[ -f /var/run/${name:+stud-$name.pid} ] && 
+		rm /var/run/${name:+stud-$name.pid}
+
+}
+
+
+start() {
+        config_load 'stud'
+        config_foreach start_instance 'stud'
+}
+
+stop() {
+        config_load 'stud'
+        config_foreach stop_instance 'stud'
+}
+

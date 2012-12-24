@@ -1,0 +1,46 @@
+Index: Pound-2.5/svc.c
+===================================================================
+--- Pound-2.5.orig/svc.c
++++ Pound-2.5/svc.c
+@@ -1356,13 +1356,14 @@ do_RSAgen(void)
+ #include    "dh512.h"
+ #include    "dh1024.h"
+ 
++static DH *DH512_params, *DH1024_params;
++
+ DH *
+ DH_tmp_callback(/* not used */SSL *s, /* not used */int is_export, int keylength)
+ {
+-    if(keylength == 512)
+-        return get_dh512();
+-    else
+-        return get_dh1024();
++    /* OpenSSL doesn't free the returned DH (it dups it), so
++     * don't return a new DH each time here! */
++    return keylength == 512 ? DH512_params : DH1024_params;
+ }
+ 
+ static time_t   last_RSA, last_rescale, last_alive, last_expire;
+@@ -1394,6 +1395,9 @@ init_timer(void)
+     /* pthread_mutex_init() always returns 0 */
+     pthread_mutex_init(&RSA_mut, NULL);
+ 
++    DH512_params = get_dh512();
++    DH1024_params = get_dh1024();
++
+     return;
+ }
+ 
+Index: Pound-2.5/Makefile.in
+===================================================================
+--- Pound-2.5.orig/Makefile.in
++++ Pound-2.5/Makefile.in
+@@ -63,7 +63,7 @@ dh1024.h:
+ $(OBJS):	pound.h config.h
+ 
+ svc.o:		svc.c dh512.h dh1024.h
+-		gcc ${CFLAGS} -c -o svc.o svc.c
++		${CC} ${CFLAGS} -c -o svc.o svc.c
+ 
+ install:	all
+ 		@INSTALL@ -d ${DESTDIR}@sbindir@

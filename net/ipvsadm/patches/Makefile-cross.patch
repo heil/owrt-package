@@ -1,0 +1,50 @@
+Index: ipvsadm-1.26/Makefile
+===================================================================
+--- ipvsadm-1.26.orig/Makefile
++++ ipvsadm-1.26/Makefile
+@@ -45,12 +45,6 @@ MKDIR		= mkdir
+ INSTALL		= install
+ STATIC_LIBS	= libipvs/libipvs.a
+ 
+-ifeq "${ARCH}" "sparc64"
+-    CFLAGS = -Wall -Wunused -Wstrict-prototypes -g -m64 -pipe -mcpu=ultrasparc -mcmodel=medlow
+-else
+-    CFLAGS = -Wall -Wunused -Wstrict-prototypes -g
+-endif
+-
+ 
+ #####################################
+ # No servicable parts below this line
+@@ -62,17 +56,7 @@ RPMBUILD = $(shell				\
+ 		echo "/bin/rpm";		\
+ 	fi )
+ 
+-ifeq (,$(FORCE_GETOPT))
+-LIB_SEARCH = /lib64 /usr/lib64 /usr/local/lib64 /lib /usr/lib /usr/local/lib
+-POPT_LIB = $(shell for i in $(LIB_SEARCH); do \
+-  if [ -f $$i/libpopt.a ]; then \
+-    if nm $$i/libpopt.a | fgrep -q poptGetContext; then \
+-	echo "-lpopt"; \
+-	break; \
+-    fi; \
+-  fi; \
+-done)
+-endif
++POPT_LIB = -lpopt
+ 
+ ifneq (,$(POPT_LIB))
+ POPT_DEFINE = -DHAVE_POPT
+Index: ipvsadm-1.26/libipvs/Makefile
+===================================================================
+--- ipvsadm-1.26.orig/libipvs/Makefile
++++ ipvsadm-1.26/libipvs/Makefile
+@@ -2,9 +2,6 @@
+ 
+ CC		= gcc
+ CFLAGS		= -Wall -Wunused -Wstrict-prototypes -g -fPIC
+-ifneq (0,$(HAVE_NL))
+-CFLAGS		+= -DLIBIPVS_USE_NL
+-endif
+ 
+ INCLUDE		+= $(shell if [ -f ../../ip_vs.h ]; then	\
+ 		     echo "-I../../."; fi;)

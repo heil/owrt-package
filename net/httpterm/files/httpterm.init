@@ -1,0 +1,23 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2009-2010 OpenWrt.org
+
+START=99
+STOP=80
+
+SERVICE_USE_PID=1
+
+HTTPTERM_BIN="/usr/sbin/httpterm"
+HTTPTERM_CONFIG="/etc/httpterm.cfg"
+HTTPTERM_PID="/var/run/httpterm.pid"
+
+start() {
+	service_start $HTTPTERM_BIN -q -D -f "$HTTPTERM_CONFIG" -p "$HTTPTERM_PID"
+}
+
+stop() {
+	service_stop $HTTPTERM_BIN
+}
+
+reload() {
+	$HTTPTERM_BIN -D -q -f $HTTPTERM_CONFIG -p $HTTPTERM_PID -sf $(cat $HTTPTERM_PID)
+}
