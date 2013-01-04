@@ -9,12 +9,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
-PKG_VERSION:=1.5-dev15
-PKG_RELEASE:=31
+PKG_VERSION:=1.5-dev17
+PKG_RELEASE:=4
 
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.5/src
-PKG_MD5SUM:=4dc19ea5b15f4e10e1ee5b9271108e00
+PKG_MD5SUM:=b8deab9989e6b9925410b0bc44dd4353
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/haproxy-$(PKG_VERSION)
 PKG_SOURCE_SUBDIR:=haproxy-$(PKG_VERSION)
