@@ -9,14 +9,11 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=varnish
 PKG_VERSION:=3.0.3
-PKG_RELEASE:=2
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://repo.varnish-cache.org/source/
 PKG_MD5SUM:=714310c83fdbd2061d897dacd3f63d8b
-#PKG_MD5SUM:=c8eae0aabbe66b6daabdf3a1f58cd47a
-#PKG_MD5SUM:=38387bf31a1574f5cd8dec4f0b7caf20
-#PKG_MD5SUM:=2d2f227da36a2a240c475304c717b8e3
 
 PKG_FIXUP:=autoreconf
 
@@ -42,9 +39,6 @@ CONFIGURE_VARS += \
 	ac_cv_lib_jemalloc_malloc_conf=no \
 	ac_cv_have_viz=no \
 	VCC_CC="varnishcc %s %o" 
-
-#TARGET_CFLAGS += -std=gnu99
-#-ggdb3
 
 CONFIGURE_ARGS := \
 	$(filter-out --disable-nls,$(CONFIGURE_ARGS)) \
@@ -124,4 +118,3 @@ endef
 
 $(eval $(call BuildPackage,varnish))
 $(eval $(call BuildPackage,varnish-top))
-#VCC_CC="i686-gcc -L/lib -L/usr/lib -fpic -shared -Wl,-x -o %o %s" 

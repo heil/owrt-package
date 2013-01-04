@@ -9,19 +9,16 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=qemu
-PKG_VERSION:=1.2.0
+PKG_VERSION:=1.3.0
 PKG_RELEASE:=1
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
 PKG_SOURCE_URL:=http://wiki.qemu.org/download/
-PKG_REV:=78eb1e984f4532aa9f2bdd3c127b5b61
-#PKG_REV:=32e7cf4453039ef7478b22a53623cfb0
-##PKG_REV:=76ee152a86d5f2533443ce4d2be6fe253cfb3c45
+PKG_REV:=a4030ddd2ba324152a97d65d3c0b247d
 
 ##PKG_SOURCE_SUBDIR:=qemu-$(PKG_VERSION)
 ##PKG_SOURCE_URL:=git://git.qemu.org/qemu.git
 ##PKG_SOURCE_VERSION:=$(PKG_REV)
 ##PKG_SOURCE_PROTO:= git
-
 
 PKG_INSTALL:=1
 
@@ -50,7 +47,7 @@ TARGET_LDFLAGS += -L$(STAGING_DIR)/usr/lib/libiconv-full/lib -L$(STAGING_DIR)/us
 #	--disable-attr \
 #	--disable-nptl \
 #	--with-coroutine=gthread \
-#	#--enable-vnc-thread \
+#	--enable-vnc-thread \
 #	--disable-vhost-net \
 
 CONFIGURE_ARGS= \
