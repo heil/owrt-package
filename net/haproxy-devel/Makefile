@@ -1,6 +1,6 @@
 #
-# Copyright (C) 2010-2011 OpenWrt.org
-# Copyright (C) 2009-2010 Thomas Heil <heil@terminal-consulting.de> 
+# Copyright (C) 2010-2013 OpenWrt.org
+# Copyright (C) 2009-2013 Thomas Heil <heil@terminal-consulting.de>
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
