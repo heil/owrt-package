@@ -1,0 +1,65 @@
+From 1c07b0755df77d5e9c867694c73c9338150a746a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 7 Jan 2013 16:19:18 +0100
+Subject: OPTIM: epoll: make use of EPOLLRDHUP
+
+epoll may report pending shutdowns using EPOLLRDHUP. Since this
+flag is missing from a number of libcs despite being available
+since kernel 2.6.17, let's define it ourselves.
+
+Doing so saves one syscall by allow us to avoid the read()==0 when
+the server closes with the respose.
+---
+ src/ev_epoll.c |   15 ++++++++++++---
+ 1 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/ev_epoll.c b/src/ev_epoll.c
+index 90efaee..034ec4c 100644
+--- a/src/ev_epoll.c
++++ b/src/ev_epoll.c
+@@ -40,6 +40,11 @@ static int epoll_fd;
+  */
+ static struct epoll_event ev;
+ 
++#ifndef EPOLLRDHUP
++/* EPOLLRDHUP was defined late in libc, and it appeared in kernel 2.6.17 */
++#define EPOLLRDHUP 0x2000
++#endif
++
+ /*
+  * speculative epoll() poller
+  */
+@@ -76,7 +81,7 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 				/* construct the epoll events based on new state */
+ 				ev.events = 0;
+ 				if (en & FD_EV_POLLED_R)
+-					ev.events |= EPOLLIN;
++					ev.events |= EPOLLIN | EPOLLRDHUP;
+ 
+ 				if (en & FD_EV_POLLED_W)
+ 					ev.events |= EPOLLOUT;
+@@ -137,8 +142,8 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 	/* process polled events */
+ 
+ 	for (count = 0; count < status; count++) {
+-		unsigned char n;
+-		unsigned char e = epoll_events[count].events;
++		unsigned int n;
++		unsigned int e = epoll_events[count].events;
+ 		fd = epoll_events[count].data.fd;
+ 
+ 		if (!fdtab[fd].owner)
+@@ -161,6 +166,10 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 				((e & EPOLLHUP) ? FD_POLL_HUP : 0);
+ 		}
+ 
++		/* always remap RDHUP to HUP as they're used similarly */
++		if (e & EPOLLRDHUP)
++			n |= FD_POLL_HUP;
++
+ 		if (!n)
+ 			continue;
+ 
+-- 
+1.7.1
+

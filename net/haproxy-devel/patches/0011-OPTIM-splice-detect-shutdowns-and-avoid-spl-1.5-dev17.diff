@@ -1,0 +1,30 @@
+From baf2a500a185fcaedede4510281be5d16a8dddde Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 7 Jan 2013 16:38:26 +0100
+Subject: OPTIM: splice: detect shutdowns and avoid splice() == 0
+
+Since last commit introducing EPOLLRDHUP, the splicing code is able to
+detect an incoming shutdown without calling splice() == 0. This avoids
+one useless syscall.
+---
+ src/raw_sock.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index 20a867a..9528911 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -148,6 +148,10 @@ int raw_sock_to_pipe(struct connection *conn, struct pipe *pipe, unsigned int co
+ 		retval += ret;
+ 		pipe->data += ret;
+ 
++		/* if a POLL_HUP was present, we've read the last segment */
++		if ((fdtab[conn->t.sock.fd].ev & (FD_POLL_ERR|FD_POLL_HUP)) == FD_POLL_HUP)
++			goto out_read0;
++
+ 		if (pipe->data >= SPLICE_FULL_HINT || ret >= global.tune.recv_enough) {
+ 			/* We've read enough of it for this time, let's stop before
+ 			 * being asked to poll.
+-- 
+1.7.1
+
