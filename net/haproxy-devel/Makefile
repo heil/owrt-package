@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
 PKG_VERSION:=1.5-dev17
-PKG_RELEASE:=12
+PKG_RELEASE:=14
 
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.5/src/devel
@@ -27,7 +27,7 @@ define Package/haproxy-devel
   CATEGORY:=Network
   TITLE:=The Reliable, High Performance TCP/HTTP Load Balancer
   URL:=http://haproxy.1wt.eu/
-  DEPENDS:=+libpcre +libltdl +libopenssl +zlib
+  DEPENDS:=+libpcre +libltdl +libopenssl +zlib +libpthread
   MAINTAINER:=Thomas Heil <heil@terminal-consulting.de>
 endef
 
@@ -40,7 +40,7 @@ define Package/haproxy-devel/description
 endef
 
 define Build/Compile
-	$(MAKE) TARGET=linux26 -C $(PKG_BUILD_DIR) \
+	$(MAKE) TARGET=linux28 -C $(PKG_BUILD_DIR) \
 		DESTDIR="$(PKG_INSTALL_DIR)" \
 		CC="$(TARGET_CC)" \
 		CFLAGS="$(TARGET_CFLAGS) -fno-align-jumps -fno-align-functions -fno-align-labels -fno-align-loops -pipe -fomit-frame-pointer -fhonour-copts" \
