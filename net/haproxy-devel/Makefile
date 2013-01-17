@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
 PKG_VERSION:=1.5-dev17
-PKG_RELEASE:=16
+PKG_RELEASE:=17
 
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.5/src/devel
@@ -47,9 +47,10 @@ define Build/Compile
 		LD="$(TARGET_CC)" \
 		LDFLAGS="$(TARGET_LDFLAGS)" \
 		ADDLIB="-lcrypto" \
+		PCREDIR="$(STAGING_DIR)/usr/include" \
 		SMALL_OPTS="-DBUFSIZE=16384 -DMAXREWRITE=1030 -DSYSTEM_MAXCONN=165530 " \
 		USE_LINUX_TPROXY=1 USE_LINUX_SPLICE=1 USE_REGPARM=1 USE_OPENSSL=1 \
-		USE_ZLIB=yes USE_CPU_AFFINITY=1 USE_PCRE=1 \
+		USE_ZLIB=yes USE_PCRE=1 \
 		VERSION="$(PKG_VERSION)-patch$(PKG_RELEASE)" \
 		install
 
