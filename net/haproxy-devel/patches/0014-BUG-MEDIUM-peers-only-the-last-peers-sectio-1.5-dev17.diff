@@ -1,0 +1,28 @@
+From 973ca497953bfc668f9879c3977942a1c6e1e536 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 17 Jan 2013 21:34:52 +0100
+Subject: BUG/MEDIUM: peers: only the last peers section was used by tables
+
+Due to a typo in the peers section lookup code, the last declared peers
+section was used instead of the one matching the requested name. This bug
+has been there since the very first commit on peers section (1.5-dev2).
+---
+ src/cfgparse.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index abcb9c5..87fbcff 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6192,7 +6192,7 @@ int check_config_validity()
+ 			for (curpeers = peers; curpeers; curpeers = curpeers->next) {
+ 				if (strcmp(curpeers->id, curproxy->table.peers.name) == 0) {
+ 					free((void *)curproxy->table.peers.name);
+-					curproxy->table.peers.p = peers;
++					curproxy->table.peers.p = curpeers;
+ 					break;
+ 				}
+ 			}
+-- 
+1.7.1
+

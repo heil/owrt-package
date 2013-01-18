@@ -1,0 +1,41 @@
+From 1f31c73030727da96ccb971e62b4d55ef182e8a7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 10 Jan 2013 16:22:27 +0100
+Subject: BUG/MINOR: log: temporary fix for lost SSL info in some situations
+
+When using log-format to log the result of sample fetch functions
+which rely on the transport layer (eg: ssl*), we have no way to tell
+the proxy not to release the connection before logs have caught the
+necessary information. As a result, it happens that logging SSL fetch
+functions sometimes doesn't return anything for example if the server
+is not available and the connection is immediately aborted.
+
+This issue will be fixed with the upcoming patches to finish handling
+of sample fetches.
+
+So for the moment, always mark the LW_XPRT flag on the proxy so that
+when any fetch method is used, the proxy does not release the transport
+layer too fast.
+---
+ src/log.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/src/log.c b/src/log.c
+index 709a66a..9e909e2 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -346,6 +346,11 @@ void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct pro
+ 	if (expr->fetch->cap & SMP_CAP_L7)
+ 		curpx->acl_requires |= ACL_USE_L7_ANY;
+ 
++	/* FIXME: temporary workaround for missing LW_XPRT flag needed with some
++	 * sample fetches (eg: ssl*). We always set it for now on, but this will
++	 * leave with sample capabilities soon.
++	 */
++	curpx->to_log |= LW_XPRT;
+ 	LIST_ADDQ(list_format, &node->list);
+ }
+ 
+-- 
+1.7.1
+
