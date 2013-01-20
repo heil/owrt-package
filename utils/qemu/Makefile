@@ -48,10 +48,11 @@ TARGET_LDFLAGS += -L$(STAGING_DIR)/usr/lib/libiconv-full/lib -L$(STAGING_DIR)/us
 #	--disable-nptl \
 #	--with-coroutine=gthread \
 #	--enable-vnc-thread \
+#	--cross-prefix="$(CROSS_PREFIX)" \
+#	--host=$(GNU_TARGET_NAME) \
 #	--disable-vhost-net \
 
 CONFIGURE_ARGS= \
-	--cross-prefix="$(CROSS_PREFIX)" \
 	--enable-kvm  \
 	--disable-werror \
 	--target-list=i386-softmmu,x86_64-softmmu,x86_64-linux-user,i386-linux-user \
