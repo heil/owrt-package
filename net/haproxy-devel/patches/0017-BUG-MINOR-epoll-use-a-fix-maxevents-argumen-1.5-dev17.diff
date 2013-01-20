@@ -1,0 +1,36 @@
+From cf181c9d404815f890da7cd2243a5528edd7b4f9 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 18 Jan 2013 15:22:41 +0100
+Subject: BUG/MINOR: epoll: use a fix maxevents argument in epoll_wait()
+
+epoll_wait() takes a number of returned events, not the number of
+fds to consider. We must not pass it the number of the smallest fd,
+as it leads to value zero being used, which is invalid in epoll_wait().
+The effect may sometimes be observed with peers sections trying to
+connect and causing 2-seconds CPU loops upon a soft reload because
+epoll_wait() immediately returns -1 EINVAL instead of waiting for the
+timeout to happen.
+
+This fix should be backported to 1.4 too (into ev_epoll and ev_sepoll).
+---
+ src/ev_epoll.c |    3 +--
+ 1 files changed, 1 insertions(+), 2 deletions(-)
+
+diff --git a/src/ev_epoll.c b/src/ev_epoll.c
+index 034ec4c..18abb10 100644
+--- a/src/ev_epoll.c
++++ b/src/ev_epoll.c
+@@ -133,9 +133,8 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 
+ 	/* now let's wait for polled events */
+ 
+-	fd = MIN(maxfd, global.tune.maxpollevents);
+ 	gettimeofday(&before_poll, NULL);
+-	status = epoll_wait(epoll_fd, epoll_events, fd, wait_time);
++	status = epoll_wait(epoll_fd, epoll_events, global.tune.maxpollevents, wait_time);
+ 	tv_update_date(wait_time, status);
+ 	measure_idle();
+ 
+-- 
+1.7.1
+
