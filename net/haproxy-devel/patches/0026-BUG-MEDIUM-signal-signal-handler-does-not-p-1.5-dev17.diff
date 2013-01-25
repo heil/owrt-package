@@ -1,0 +1,60 @@
+From 1a53b5ef583988ca0405007f3ef47d2114da9546 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Jan 2013 02:06:05 +0100
+Subject: BUG/MEDIUM: signal: signal handler does not properly check for signal bounds
+
+sig is checked for < 0 or > MAX_SIGNAL, but the signal array is
+MAX_SIGNAL in size. At the moment, MAX_SIGNAL is 256. If a system supports
+more than MAX_SIGNAL signals, then sending signal MAX_SIGNAL to the process
+will corrupt one integer in its memory and might also crash the process.
+
+This bug is also present in 1.4 and 1.3, and the fix must be backported.
+
+Reported-by: Dinko Korunic <dkorunic@reflected.net>
+---
+ src/signal.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/signal.c b/src/signal.c
+index fb6980b..e9301ed 100644
+--- a/src/signal.c
++++ b/src/signal.c
+@@ -37,7 +37,7 @@ int signal_pending = 0; /* non-zero if t least one signal remains unprocessed */
+  */
+ void signal_handler(int sig)
+ {
+-	if (sig < 0 || sig > MAX_SIGNAL) {
++	if (sig < 0 || sig >= MAX_SIGNAL) {
+ 		/* unhandled signal */
+ 		signal(sig, SIG_IGN);
+ 		qfprintf(stderr, "Received unhandled signal %d. Signal has been disabled.\n", sig);
+@@ -142,7 +142,7 @@ struct sig_handler *signal_register_fct(int sig, void (*fct)(struct sig_handler
+ {
+ 	struct sig_handler *sh;
+ 
+-	if (sig < 0 || sig > MAX_SIGNAL)
++	if (sig < 0 || sig >= MAX_SIGNAL)
+ 		return NULL;
+ 
+ 	if (sig)
+@@ -174,7 +174,7 @@ struct sig_handler *signal_register_task(int sig, struct task *task, int reason)
+ {
+ 	struct sig_handler *sh;
+ 
+-	if (sig < 0 || sig > MAX_SIGNAL)
++	if (sig < 0 || sig >= MAX_SIGNAL)
+ 		return NULL;
+ 
+ 	if (sig)
+@@ -213,7 +213,7 @@ void signal_unregister_target(int sig, void *target)
+ {
+ 	struct sig_handler *sh, *shb;
+ 
+-	if (sig < 0 || sig > MAX_SIGNAL)
++	if (sig < 0 || sig >= MAX_SIGNAL)
+ 		return;
+ 
+ 	if (!target)
+-- 
+1.7.1
+

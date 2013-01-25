@@ -1,0 +1,31 @@
+From f678b7f32253fa7b279f907dbda563e985c6478c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Jan 2013 00:25:39 +0100
+Subject: BUG/MINOR: config: fix improper check for failed memory alloc in ACL parser
+
+The wrong variable is checked after a calloc() so a memory shortage would
+result in a segfault while loading the config instead of a clean error.
+
+This fix may be backported to 1.4 and 1.3 which are both affected.
+
+Reported-by: Dinko Korunic <dkorunic@reflected.net>
+---
+ src/acl.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/acl.c b/src/acl.c
+index cba89ab..753f109 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -1840,7 +1840,7 @@ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl, int p
+ 
+ 		if (!cur_suite) {
+ 			cur_suite = (struct acl_term_suite *)calloc(1, sizeof(*cur_suite));
+-			if (cur_term == NULL) {
++			if (cur_suite == NULL) {
+ 				memprintf(err, "out of memory when parsing condition");
+ 				goto out_free_term;
+ 			}
+-- 
+1.7.1
+

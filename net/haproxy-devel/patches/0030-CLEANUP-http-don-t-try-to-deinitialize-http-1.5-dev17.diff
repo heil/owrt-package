@@ -1,0 +1,47 @@
+From 192e59fb0737cda156acfd652618c77cd00f07bd Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Jan 2013 15:58:42 +0100
+Subject: CLEANUP: http: don't try to deinitialize http compression if it fails before init
+
+In select_compression_response_header(), some tests are rather confusing
+as the "fail" label is used to deinitialize the compression context for
+the session while it's branched only before initialization succeeds. The
+test is always false here and the dereferencing of the comp_algo pointer
+which might be null is also confusing. Remove that code which is not needed
+anymore since commit ec3e3890 got rid of the latest issues.
+
+Reported-by: Dinko Korunic <dkorunic@reflected.net>
+---
+ src/proto_http.c |    5 -----
+ 1 files changed, 0 insertions(+), 5 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 3d68da8..da3935c 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2028,7 +2028,6 @@ int select_compression_request_header(struct session *s, struct buffer *req)
+ 	}
+ 
+ 	s->comp_algo = NULL;
+-
+ 	return 0;
+ }
+ 
+@@ -2138,14 +2137,10 @@ int select_compression_response_header(struct session *s, struct buffer *res)
+ 		trash.str[trash.len] = '\0';
+ 		http_header_add_tail2(&txn->rsp, &txn->hdr_idx, trash.str, trash.len);
+ 	}
+-
+ 	return 1;
+ 
+ fail:
+-	if (s->flags & SN_COMP_READY)
+-		s->comp_algo->end(&s->comp_ctx);
+ 	s->comp_algo = NULL;
+-	s->flags &= ~SN_COMP_READY;
+ 	return 0;
+ }
+ 
+-- 
+1.7.1
+

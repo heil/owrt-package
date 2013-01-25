@@ -1,0 +1,66 @@
+From 8ab505bdefb57d2e097d174866ba8ddd207acc47 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Jan 2013 01:41:38 +0100
+Subject: CLEANUP: tcp/unix: remove useless NULL check in {tcp,unix}_bind_listener()
+
+errmsg may only be NULL if errlen is zero. Clarify this in the comment too.
+
+Reported-by: Dinko Korunic <dkorunic@reflected.net>
+---
+ src/proto_tcp.c  |    7 ++++---
+ src/proto_uxst.c |    7 +++++--
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 7285457..60b111c 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -550,8 +550,9 @@ int tcp_connect_probe(struct connection *conn)
+ 
+ 
+ /* This function tries to bind a TCPv4/v6 listener. It may return a warning or
+- * an error message in <err> if the message is at most <errlen> bytes long
+- * (including '\0'). The return value is composed from ERR_ABORT, ERR_WARN,
++ * an error message in <errmsg> if the message is at most <errlen> bytes long
++ * (including '\0'). Note that <errmsg> may be NULL if <errlen> is also zero.
++ * The return value is composed from ERR_ABORT, ERR_WARN,
+  * ERR_ALERT, ERR_RETRYABLE and ERR_FATAL. ERR_NONE indicates that everything
+  * was alright and that no message was returned. ERR_RETRYABLE means that an
+  * error occurred but that it may vanish after a retry (eg: port in use), and
+@@ -568,7 +569,7 @@ int tcp_bind_listener(struct listener *listener, char *errmsg, int errlen)
+ 	const char *msg = NULL;
+ 
+ 	/* ensure we never return garbage */
+-	if (errmsg && errlen)
++	if (errlen)
+ 		*errmsg = 0;
+ 
+ 	if (listener->state != LI_ASSIGNED)
+diff --git a/src/proto_uxst.c b/src/proto_uxst.c
+index 3f18770..3263ea4 100644
+--- a/src/proto_uxst.c
++++ b/src/proto_uxst.c
+@@ -144,7 +144,10 @@ static void destroy_uxst_socket(const char *path)
+ 
+ /* This function creates a UNIX socket associated to the listener. It changes
+  * the state from ASSIGNED to LISTEN. The socket is NOT enabled for polling.
+- * The return value is composed from ERR_NONE, ERR_RETRYABLE and ERR_FATAL.
++ * The return value is composed from ERR_NONE, ERR_RETRYABLE and ERR_FATAL. It
++ * may return a warning or an error message in <errmsg> if the message is at
++ * most <errlen> bytes long (including '\0'). Note that <errmsg> may be NULL if
++ * <errlen> is also zero.
+  */
+ static int uxst_bind_listener(struct listener *listener, char *errmsg, int errlen)
+ {
+@@ -158,7 +161,7 @@ static int uxst_bind_listener(struct listener *listener, char *errmsg, int errle
+ 	int ret;
+ 
+ 	/* ensure we never return garbage */
+-	if (errmsg && errlen)
++	if (errlen)
+ 		*errmsg = 0;
+ 
+ 	if (listener->state != LI_ASSIGNED)
+-- 
+1.7.1
+

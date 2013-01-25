@@ -1,0 +1,29 @@
+From 846257ececc6ad00cfa75c3a37bb5509303a7c93 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Jan 2013 00:29:37 +0100
+Subject: BUG/MINOR: config: free peer's address when exiting upon parsing error
+
+An error caused by an invalid port does not cause the raddr string to
+be freed. This is harmless at the moment since we exit, but may have
+an impact later if we ever support hot config changes.
+
+Reported-by: Dinko Korunic <dkorunic@reflected.net>
+---
+ src/cfgparse.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index bbf0da2..718664c 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1509,6 +1509,7 @@ int cfg_parse_peers(const char *file, int linenum, char **args, int kwm)
+ 		if (!realport) {
+ 			Alert("parsing [%s:%d] : Missing or invalid port in '%s'\n", file, linenum, args[2]);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
++			free(raddr);
+ 			goto out;
+ 		}
+ 
+-- 
+1.7.1
+
