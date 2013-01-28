@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=iptables-mod-ndpi
 PKG_RELEASE:=1
 PKG_VERSION:=1.$(PKG_RELEASE)
-PKG_REV:=5847
+PKG_REV:=5923
 
 PKG_SOURCE:=iptables-mod-ndpi-$(PKG_VERSION).tar.gz
 PKG_SOURCE_SUBDIR:=iptables-mod-ndpi-$(PKG_VERSION)
