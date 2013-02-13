@@ -1,0 +1,119 @@
+From 6cbbdbf3f363711b2264565763bf1b6c6a7af012 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 5 Feb 2013 18:52:25 +0100
+Subject: BUG/MEDIUM: log: emit '-' for empty fields again
+
+Commit 2b0108ad accidently got rid of the ability to emit a "-" for
+empty log fields. This can happen for captured request and response
+cookies, as well as for fetches. Since we don't want to have this done
+for headers however, we set the default log method when parsing the
+format. It is still possible to force the desired mode using +M/-M.
+---
+ include/proto/log.h |    2 +-
+ src/cfgparse.c      |    4 ++--
+ src/log.c           |   16 +++++++++-------
+ src/proto_http.c    |    2 +-
+ 4 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/include/proto/log.h b/include/proto/log.h
+index 72b9f2b..08a9a1b 100644
+--- a/include/proto/log.h
++++ b/include/proto/log.h
+@@ -70,7 +70,7 @@ void add_to_logformat_list(char *start, char *end, int type, struct list *list_f
+  * Variable name are preceded by % and composed by characters [a-zA-Z0-9]* : %varname
+  * You can set arguments using { } : %{many arguments}varname
+  */
+-void parse_logformat_string(const char *str, struct proxy *curproxy, struct list *list_format, int capabilities);
++void parse_logformat_string(const char *str, struct proxy *curproxy, struct list *list_format, int options);
+ /*
+  * Displays the message on stderr with the date and pid. Overrides the quiet
+  * mode during startup.
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 175e30c..315e5ed 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6365,10 +6365,10 @@ out_uri_auth_compat:
+ 		}
+ 
+ 		if (curproxy->logformat_string)
+-			parse_logformat_string(curproxy->logformat_string, curproxy, &curproxy->logformat, curproxy->mode);
++			parse_logformat_string(curproxy->logformat_string, curproxy, &curproxy->logformat, LOG_OPT_MANDATORY);
+ 
+ 		if (curproxy->uniqueid_format_string)
+-			parse_logformat_string(curproxy->uniqueid_format_string, curproxy, &curproxy->format_unique_id, PR_MODE_HTTP);
++			parse_logformat_string(curproxy->uniqueid_format_string, curproxy, &curproxy->format_unique_id, 0);
+ 
+ 		/* first, we will invert the servers list order */
+ 		newsrv = NULL;
+diff --git a/src/log.c b/src/log.c
+index d36d879..338a986 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -362,9 +362,9 @@ void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct pro
+  *  str: the string to parse
+  *  curproxy: the proxy affected
+  *  list_format: the destination list
+- *  capabilities: PR_MODE_TCP_ | PR_MODE_HTTP
++ *  options: LOG_OPT_* to force on every node
+  */
+-void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list *list_format, int capabilities)
++void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list *list_format, int options)
+ {
+ 	char *sp, *str, *backfmt; /* start pointer for text parts */
+ 	char *arg = NULL; /* start pointer for args */
+@@ -374,7 +374,6 @@ void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list
+ 	int cformat; /* current token format */
+ 	int pformat; /* previous token format */
+ 	struct logformat_node *tmplf, *back;
+-	int options = 0;
+ 
+ 	sp = str = backfmt = strdup(fmt);
+ 	curproxy->to_log |= LW_INIT;
+@@ -593,7 +592,7 @@ char *lf_text_len(char *dst, const char *src, size_t len, size_t size, struct lo
+ 		size--;
+ 	}
+ 
+-	if (src) {
++	if (src && len) {
+ 		if (++len > size)
+ 			len = size;
+ 		len = strlcpy2(dst, src, len);
+@@ -601,6 +600,11 @@ char *lf_text_len(char *dst, const char *src, size_t len, size_t size, struct lo
+ 		size -= len;
+ 		dst += len;
+ 	}
++	else if ((node->options & (LOG_OPT_QUOTE|LOG_OPT_MANDATORY)) == LOG_OPT_MANDATORY) {
++		if (size < 2)
++			return NULL;
++		*(dst++) = '-';
++	}
+ 
+ 	if (node->options & LOG_OPT_QUOTE) {
+ 		if (size < 2)
+@@ -908,9 +912,7 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
+ 					key = sample_fetch_string(be, s, txn, SMP_OPT_DIR_REQ|SMP_OPT_FINAL, tmp->expr);
+ 				if (!key && (tmp->options & LOG_OPT_RES_CAP))
+ 					key = sample_fetch_string(be, s, txn, SMP_OPT_DIR_RES|SMP_OPT_FINAL, tmp->expr);
+-				if (!key)
+-					break;
+-				ret = lf_text_len(tmplog, key->data.str.str, key->data.str.len, dst + maxsize - tmplog, tmp);
++				ret = lf_text_len(tmplog, key ? key->data.str.str : NULL, key ? key->data.str.len : 0, dst + maxsize - tmplog, tmp);
+ 				if (ret == 0)
+ 					goto out;
+ 				tmplog = ret;
+diff --git a/src/proto_http.c b/src/proto_http.c
+index da3935c..0040cbf 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8109,7 +8109,7 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 		rule->arg.hdr_add.name = strdup(args[cur_arg]);
+ 		rule->arg.hdr_add.name_len = strlen(rule->arg.hdr_add.name);
+ 		LIST_INIT(&rule->arg.hdr_add.fmt);
+-		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, PR_MODE_HTTP);
++		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, LOG_OPT_MANDATORY);
+ 		cur_arg += 2;
+ 	} else if (strcmp(args[0], "redirect") == 0) {
+ 		struct redirect_rule *redir;
+-- 
+1.7.1
+

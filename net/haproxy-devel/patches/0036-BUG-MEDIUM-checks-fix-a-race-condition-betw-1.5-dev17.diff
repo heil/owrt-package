@@ -1,0 +1,71 @@
+From 5ba04f6cf94651ce77c8b1059ff033a0c6f112af Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 12 Feb 2013 15:23:12 +0100
+Subject: BUG/MEDIUM: checks: fix a race condition between checks and observe layer7
+
+When observe layer7 is enabled on a server, a response may cause a server
+to be marked down while a check is in progress. When the check finally
+completes, the connection is not properly released in process_chk() because
+the server states makes it think that no check was in progress due to the
+lastly reported failure.
+
+When a new check gets scheduled, it reuses the same connection structure
+which is reinitialized. When the server finally closes the previous
+connection, epoll_wait() notifies conn_fd_handler() which sees that the
+old connection is still referenced by fdtab[fd], but it can not do anything
+with this fd which does not match conn->t.sock.fd. So epoll_wait() keeps
+reporting this fd forever.
+
+The solution is to always make process_chk() always take care of closing
+the connection and not make it rely on the connection layer to so.
+
+Special thanks go to James Cole and Finn Arne Gangstad who encountered
+the issue almost at the same time and took care of reporting a very
+detailed analysis with rich information to help understand the issue.
+---
+ src/checks.c |   22 ++++++++++++----------
+ 1 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index a933bba..fab13ed 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1388,16 +1388,6 @@ static struct task *process_chk(struct task *t)
+ 		 * which can happen on connect timeout or error.
+ 		 */
+ 		if (s->result == SRV_CHK_UNKNOWN) {
+-			if (expired && conn->xprt) {
+-				/* the check expired and the connection was not
+-				 * yet closed, start by doing this.
+-				 */
+-				if (conn->ctrl)
+-					setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
+-						   (struct linger *) &nolinger, sizeof(struct linger));
+-				conn_full_close(conn);
+-			}
+-
+ 			if ((conn->flags & (CO_FL_CONNECTED|CO_FL_WAIT_L4_CONN)) == CO_FL_WAIT_L4_CONN) {
+ 				/* L4 not established (yet) */
+ 				if (conn->flags & CO_FL_ERROR)
+@@ -1433,6 +1423,18 @@ static struct task *process_chk(struct task *t)
+ 
+ 		/* check complete or aborted */
+ 
++		if (conn->xprt) {
++			/* The check was aborted and the connection was not yet closed.
++			 * This can happen upon timeout, or when an external event such
++			 * as a failed response coupled with "observe layer7" caused the
++			 * server state to be suddenly changed.
++			 */
++			if (conn->ctrl)
++				setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
++					   (struct linger *) &nolinger, sizeof(struct linger));
++			conn_full_close(conn);
++		}
++
+ 		if (s->result & SRV_CHK_FAILED) {    /* a failure or timeout detected */
+ 			if (s->health > s->rise) {
+ 				s->health--; /* still good */
+-- 
+1.7.1
+
