@@ -8,9 +8,9 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=iptables-mod-ndpi
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_VERSION:=1.$(PKG_RELEASE)
-PKG_REV:=5923
+PKG_REV:=5992
 
 PKG_SOURCE:=iptables-mod-ndpi-$(PKG_VERSION).tar.gz
 PKG_SOURCE_SUBDIR:=iptables-mod-ndpi-$(PKG_VERSION)
@@ -38,9 +38,9 @@ define Package/iptables-mod-ndpi/description
 endef
 
 define Download/ndpi-netfilter
-  VERSION:=9bf95d159586d5c2bbf517dae80bfa4c3bcd8937
-  FILE:=ndpi-netfilter-$(PKG_VERSION).tar.gz
-  URL:=https://github.com/ewildgoose/ndpi-netfilter.git
+  VERSION:=81093ac2fd55be69e926d1208c97d898d8f9692e
+  FILE:=ndpi-netfilter-$(PKG_SOURCE_VERSION).tar.gz
+  URL:=https://github.com/heil/ndpi-netfilter.git
   PROTO:=git
   SUBDIR:=ndpi-netfilter
 endef
