@@ -1,0 +1,29 @@
+From 007f2a2d24ee6c5d76b37908a26a4339653a0588 Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Tue, 12 Feb 2013 10:45:49 +0900
+Subject: CLEANUP: checks: Make desc argument to set_server_check_status const
+
+This parameter is not modified by set_server_check_status() and
+thus may be const.
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ src/checks.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index fab13ed..820a8c2 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -198,7 +198,7 @@ static void server_status_printf(struct chunk *msg, struct server *s, unsigned o
+  * Show information in logs about failed health check if server is UP
+  * or succeeded health checks if server is DOWN.
+  */
+-static void set_server_check_status(struct server *s, short status, char *desc)
++static void set_server_check_status(struct server *s, short status, const char *desc)
+ {
+ 	if (status == HCHK_STATUS_START) {
+ 		s->result = SRV_CHK_UNKNOWN;	/* no result yet */
+-- 
+1.7.1
+
