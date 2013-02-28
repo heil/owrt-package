@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=iptables-mod-ndpi
 PKG_RELEASE:=2
 PKG_VERSION:=1.$(PKG_RELEASE)
-PKG_REV:=5998
+PKG_REV:=6018
 
 PKG_SOURCE:=iptables-mod-ndpi-$(PKG_VERSION).tar.gz
 PKG_SOURCE_SUBDIR:=iptables-mod-ndpi-$(PKG_VERSION)
@@ -56,6 +56,11 @@ CONFIGURE_ARGS += \
         --with-pic 
 
 MAKE_PATH := ndpi-netfilter
+
+ifneq ($(CONFIG_USE_EGLIBC),)
+  TARGET_CPPFLAGS += -I$(STAGING_DIR)/usr/include 
+endif
+
 
 MAKE_FLAGS += \
 	KERNEL_DIR=$(LINUX_DIR) \

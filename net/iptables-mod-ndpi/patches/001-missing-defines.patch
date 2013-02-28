@@ -1,11 +1,11 @@
-Index: iptables-mod-ndpi-1.1/src/include/ndpi_protocols_osdpi.h
+Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 ===================================================================
---- iptables-mod-ndpi-1.1.orig/src/include/ndpi_protocols_osdpi.h
-+++ iptables-mod-ndpi-1.1/src/include/ndpi_protocols_osdpi.h
-@@ -204,6 +204,40 @@ typedef struct {
- 
+--- iptables-mod-ndpi-1.2.orig/src/include/ndpi_protocols_osdpi.h
++++ iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
+@@ -194,6 +194,40 @@ typedef struct {
  /* NOTE: REMEMBER TO UPDATE NDPI_PROTOCOL_LONG_STRING / NDPI_PROTOCOL_SHORT_STRING */
  
+ #define NDPI_LAST_IMPLEMENTED_PROTOCOL                          144
 +#define NDPI_PROTOCOL_LONG_STRING "Unknown","FTP","POP","SMTP","IMAP","DNS","IPP","HTTP","MDNS","NTP","NETBIOS",\
 +"NFS","SSDP","BGP","SNMP","XDMCP","SMB","SYSLOG","DHCP","PostgreSQL","MySQL",\
 +"TDS","DirectDownloadLink","I23V5","AppleJuice","DirectConnect","Socrates","WinMX","MANOLITO","PANDO","Filetopia",\
@@ -23,6 +23,7 @@ Index: iptables-mod-ndpi-1.1/src/include/ndpi_protocols_osdpi.h
 +"Webex","WhatsApp","Apple_iCloud","Viber","Apple_iTunes","Radius","Windows_Update","TeamViewer","Tuenti","Lotus_Notes",\
 +"SAP","GTP","uPnP","LLMNR","Remote_Scan"
 +
++
 +#define NDPI_PROTOCOL_SHORT_STRING "ukn","ftp","pop","smtp","imap","dns","ipp","http","mdns","ntp","netbios",\
 +"nfs","ssdp","bgp","snmp","xdmcp","smb","syslog","dhcp","postgres","mysql",\
 +"tds","ddl","i23v5","applejuice","directconnect","socrates","winmx","manolito","pando","filetopia",\
@@ -39,7 +40,6 @@ Index: iptables-mod-ndpi-1.1/src/include/ndpi_protocols_osdpi.h
 +"httpproxy","citrix","netflix","lastfm","grooveshark","skyfileprepaid","skyfilerudics","skyfilepostpaid","citrixonline","apple",\
 +"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti",\
 +"sap","upnp","llmnr","remotescan"
-+
- #define NDPI_LAST_IMPLEMENTED_PROTOCOL                          155
  
  #define NDPI_MAX_SUPPORTED_PROTOCOLS (NDPI_LAST_IMPLEMENTED_PROTOCOL + 1)
+ #define NDPI_MAX_NUM_CUSTOM_PROTOCOLS                           128
