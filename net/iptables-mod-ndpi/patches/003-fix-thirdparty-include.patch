@@ -1,0 +1,13 @@
+Index: iptables-mod-ndpi-1.2/src/lib/ndpi_main.c
+===================================================================
+--- iptables-mod-ndpi-1.2.orig/src/lib/ndpi_main.c
++++ iptables-mod-ndpi-1.2/src/lib/ndpi_main.c
+@@ -32,7 +32,7 @@
+ #include "ndpi_protocols.h"
+ #include "ndpi_utils.h"
+ 
+-#include "ahocorasick.h"
++#include "third_party/include/ahocorasick.h"
+ 
+ #ifdef __KERNEL__
+ #define printf printk

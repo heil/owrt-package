@@ -2,10 +2,10 @@ Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 ===================================================================
 --- iptables-mod-ndpi-1.2.orig/src/include/ndpi_protocols_osdpi.h
 +++ iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
-@@ -194,6 +194,40 @@ typedef struct {
- /* NOTE: REMEMBER TO UPDATE NDPI_PROTOCOL_LONG_STRING / NDPI_PROTOCOL_SHORT_STRING */
+@@ -36,6 +36,42 @@ extern "C" {
  
- #define NDPI_LAST_IMPLEMENTED_PROTOCOL                          144
+ //  #define NDPI_ENABLE_DEBUG_MESSAGES
+ 
 +#define NDPI_PROTOCOL_LONG_STRING "Unknown","FTP","POP","SMTP","IMAP","DNS","IPP","HTTP","MDNS","NTP","NETBIOS",\
 +"NFS","SSDP","BGP","SNMP","XDMCP","SMB","SYSLOG","DHCP","PostgreSQL","MySQL",\
 +"TDS","DirectDownloadLink","I23V5","AppleJuice","DirectConnect","Socrates","WinMX","MANOLITO","PANDO","Filetopia",\
@@ -40,6 +40,8 @@ Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 +"httpproxy","citrix","netflix","lastfm","grooveshark","skyfileprepaid","skyfilerudics","skyfilepostpaid","citrixonline","apple",\
 +"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti",\
 +"sap","upnp","llmnr","remotescan"
++
++
+ #define NDPI_DETECTION_SUPPORT_IPV6
+ #define NDPI_PROTOCOL_HISTORY_SIZE				3
  
- #define NDPI_MAX_SUPPORTED_PROTOCOLS (NDPI_LAST_IMPLEMENTED_PROTOCOL + 1)
- #define NDPI_MAX_NUM_CUSTOM_PROTOCOLS                           128
