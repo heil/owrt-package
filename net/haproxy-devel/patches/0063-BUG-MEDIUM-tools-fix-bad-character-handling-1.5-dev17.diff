@@ -1,0 +1,32 @@
+From e4c58c89f6e657397beeff1b394f7567241a71b7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 6 Mar 2013 15:28:17 +0100
+Subject: BUG/MEDIUM: tools: fix bad character handling in str2sa_range()
+
+Commit d4448bc8 brought support for parsing port ranges, but invalid
+characters are not properly handled and can result in a crash while
+parsing the configuration if an invalid character is present in the
+port, because the return value is set to NULL then dereferenced.
+---
+ src/standard.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/src/standard.c b/src/standard.c
+index db0e0e4..be6b911 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -679,8 +679,10 @@ struct sockaddr_storage *str2sa_range(const char *str, int *low, int *high)
+ 		porth = atoi(port1 + 1);
+ 		porta = porth;
+ 	}
+-	else if (*port1) /* other any unexpected char */
++	else if (*port1) { /* other any unexpected char */
+ 		ret = NULL;
++		goto out;
++	}
+ 
+ 	set_host_port(ret, porta);
+ 
+-- 
+1.7.1
+

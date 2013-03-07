@@ -1,0 +1,37 @@
+From 0dbbf317e6ee80e60bebf11d0f8446f7a2aa7db9 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 5 Mar 2013 11:31:55 +0100
+Subject: MINOR: config: report missing peers section name
+
+Right now we report "invalid character ''" which is a bit confusing,
+better make a special case of the missing name.
+---
+ src/cfgparse.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index db2b21d..c11c30a 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1454,12 +1454,18 @@ int cfg_parse_peers(const char *file, int linenum, char **args, int kwm)
+ 	int err_code = 0;
+ 
+ 	if (strcmp(args[0], "peers") == 0) { /* new peers section */
++		if (!*args[1]) {
++			Alert("parsing [%s:%d] : missing name for peers section.\n", file, linenum);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
+ 
+ 		err = invalid_char(args[1]);
+ 		if (err) {
+ 			Alert("parsing [%s:%d] : character '%c' is not permitted in '%s' name '%s'.\n",
+ 			      file, linenum, *err, args[0], args[1]);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
+ 		}
+ 
+ 		for (curpeers = peers; curpeers != NULL; curpeers = curpeers->next) {
+-- 
+1.7.1
+

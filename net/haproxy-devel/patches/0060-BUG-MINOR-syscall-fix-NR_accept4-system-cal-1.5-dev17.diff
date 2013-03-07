@@ -1,0 +1,28 @@
+From b26cc86b1cf36f0d4116834810754c9d15f1b67b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 4 Mar 2013 07:31:08 +0100
+Subject: BUG/MINOR: syscall: fix NR_accept4 system call on sparc/linux
+
+An invalid copy-paste called it NR_splice instead of NR_accept4.
+This does not lead to real issues because if this define is used,
+then the code cannot compile since NR_accept4 is still missing.
+---
+ include/common/syscall.h |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/include/common/syscall.h b/include/common/syscall.h
+index 3ccbf5a..659b0ca 100644
+--- a/include/common/syscall.h
++++ b/include/common/syscall.h
+@@ -131,7 +131,7 @@
+ #if defined(__x86_64__)
+ #define __NR_accept4            288
+ #elif defined(__sparc__) || defined(__sparc64__)
+-#define __NR_splice             323
++#define __NR_accept4            323
+ #else
+ #define ACCEPT4_USE_SOCKETCALL    1
+ #ifndef SYS_ACCEPT4
+-- 
+1.7.1
+
