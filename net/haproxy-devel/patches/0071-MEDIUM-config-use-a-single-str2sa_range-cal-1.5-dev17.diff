@@ -1,0 +1,78 @@
+From 12eb2a6a97811c045b914ec031b4ca15cc0a9dc2 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 6 Mar 2013 15:45:03 +0100
+Subject: MEDIUM: config: use a single str2sa_range() call to parse bind addresses
+
+str2listener() now doesn't check the address syntax, it only relies on
+str2sa_range() to retrieve the address and family.
+---
+ src/cfgparse.c |   31 +++++++++----------------------
+ 1 files changed, 9 insertions(+), 22 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 61b78a5..800f162 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -206,7 +206,7 @@ int str2listener(char *str, struct proxy *curproxy, struct bind_conf *bind_conf,
+ 	next = dupstr = strdup(str);
+ 
+ 	while (next && *next) {
+-		struct sockaddr_storage ss;
++		struct sockaddr_storage ss, *ss2;
+ 
+ 		str = next;
+ 		/* 1) look for the end of the first address */
+@@ -214,25 +214,12 @@ int str2listener(char *str, struct proxy *curproxy, struct bind_conf *bind_conf,
+ 			*next++ = 0;
+ 		}
+ 
+-		if (*str == '/') {
+-			struct sockaddr_storage *ss2;
+-
+-			ss2 = str2sa_range(str, &port, &end, err,
+-			                   curproxy == global.stats_fe ? NULL : global.unix_bind.prefix);
+-			if (!ss2)
+-				goto fail;
+-			ss = *ss2;
+-			port = end = 0;
+-		}
+-		else {
+-			struct sockaddr_storage *ss2;
+-
+-			ss2 = str2sa_range(str, &port, &end, NULL, NULL);
+-			if (!ss2) {
+-				memprintf(err, "invalid listening address: '%s'\n", str);
+-				goto fail;
+-			}
++		ss2 = str2sa_range(str, &port, &end, err,
++		                   curproxy == global.stats_fe ? NULL : global.unix_bind.prefix);
++		if (!ss2)
++			goto fail;
+ 
++		if (ss2->ss_family == AF_INET || ss2->ss_family == AF_INET6) {
+ 			if (!port && !end) {
+ 				memprintf(err, "missing port number: '%s'\n", str);
+ 				goto fail;
+@@ -243,9 +230,6 @@ int str2listener(char *str, struct proxy *curproxy, struct bind_conf *bind_conf,
+ 				goto fail;
+ 			}
+ 
+-			/* OK the address looks correct */
+-			ss = *ss2;
+-
+ 			if (port < 1 || port > 65535) {
+ 				memprintf(err, "invalid port '%d' specified for address '%s'.\n", port, str);
+ 				goto fail;
+@@ -257,6 +241,9 @@ int str2listener(char *str, struct proxy *curproxy, struct bind_conf *bind_conf,
+ 			}
+ 		}
+ 
++		/* OK the address looks correct */
++		ss = *ss2;
++
+ 		for (; port <= end; port++) {
+ 			l = (struct listener *)calloc(1, sizeof(struct listener));
+ 			l->obj_type = OBJ_TYPE_LISTENER;
+-- 
+1.7.1
+

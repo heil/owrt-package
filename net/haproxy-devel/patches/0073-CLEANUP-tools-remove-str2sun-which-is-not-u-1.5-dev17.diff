@@ -1,0 +1,62 @@
+From add0ab19759379b44b333e746225002e9032be4a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 6 Mar 2013 15:08:16 +0100
+Subject: CLEANUP: tools: remove str2sun() which is not used anymore.
+
+---
+ include/common/standard.h |    6 ------
+ src/standard.c            |   21 ---------------------
+ 2 files changed, 0 insertions(+), 27 deletions(-)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index 4bc656d..59997db 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -212,12 +212,6 @@ extern const char *invalid_char(const char *name);
+ extern const char *invalid_domainchar(const char *name);
+ 
+ /*
+- * converts <str> to a struct sockaddr_un* which is locally allocated.
+- * The format is "/path", where "/path" is a path to a UNIX domain socket.
+- */
+-struct sockaddr_un *str2sun(const char *str);
+-
+-/*
+  * converts <str> to a struct sockaddr_storage* which is locally allocated. The
+  * string is assumed to contain only an address, no port. The address can be a
+  * dotted IPv4 address, an IPv6 address, a host name, or empty or "*" to
+diff --git a/src/standard.c b/src/standard.c
+index 833d91a..2236b55 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -443,27 +443,6 @@ const char *limit_r(unsigned long n, char *buffer, int size, const char *alt)
+ }
+ 
+ /*
+- * converts <str> to a struct sockaddr_un* which is locally allocated.
+- * The format is "/path", where "/path" is a path to a UNIX domain socket.
+- * NULL is returned if the socket path is invalid (too long).
+- */
+-struct sockaddr_un *str2sun(const char *str)
+-{
+-	static struct sockaddr_un su;
+-	int strsz;	/* length included null */
+-
+-	memset(&su, 0, sizeof(su));
+-	strsz = strlen(str) + 1;
+-	if (strsz > sizeof(su.sun_path)) {
+-		return NULL;
+-	} else {
+-		su.sun_family = AF_UNIX;
+-		memcpy(su.sun_path, str, strsz);
+-	}
+-	return &su;
+-}
+-
+-/*
+  * Returns non-zero if character <s> is a hex digit (0-9, a-f, A-F), else zero.
+  *
+  * It looks like this one would be a good candidate for inlining, but this is
+-- 
+1.7.1
+
