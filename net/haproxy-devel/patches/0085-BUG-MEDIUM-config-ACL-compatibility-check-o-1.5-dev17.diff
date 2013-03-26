@@ -1,0 +1,31 @@
+From 2f4765128056b895b02ea34cdb1b02231b163caa Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 25 Mar 2013 19:16:31 +0100
+Subject: BUG/MEDIUM: config: ACL compatibility check on "redirect" was wrong
+
+The check was made on "cond" instead of "rule->cond", so it never
+emitted any warning since either the rule was NULL or it was set to
+the last condition met.
+
+This is 1.5-specific and the bug was introduced by commit 4baae248
+in 1.5-dev17, so no backport is needed.
+---
+ src/cfgparse.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 2c2faf5..8c959de 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2689,7 +2689,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 
+ 		LIST_ADDQ(&curproxy->redirect_rules, &rule->list);
+ 		err_code |= warnif_rule_after_use_backend(curproxy, file, linenum, args[0]);
+-		err_code |= warnif_cond_requires_resp(cond, file, linenum);
++		err_code |= warnif_cond_requires_resp(rule->cond, file, linenum);
+ 	}
+ 	else if (!strcmp(args[0], "use_backend")) {
+ 		struct switching_rule *rule;
+-- 
+1.7.1
+
