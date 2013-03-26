@@ -1,0 +1,29 @@
+From bf43927cd70bd39b8bd57de5b61a3a273ada0f5e Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 2 Apr 2013 01:25:57 +0200
+Subject: [PATCH 099/105] OPTIM: buffer: remove one jump in buffer_count()
+
+We can help gcc build an expression not involving a jump. This function
+is used a lot when parsing chunks.
+---
+ include/common/buffer.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/common/buffer.h b/include/common/buffer.h
+index d46495c..18ced91 100644
+--- a/include/common/buffer.h
++++ b/include/common/buffer.h
+@@ -272,8 +272,8 @@ static inline const char *buffer_pointer(const struct buffer *buf, const char *p
+ static inline int buffer_count(const struct buffer *buf, const char *from, const char *to)
+ {
+ 	int count = to - from;
+-	if (count < 0)
+-		count += buf->size;
++
++	count += count < 0 ? buf->size : 0;
+ 	return count;
+ }
+ 
+-- 
+1.8.1.5
+

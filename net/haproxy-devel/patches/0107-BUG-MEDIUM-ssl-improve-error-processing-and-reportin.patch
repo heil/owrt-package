@@ -1,0 +1,160 @@
+From ad1731d553a93983782c50999d900a731dee669f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 2 Apr 2013 17:35:58 +0200
+Subject: [PATCH 107/108] BUG/MEDIUM: ssl: improve error processing and
+ reporting in ssl_sock_load_cert_list_file()
+
+fe61656b added the ability to load a list of certificates from a file,
+but error control was incomplete and misleading, as some errors such
+as missing files were not reported, and errors reported with Alert()
+instead of memprintf() were inappropriate and mixed with upper errors.
+Also, the code really supports a single SNI filter right now, so let's
+correct it and the doc for that, leaving room for later change if needed.
+---
+ doc/configuration.txt |  6 ++---
+ src/ssl_sock.c        | 72 +++++++++++++--------------------------------------
+ 2 files changed, 21 insertions(+), 57 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 69ee1f0..449d158 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -7216,10 +7216,10 @@ crt-ignore-err <errors>
+ 
+ crt-list <file>
+   This setting is only available when support for OpenSSL was built in. It
+-  designates a list of PEM file with an optional list of SNI filter per
+-  certificate, with the following format for each line :
++  designates a list of PEM file with an optional SNI filter per certificate,
++  with the following format for each line :
+ 
+-        <crtfile>[ <snifilter>]*
++        <crtfile> [<snifilter>]
+ 
+   Wildcards are supported in the SNI filter. The certificates will be presented
+   to clients who provide a valid TLS Server Name Indication field matching one
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 90c7232..6faab78 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -498,11 +498,11 @@ int ssl_sock_load_cert_list_file(char *file, struct bind_conf *bind_conf, struct
+ 	FILE *f;
+ 	int linenum = 0;
+ 	int cfgerr = 0;
+-	char *sni_filter = NULL;
+-	char *crt_file = NULL;
+ 
+-	if ((f = fopen(file, "r")) == NULL)
++	if ((f = fopen(file, "r")) == NULL) {
++		memprintf(err, "cannot open file '%s' : %s", file, strerror(errno));
+ 		return 1;
++	}
+ 
+ 	while (fgets(thisline, sizeof(thisline), f) != NULL) {
+ 		int arg;
+@@ -516,9 +516,10 @@ int ssl_sock_load_cert_list_file(char *file, struct bind_conf *bind_conf, struct
+ 			/* Check if we reached the limit and the last char is not \n.
+ 			 * Watch out for the last line without the terminating '\n'!
+ 			 */
+-			Alert("parsing [%s:%d]: line too long, limit: %d.\n",
+-			      file, linenum, (int)sizeof(thisline)-1);
++			memprintf(err, "line %d too long in file '%s', limit is %d characters",
++				  linenum, file, (int)sizeof(thisline)-1);
+ 			cfgerr = 1;
++			break;
+ 		}
+ 
+ 		/* skip leading spaces */
+@@ -540,68 +541,29 @@ int ssl_sock_load_cert_list_file(char *file, struct bind_conf *bind_conf, struct
+ 				while (isspace(*line))
+ 					line++;
+ 				args[++arg] = line;
+-				break;
+-			}
+-			else {
+-				line++;
+-			}
+-		}
+-		while (*line) {
+-			if (*line == '#' || *line == '\n' || *line == '\r') {
+-				/* end of string, end of loop */
+-				*line = 0;
+-				break;
+ 			}
+ 			else {
+ 				line++;
+ 			}
+ 		}
++
+ 		/* empty line */
+ 		if (!**args)
+ 			continue;
+-		if (*line) {
+-			/* we had to stop due to too many args.
+-			 * Let's terminate the string, print the offending part then cut the
+-			 * last arg.
+-			 */
+-			while (*line && *line != '#' && *line != '\n' && *line != '\r')
+-				line++;
+-			*line = '\0';
+ 
+-			Alert("parsing [%s:%d]: line too long, truncating at word %d, position %ld: <%s>.\n",
+-			      file, linenum, arg + 1, (long)(args[arg] - thisline + 1), args[arg]);
++		if (arg > 2) {
++			memprintf(err, "too many args on line %d in file '%s', only one SNI filter is supported (was '%s')",
++				  linenum, file, args[2]);
+ 			cfgerr = 1;
+-			args[arg] = line;
+-		}
+-		/* zero out remaining args and ensure that at least one entry
+-		 * is zeroed out.
+-		 */
+-		while (++arg <= MAX_LINE_ARGS) {
+-			args[arg] = line;
+-		}
+-
+-		crt_file = strdup(args[0]);
+-		if (*args[1])
+-			sni_filter = strdup(args[1]);
+-		cfgerr = ssl_sock_load_cert_file(crt_file, bind_conf, curproxy, sni_filter, err);
+-
+-		if (sni_filter) {
+-			free(sni_filter);
+-			sni_filter = NULL;
+-		}
+-		if (crt_file) {
+-			free(crt_file);
+-			crt_file = NULL;
++			break;
+ 		}
+ 
+-		if (cfgerr)
++		cfgerr = ssl_sock_load_cert_file(args[0], bind_conf, curproxy, arg > 1 ? args[1] : NULL, err);
++		if (cfgerr) {
++			memprintf(err, "error processing line %d in file '%s' : %s", linenum, file, *err);
+ 			break;
++		}
+ 	}
+-	if (sni_filter)
+-		free(sni_filter);
+-	if (crt_file)
+-		free(crt_file);
+-
+ 	fclose(f);
+ 	return cfgerr;
+ }
+@@ -2507,8 +2469,10 @@ static int bind_parse_crt_list(char **args, int cur_arg, struct proxy *px, struc
+ 		return ERR_ALERT | ERR_FATAL;
+ 	}
+ 
+-	if (ssl_sock_load_cert_list_file(args[cur_arg + 1], conf, px, err) > 0)
++	if (ssl_sock_load_cert_list_file(args[cur_arg + 1], conf, px, err) > 0) {
++		memprintf(err, "'%s' : %s", args[cur_arg], *err);
+ 		return ERR_ALERT | ERR_FATAL;
++	}
+ 
+ 	return 0;
+ }
+-- 
+1.8.1.5
+

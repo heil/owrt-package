@@ -1,0 +1,36 @@
+From e5b4f9d58353e1c7731e0bd21942f305646bad6e Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 31 Mar 2013 19:38:19 +0200
+Subject: [PATCH 093/105] BUG/MINOR: acl: ssl_fc_{alg,use}_keysize must parse
+ integers, not strings
+
+This is a copy-paste typo making the ACLs unusable.
+---
+ src/ssl_sock.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 580ff5a..32a06ab 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -2900,7 +2900,7 @@ static struct acl_kw_list acl_kws = {{ },{
+ 	{ "ssl_f_serial",           acl_parse_bin, smp_fetch_ssl_f_serial,       acl_match_bin,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_f_version",          acl_parse_int, smp_fetch_ssl_f_version,      acl_match_int,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_fc",                 acl_parse_int, smp_fetch_ssl_fc,             acl_match_nothing, ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+-	{ "ssl_fc_alg_keysize",     acl_parse_str, smp_fetch_ssl_fc_alg_keysize, acl_match_int,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
++	{ "ssl_fc_alg_keysize",     acl_parse_int, smp_fetch_ssl_fc_alg_keysize, acl_match_int,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_fc_cipher",          acl_parse_str, smp_fetch_ssl_fc_cipher,      acl_match_str,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_fc_has_crt",         acl_parse_int, smp_fetch_ssl_fc_has_crt,     acl_match_nothing, ACL_USE_L6REQ_PERMANENT, 0 },
+ 	{ "ssl_fc_has_sni",         acl_parse_int, smp_fetch_ssl_fc_has_sni,     acl_match_nothing, ACL_USE_L6REQ_PERMANENT, 0 },
+@@ -2908,7 +2908,7 @@ static struct acl_kw_list acl_kws = {{ },{
+ 	{ "ssl_fc_npn",             acl_parse_str, smp_fetch_ssl_fc_npn,         acl_match_str,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ #endif
+ 	{ "ssl_fc_protocol",        acl_parse_str, smp_fetch_ssl_fc_protocol,    acl_match_str,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+-	{ "ssl_fc_use_keysize",     acl_parse_str, smp_fetch_ssl_fc_use_keysize, acl_match_int,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
++	{ "ssl_fc_use_keysize",     acl_parse_int, smp_fetch_ssl_fc_use_keysize, acl_match_int,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_fc_sni",             acl_parse_str, smp_fetch_ssl_fc_sni,         acl_match_str,     ACL_USE_L6REQ_PERMANENT|ACL_MAY_LOOKUP, 0 },
+ 	{ "ssl_fc_sni_end",         acl_parse_str, smp_fetch_ssl_fc_sni,         acl_match_end,     ACL_USE_L6REQ_PERMANENT, 0 },
+ 	{ "ssl_fc_sni_reg",         acl_parse_reg, smp_fetch_ssl_fc_sni,         acl_match_reg,     ACL_USE_L6REQ_PERMANENT, 0 },
+-- 
+1.8.1.5
+

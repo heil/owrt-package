@@ -1,0 +1,29 @@
+From a39d19905e63971b9545accd69a6ce7ac9e529e1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 1 Apr 2013 20:37:42 +0200
+Subject: [PATCH 095/105] BUILD: fix usual isdigit() warning on solaris
+
+src/standard.c: In function `str2sa_range':
+src/standard.c:734: warning: subscript has type `char'
+
+This one was recently introduced by commit c120c8d3.
+---
+ src/standard.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/standard.c b/src/standard.c
+index 7a6ca11..37b3c43 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -731,7 +731,7 @@ struct sockaddr_storage *str2sa_range(const char *str, int *low, int *high, char
+ 			goto out;
+ 		}
+ 
+-		if (isdigit(*port1)) {	/* single port or range */
++		if (isdigit((int)(unsigned char)*port1)) {	/* single port or range */
+ 			port2 = strchr(port1, '-');
+ 			if (port2)
+ 				*port2++ = '\0';
+-- 
+1.8.1.5
+

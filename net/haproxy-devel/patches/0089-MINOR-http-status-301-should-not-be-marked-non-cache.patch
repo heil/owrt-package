@@ -1,0 +1,27 @@
+From e267421e93eb35272a104c9c8fa6878880f42be8 Mon Sep 17 00:00:00 2001
+From: Yves Lafon <ylafon@w3.org>
+Date: Mon, 11 Mar 2013 11:06:05 -0400
+Subject: [PATCH 089/105] MINOR: http: status 301 should not be marked
+ non-cacheable
+
+Also, browsers behaviour is inconsistent regarding the Cache-Control
+header field on a 301.
+---
+ src/proto_http.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 24e0a76..b85c6aa 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -75,7 +75,6 @@ const struct chunk http_100_chunk = {
+ /* Warning: no "connection" header is provided with the 3xx messages below */
+ const char *HTTP_301 =
+ 	"HTTP/1.1 301 Moved Permanently\r\n"
+-	"Cache-Control: no-cache\r\n"
+ 	"Content-length: 0\r\n"
+ 	"Location: "; /* not terminated since it will be concatenated with the URL */
+ 
+-- 
+1.8.1.5
+

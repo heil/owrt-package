@@ -1,0 +1,26 @@
+From 4e8ec500e54c2781964cb2af7b3e7545138fea28 Mon Sep 17 00:00:00 2001
+From: Yves Lafon <ylafon@w3.org>
+Date: Mon, 11 Mar 2013 11:06:05 -0400
+Subject: [PATCH 087/105] MINOR: http: status code 303 is HTTP/1.1 only
+
+Don't return a 303 redirect with "HTTP/1.0" as it's HTTP/1.1 only.
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 0f14016..4644acf 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2979,7 +2979,7 @@ int http_handle_stats(struct session *s, struct channel *req)
+ 		 * the browse to the stats page with a GET.
+ 		 */
+ 		chunk_printf(&trash,
+-		             "HTTP/1.0 303 See Other\r\n"
++		             "HTTP/1.1 303 See Other\r\n"
+ 		             "Cache-Control: no-cache\r\n"
+ 		             "Content-Type: text/plain\r\n"
+ 		             "Connection: close\r\n"
+-- 
+1.8.1.5
+

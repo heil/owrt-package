@@ -1,0 +1,188 @@
+From 7035132349ed8cf62157eaec3453be88dbf3586e Mon Sep 17 00:00:00 2001
+From: Hiroaki Nakamura <hnakamur@gmail.com>
+Date: Sun, 13 Jan 2013 15:00:42 +0900
+Subject: [PATCH 098/105] MEDIUM: regex: Use PCRE JIT in acl
+
+This is a patch for using PCRE JIT in acl.
+
+I notice regex are used in other places, but they are more complicated
+to modify to use PCRE APIs. So I focused to acl in the first try.
+
+BTW, I made a simple benchmark program for PCRE JIT beforehand.
+https://github.com/hnakamur/pcre-jit-benchmark
+
+I read the manual for PCRE JIT
+http://www.manpagez.com/man/3/pcrejit/
+
+and wrote my benchmark program.
+https://github.com/hnakamur/pcre-jit-benchmark/blob/master/test-pcre.c
+---
+ Makefile               |  7 ++++++-
+ include/common/regex.h | 32 +++++++++++++++++++++++++++++++-
+ include/types/acl.h    |  2 +-
+ src/acl.c              | 27 +++++++++++++++++++++++----
+ 4 files changed, 61 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index a78e9d9..daa64ee 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,6 +14,7 @@
+ #   USE_MY_SPLICE        : redefine the splice syscall if build fails without.
+ #   USE_NETFILTER        : enable netfilter on Linux. Automatic.
+ #   USE_PCRE             : enable use of libpcre for regex. Recommended.
++#   USE_PCRE_JIT         : enable use of libpcre jit for regex. Recommended.
+ #   USE_POLL             : enable poll(). Automatic.
+ #   USE_PRIVATE_CACHE    : disable shared memory cache of ssl sessions.
+ #   USE_REGPARM          : enable regparm optimization. Recommended on x86.
+@@ -521,7 +522,7 @@ endif
+ endif
+ endif
+ 
+-ifneq ($(USE_PCRE)$(USE_STATIC_PCRE),)
++ifneq ($(USE_PCRE)$(USE_STATIC_PCRE)$(USE_PCRE_JIT),)
+ # PCREDIR is used to automatically construct the PCRE_INC and PCRE_LIB paths,
+ # by appending /include and /lib respectively. If your system does not use the
+ # same sub-directories, simply force these variables instead of PCREDIR. It is
+@@ -546,6 +547,10 @@ OPTIONS_CFLAGS  += -DUSE_PCRE $(if $(PCRE_INC),-I$(PCRE_INC))
+ OPTIONS_LDFLAGS += $(if $(PCRE_LIB),-L$(PCRE_LIB)) -Wl,-Bstatic -lpcreposix -lpcre -Wl,-Bdynamic
+ BUILD_OPTIONS   += $(call ignore_implicit,USE_STATIC_PCRE)
+ endif
++# JIT PCRE
++ifneq ($(USE_PCRE_JIT),)
++OPTIONS_CFLAGS  += -DUSE_PCRE_JIT
++endif
+ endif
+ 
+ # This one can be changed to look for ebtree files in an external directory
+diff --git a/include/common/regex.h b/include/common/regex.h
+index 60c7f42..bab1a55 100644
+--- a/include/common/regex.h
++++ b/include/common/regex.h
+@@ -27,8 +27,20 @@
+ #ifdef USE_PCRE
+ #include <pcre.h>
+ #include <pcreposix.h>
+-#else
++
++#ifdef USE_PCRE_JIT
++struct jit_regex {
++    pcre *reg;
++    pcre_extra *extra;
++};
++typedef struct jit_regex regex;
++#else /* no PCRE_JIT */
++typedef regex_t regex;
++#endif
++
++#else /* no PCRE */
+ #include <regex.h>
++typedef regex_t regex;
+ #endif
+ 
+ /* what to do when a header matches a regex */
+@@ -55,6 +67,24 @@ const char *check_replace_string(const char *str);
+ const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
+ 			int action, const char *replace, void *cond);
+ 
++static inline int regex_exec(const regex *preg, const char *subject, int length) {
++#ifdef USE_PCRE_JIT
++	return pcre_exec(preg->reg, preg->extra, subject, length, 0, 0, NULL, 0);
++#else
++	return regexec(preg, subject, 0, NULL, 0);
++#endif
++}
++
++static inline void regex_free(regex *preg) {
++#ifdef USE_PCRE_JIT
++	pcre_free_study(preg->extra);
++	pcre_free(preg->reg);
++	free(preg);
++#else
++	regfree(preg);
++#endif
++}
++
+ #endif /* _COMMON_REGEX_H */
+ 
+ /*
+diff --git a/include/types/acl.h b/include/types/acl.h
+index bf5537f..2b0de0c 100644
+--- a/include/types/acl.h
++++ b/include/types/acl.h
+@@ -213,7 +213,7 @@ struct acl_pattern {
+ 	union {
+ 		void *ptr;              /* any data */
+ 		char *str;              /* any string  */
+-		regex_t *reg;           /* a compiled regex */
++		regex *reg;             /* a compiled regex */
+ 	} ptr;                          /* indirect values, allocated */
+ 	void(*freeptrbuf)(void *ptr);	/* a destructor able to free objects from the ptr */
+ 	int len;                        /* data length when required  */
+diff --git a/src/acl.c b/src/acl.c
+index 753f109..a0b16b1 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -533,7 +533,7 @@ int acl_match_reg(struct sample *smp, struct acl_pattern *pattern)
+ 	old_char = smp->data.str.str[smp->data.str.len];
+ 	smp->data.str.str[smp->data.str.len] = 0;
+ 
+-	if (regexec(pattern->ptr.reg, smp->data.str.str, 0, NULL, 0) == 0)
++	if (regex_exec(pattern->ptr.reg, smp->data.str.str, smp->data.str.len) == 0)
+ 		ret = ACL_PAT_PASS;
+ 	else
+ 		ret = ACL_PAT_FAIL;
+@@ -900,28 +900,47 @@ acl_parse_strcat(const char **text, struct acl_pattern *pattern, int *opaque, ch
+ /* Free data allocated by acl_parse_reg */
+ static void acl_free_reg(void *ptr)
+ {
+-	regfree((regex_t *)ptr);
++	regex_free(ptr);
+ }
+ 
+ /* Parse a regex. It is allocated. */
+ int acl_parse_reg(const char **text, struct acl_pattern *pattern, int *opaque, char **err)
+ {
+-	regex_t *preg;
++	regex *preg;
+ 	int icase;
+ 
+-	preg = calloc(1, sizeof(regex_t));
++	preg = calloc(1, sizeof(*preg));
+ 
+ 	if (!preg) {
+ 		memprintf(err, "out of memory while loading pattern");
+ 		return 0;
+ 	}
+ 
++#ifdef USE_PCRE_JIT
++	icase = (pattern->flags & ACL_PAT_F_IGNORE_CASE) ? PCRE_CASELESS : 0;
++	preg->reg = pcre_compile(*text, PCRE_NO_AUTO_CAPTURE | icase, NULL, NULL,
++		NULL);
++	if (!preg->reg) {
++		free(preg);
++		memprintf(err, "regex '%s' is invalid", *text);
++		return 0;
++	}
++
++	preg->extra = pcre_study(preg->reg, PCRE_STUDY_JIT_COMPILE, NULL);
++	if (!preg->extra) {
++		pcre_free(preg->reg);
++		free(preg);
++		memprintf(err, "failed to compile regex '%s'", *text);
++		return 0;
++	}
++#else
+ 	icase = (pattern->flags & ACL_PAT_F_IGNORE_CASE) ? REG_ICASE : 0;
+ 	if (regcomp(preg, *text, REG_EXTENDED | REG_NOSUB | icase) != 0) {
+ 		free(preg);
+ 		memprintf(err, "regex '%s' is invalid", *text);
+ 		return 0;
+ 	}
++#endif
+ 
+ 	pattern->ptr.reg = preg;
+ 	pattern->freeptrbuf = &acl_free_reg;
+-- 
+1.8.1.5
+

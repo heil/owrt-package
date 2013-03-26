@@ -1,0 +1,67 @@
+From 2fef9b1ef6f346e75016340531f6e1da5d9d5d2b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 26 Mar 2013 01:08:21 +0100
+Subject: [PATCH 086/105] BUG/MEDIUM: http: fix another issue caused by
+ http-send-name-header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An issue reported by David Coulson is that when using http-send-name-header,
+the response processing would randomly be performed. The issue was first
+diagnosed by Cyril Bonté as being related to a time race when processing
+the closing of the response.
+
+In practice, the issue is a bit trickier. It happens that
+http_send_name_header() did not update msg->sol after a rewrite. This
+counter is supposed to point to the beginning of the message's body
+once headers are scheduled for being forwarded. And not updating it
+means that the first forwarding of the request headers in
+http_request_forward_body() does not send the correct count, leaving
+some bytes in chn->to_forward.
+
+Then if the server sends its response in a single packet with the
+close, the stream interface switches to state SI_ST_DIS which in
+turn moves to SI_ST_CLO in process_session(), and to close the
+outgoing connection. This is detected by http_request_forward_body(),
+which then switches the request message to the error state, and syncs
+all FSMs and removes any response analyser.
+
+The response analyser being removed, no processing is performed on
+the response buffer, which is tunnelled as-is to the client.
+
+Of course, the correct fix consists in having http_send_name_header()
+update msg->sol. Normally this ought not to have been needed, but it
+is an abuse to modify data already scheduled for being forwarded, so
+it is expected that such specific handling has to be done there. Better
+not have generic functions deal with such cases, so that it does not
+become the standard.
+
+Note: 1.4 does not have this issue even if it does not update the
+pointer either, because it forwards from msg->som which is not
+updated at the moment the connect() succeeds. So no backport is
+required.
+---
+ src/proto_http.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 2fa7598..0f14016 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -4162,8 +4162,11 @@ int http_send_name_header(struct http_txn *txn, struct proxy* be, const char* sr
+ 	if (old_o) {
+ 		/* If this was a forwarded request, we must readjust the amount of
+ 		 * data to be forwarded in order to take into account the size
+-		 * variations.
++		 * variations. Note that if the request was already scheduled for
++		 * forwarding, it had its req->sol pointing to the body, which
++		 * must then be updated too.
+ 		 */
++		txn->req.sol += chn->buf->i - old_i;
+ 		b_adv(chn->buf, old_o + chn->buf->i - old_i);
+ 	}
+ 
+-- 
+1.8.1.5
+
