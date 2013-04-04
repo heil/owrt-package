@@ -1,0 +1,30 @@
+From 8d1c5164f371fa66fc7cdf42a800e48d0e4e8e4a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 3 Apr 2013 14:13:58 +0200
+Subject: [PATCH] BUG/MINOR: http: add-header/set-header did not accept the ACL
+ condition
+
+Sander Klein reported this bug. The test for the extra argument on these
+rules prevent any condition from being added. The bug was introduced with
+the feature itself in 1.5-dev16.
+---
+ src/proto_http.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index ff71659..afb0db4 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8130,7 +8130,8 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 		rule->action = *args[0] == 'a' ? HTTP_REQ_ACT_ADD_HDR : HTTP_REQ_ACT_SET_HDR;
+ 		cur_arg = 1;
+ 
+-		if (!*args[cur_arg] || !*args[cur_arg+1] || *args[cur_arg+2]) {
++		if (!*args[cur_arg] || !*args[cur_arg+1] ||
++		    (*args[cur_arg+2] && strcmp(args[cur_arg+2], "if") != 0 && strcmp(args[cur_arg+2], "unless") != 0)) {
+ 			Alert("parsing [%s:%d]: 'http-request %s' expects exactly 2 arguments.\n",
+ 			      file, linenum, args[0]);
+ 			goto out_err;
+-- 
+1.8.1.5
+

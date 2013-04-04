@@ -51,7 +51,7 @@ define Package/gcc-native
   SECTION:=devel
   CATEGORY:=Development
   TITLE:=gcc-native
-  DEPENDS:=+mpfr +binutils +libmpc +libc +libgcc +zlib +libpthread  +libelf
+  DEPENDS:=+mpfr +binutils +libmpc +libc +libgcc +zlib +libpthread  +libelf +libelf1
 endef
 
 define Package/gcc-native/description
