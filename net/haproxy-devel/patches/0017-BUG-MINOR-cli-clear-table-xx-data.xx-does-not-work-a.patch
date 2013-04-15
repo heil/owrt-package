@@ -1,0 +1,30 @@
+From 04b3a197098983c145090632a06c13d7ee6a18dd Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 13 Apr 2013 09:41:37 +0200
+Subject: [PATCH 17/17] BUG/MINOR: cli: "clear table xx data.xx" does not work
+ anymore
+
+Commit 654694e1 introduced in 1.5-dev12 broke the ability to clear
+some entries in a table by the value of their data fields.
+---
+ src/dumpstats.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 8ee1eec..578247e 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -741,8 +741,8 @@ static void stats_sock_table_key_request(struct stream_interface *si, char **arg
+ 
+ static void stats_sock_table_data_request(struct stream_interface *si, char **args, int action)
+ {
+-	if (action != STAT_CLI_O_TAB) {
+-		si->applet.ctx.cli.msg = "content-based lookup is only supported with the \"show\" action";
++	if (action != STAT_CLI_O_TAB && action != STAT_CLI_O_CLR) {
++		si->applet.ctx.cli.msg = "content-based lookup is only supported with the \"show\" and \"clear\" actions";
+ 		si->applet.st0 = STAT_CLI_PRINT;
+ 		return;
+ 	}
+-- 
+1.8.1.5
+

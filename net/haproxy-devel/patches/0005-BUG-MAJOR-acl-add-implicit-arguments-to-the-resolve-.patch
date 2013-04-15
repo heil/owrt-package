@@ -1,0 +1,40 @@
+From f75d008c45c6e0e989825d381222cd3d978b01c8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 7 Apr 2013 21:20:44 +0200
+Subject: [PATCH 5/6] BUG/MAJOR: acl: add implicit arguments to the resolve
+ list
+
+When an ACL keyword needs a mandatory argument and this argument is of
+type proxy or table, it is allowed not to specify it so that current
+proxy is used by default.
+
+In order to achieve this, the ACL expression parser builds a dummy
+argument from scratch and marks it unresolved.
+
+However, since recent changes on the ACL and samples, an unresolved
+argument needs to be added to the unresolved list. This specific code
+did not do it, resulting in random data being used as a proxy pointer
+if no argument was passed for a proxy name, possibly even causing a
+crash.
+
+A quick workaround consists explicitly naming proxies in ACLs.
+---
+ src/acl.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/acl.c b/src/acl.c
+index efd1ee6..6a23bae 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -1135,6 +1135,8 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->args[0].data.str.str = strdup("");
+ 			expr->args[0].data.str.len = 1;
+ 			expr->args[0].data.str.len = 0;
++			arg_list_add(al, &expr->args[0], 0);
++
+ 			expr->args[1].type = ARGT_STOP;
+ 		}
+ 		else if (ARGM(expr->smp->arg_mask)) {
+-- 
+1.8.1.5
+

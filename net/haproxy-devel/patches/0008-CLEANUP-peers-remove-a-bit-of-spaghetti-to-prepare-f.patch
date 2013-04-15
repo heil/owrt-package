@@ -1,0 +1,171 @@
+From 72d6c16df44dab50fd5de286864f489801e1db2d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 11 Apr 2013 16:14:13 +0200
+Subject: [PATCH 08/11] CLEANUP: peers: remove a bit of spaghetti to prepare
+ for the next bugfix
+
+We'll need to centralize some pool_alloc()/pool_free() calls in the
+upcoming fix so before that we need to reduce the number of points
+by which we leave the critical code.
+---
+ src/peers.c | 92 ++++++++++++++++++++++---------------------------------------
+ 1 file changed, 33 insertions(+), 59 deletions(-)
+
+diff --git a/src/peers.c b/src/peers.c
+index 789fa8c..58248bb 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -600,14 +600,9 @@ switchstate:
+ 				int totl = 0;
+ 
+ 				reql = bo_getblk(si->ob, (char *)&c, sizeof(c), totl);
+-				if (reql <= 0) { /* closed or EOL not found */
+-					if (reql == 0) {
+-						/* nothing to read */
+-						goto incomplete;
+-					}
+-					si->applet.st0 = PEER_SESSION_END;
+-					goto switchstate;
+-				}
++				if (reql <= 0) /* closed or EOL not found */
++					goto incomplete;
++
+ 				totl += reql;
+ 
+ 				if ((c & 0x80) || (c == 'D')) {
+@@ -625,13 +620,9 @@ switchstate:
+ 					}
+ 					else {
+ 						reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+-						if (reql <= 0) { /* closed or EOL not found */
+-							if (reql == 0) {
+-								goto incomplete;
+-							}
+-							si->applet.st0 = PEER_SESSION_END;
+-							goto switchstate;
+-						}
++						if (reql <= 0) /* closed or EOL not found */
++							goto incomplete;
++
+ 						totl += reql;
+ 						pushack = ntohl(netinteger);
+ 					}
+@@ -642,24 +633,16 @@ switchstate:
+ 						stkey.key = stkey.data.buf;
+ 
+ 						reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+-						if (reql <= 0) { /* closed or EOL not found */
+-							if (reql == 0) {
+-								goto incomplete;
+-							}
+-							si->applet.st0 = PEER_SESSION_END;
+-							goto switchstate;
+-						}
++						if (reql <= 0) /* closed or EOL not found */
++							goto incomplete;
++
+ 						totl += reql;
+ 						stkey.key_len = ntohl(netinteger);
+ 
+ 						reql = bo_getblk(si->ob, stkey.key, stkey.key_len, totl);
+-						if (reql <= 0) { /* closed or EOL not found */
+-							if (reql == 0) {
+-								goto incomplete;
+-							}
+-							si->applet.st0 = PEER_SESSION_END;
+-							goto switchstate;
+-						}
++						if (reql <= 0) /* closed or EOL not found */
++							goto incomplete;
++
+ 						totl += reql;
+ 					}
+ 					else if (ps->table->table->type == STKTABLE_TYPE_INTEGER) {
+@@ -668,13 +651,9 @@ switchstate:
+ 						stkey.key = &stkey.data.integer;
+ 
+ 						reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+-						if (reql <= 0) { /* closed or EOL not found */
+-							if (reql == 0) {
+-								goto incomplete;
+-							}
+-							si->applet.st0 = PEER_SESSION_END;
+-							goto switchstate;
+-						}
++						if (reql <= 0) /* closed or EOL not found */
++							goto incomplete;
++
+ 						totl += reql;
+ 						stkey.data.integer = ntohl(netinteger);
+ 					}
+@@ -684,26 +663,17 @@ switchstate:
+ 						stkey.key = stkey.data.buf;
+ 
+ 						reql = bo_getblk(si->ob, (char *)&stkey.data.buf, ps->table->table->key_size, totl);
+-						if (reql <= 0) { /* closed or EOL not found */
+-							if (reql == 0) {
+-								goto incomplete;
+-							}
+-							si->applet.st0 = PEER_SESSION_END;
+-							goto switchstate;
+-						}
+-						totl += reql;
++						if (reql <= 0) /* closed or EOL not found */
++							goto incomplete;
+ 
++						totl += reql;
+ 					}
+ 
+ 					/* read server id */
+ 					reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+-					if (reql <= 0) { /* closed or EOL not found */
+-						if (reql == 0) {
+-							goto incomplete;
+-						}
+-						si->applet.st0 = PEER_SESSION_END;
+-						goto switchstate;
+-					}
++					if (reql <= 0) /* closed or EOL not found */
++						goto incomplete;
++
+ 					totl += reql;
+ 					srvid = ntohl(netinteger);
+ 
+@@ -806,13 +776,9 @@ switchstate:
+ 					uint32_t netinteger;
+ 
+ 					reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+-					if (reql <= 0) { /* closed or EOL not found */
+-						if (reql == 0) {
+-							goto incomplete;
+-						}
+-						si->applet.st0 = PEER_SESSION_END;
+-						goto switchstate;
+-					}
++					if (reql <= 0) /* closed or EOL not found */
++						goto incomplete;
++
+ 					totl += reql;
+ 
+ 					/* Consider remote is up to date with "acked" version */
+@@ -828,8 +794,16 @@ switchstate:
+ 				bo_skip(si->ob, totl);
+ 
+ 				/* loop on that state to peek next message */
+-				continue;
++				goto switchstate;
++
+ incomplete:
++				/* we get here when a bo_getblk() returns <= 0 */
++				if (reql < 0) {
++					/* there was an error */
++					si->applet.st0 = PEER_SESSION_END;
++					goto switchstate;
++				}
++
+ 				/* Nothing to read, now we start to write */
+ 
+ 				/* Confirm finished or partial messages */
+-- 
+1.8.1.5
+

@@ -1,0 +1,35 @@
+From 667c2a3d2ae7a651d162fe709a7290060bf82497 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 9 Apr 2013 08:13:58 +0200
+Subject: [PATCH 18/19] BUG/MAJOR: http: compression still has defects on
+ chunked responses
+
+The compression state machine happens to start work it cannot undo if
+there's no more data in the input buffer, and has trouble accounting
+for it. Fixing it requires more than a few lines, as the confusion is
+in part caused by the way the pointers to the various places in the
+message are handled internally. So as a temporary fix, let's disable
+compression on chunk-encoded responses. This will give us more time
+to perform the required changes.
+---
+ src/proto_http.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index afb0db4..206701e 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2073,6 +2073,10 @@ int select_compression_response_header(struct session *s, struct buffer *res)
+ 	if (!(msg->flags & HTTP_MSGF_TE_CHNK) && msg->body_len == 0)
+ 		goto fail;
+ 
++	/* TEMPORARY WORKAROUND: do not compress if response is chunked !!!!!! */
++	if (msg->flags & HTTP_MSGF_TE_CHNK)
++		goto fail;
++
+ 	/* content is already compressed */
+ 	ctx.idx = 0;
+ 	if (http_find_header2("Content-Encoding", 16, res->p, &txn->hdr_idx, &ctx))
+-- 
+1.8.1.5
+

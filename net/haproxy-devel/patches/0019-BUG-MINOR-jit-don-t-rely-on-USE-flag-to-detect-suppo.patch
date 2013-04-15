@@ -1,0 +1,55 @@
+From d9bdccda556d6139a06f0a1229e7f304a93ee0fe Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Mon, 15 Apr 2013 00:41:40 +0200
+Subject: [PATCH 19/19] BUG/MINOR: jit: don't rely on USE flag to detect
+ support
+
+Since ea68d36 we show whether JIT is enabled, based on the USE-flag
+(USE_PCRE_JIT). This is too naive; libpcre may be built without JIT
+support (which is the default).
+
+Fix this by calling pcre_config(), which has the accurate information
+we are looking for.
+
+Example of a libpcre without JIT support after this patch:
+> ./haproxy -vv | grep PCRE
+>   OPTIONS = USE_STATIC_PCRE=1 USE_PCRE_JIT=1
+> Built with PCRE version : 8.32 2012-11-30
+> PCRE library supports JIT : no (libpcre build without JIT?)
+---
+ src/haproxy.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index d4c1189..da7a625 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -292,13 +292,20 @@ void display_build_opts()
+ 
+ #ifdef USE_PCRE
+ 	printf("Built with PCRE version : %s", pcre_version());
+-	printf("\nPCRE library supports JIT : "
+-#ifndef USE_PCRE_JIT
+-	       "no (USE_PCRE_JIT not set)"
++	printf("\nPCRE library supports JIT : ");
++#ifdef USE_PCRE_JIT
++	{
++		int r;
++		pcre_config(PCRE_CONFIG_JIT, &r);
++		if (r)
++			printf("yes");
++		else
++			printf("no (libpcre build without JIT?)");
++	}
+ #else
+-	       "yes"
++	printf("no (USE_PCRE_JIT not set)");
+ #endif
+-	       "\n");
++	printf("\n");
+ #else
+ 	printf("Built without PCRE support (using libc's regex instead)\n");
+ #endif
+-- 
+1.8.1.5
+

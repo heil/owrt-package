@@ -1,8 +1,8 @@
 From 8d1c5164f371fa66fc7cdf42a800e48d0e4e8e4a Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 3 Apr 2013 14:13:58 +0200
-Subject: [PATCH] BUG/MINOR: http: add-header/set-header did not accept the ACL
- condition
+Subject: [PATCH 1/6] BUG/MINOR: http: add-header/set-header did not accept the
+ ACL condition
 
 Sander Klein reported this bug. The test for the extra argument on these
 rules prevent any condition from being added. The bug was introduced with

@@ -1,0 +1,46 @@
+From 4fc90efed039f23d0d48cde895939d3e94410e54 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 6 Apr 2013 11:29:39 +0200
+Subject: [PATCH 4/6] BUG/MEDIUM: splicing is broken since 1.5-dev12
+
+Commit 96199b10 reintroduced the splice() mechanism in the new connection
+system. However, it failed to account for the number of transferred bytes,
+allowing more bytes than scheduled to be transferred to the client. This
+can cause an issue with small-chunked responses, where each packet from
+the server may contain several chunks, because a single splice() call may
+succeed, then try to splice() a second time as the pipe is not full, thus
+consuming the next chunk size.
+
+This patch also reverts commit baf2a5 ("OPTIM: splice: detect shutdowns...")
+because it introduced a related regression. The issue is that splice() may
+return less data than available also if the pipe is full, so having EPOLLRDHUP
+after splice() returns less than expected is not a sufficient indication that
+the input is empty.
+
+In both cases, the issue may be detected by the presence of "SD" termination
+flags in the logs, and worked around by disabling splicing (using "-dS").
+
+This problem was reported by Sander Klein, and no backport is needed.
+---
+ src/raw_sock.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index ad4a0aa..e030253 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -159,10 +159,7 @@ int raw_sock_to_pipe(struct connection *conn, struct pipe *pipe, unsigned int co
+ 
+ 		retval += ret;
+ 		pipe->data += ret;
+-
+-		/* if a POLL_HUP was present, we've read the last segment */
+-		if ((fdtab[conn->t.sock.fd].ev & (FD_POLL_ERR|FD_POLL_HUP)) == FD_POLL_HUP)
+-			goto out_read0;
++		count -= ret;
+ 
+ 		if (pipe->data >= SPLICE_FULL_HINT || ret >= global.tune.recv_enough) {
+ 			/* We've read enough of it for this time, let's stop before
+-- 
+1.8.1.5
+

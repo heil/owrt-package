@@ -1,0 +1,29 @@
+From 91418063c3a552e979aec74ca248830b111d2520 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 4 Apr 2013 23:05:32 +0200
+Subject: [PATCH 3/6] BUILD: mention in the Makefile that USE_PCRE_JIT is for
+ libpcre >= 8.32
+
+JIT was introduced in 8.20 but it's said everywhere that it was
+significantly improved in 8.32. Let's not tempt users of older
+versions then. BTW the patch was developped on 8.32.
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 68e2ff8..5e12af8 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,7 +14,7 @@
+ #   USE_MY_SPLICE        : redefine the splice syscall if build fails without.
+ #   USE_NETFILTER        : enable netfilter on Linux. Automatic.
+ #   USE_PCRE             : enable use of libpcre for regex. Recommended.
+-#   USE_PCRE_JIT         : enable use of libpcre jit for regex. Recommended.
++#   USE_PCRE_JIT         : enable JIT for faster regex on libpcre >= 8.32
+ #   USE_POLL             : enable poll(). Automatic.
+ #   USE_PRIVATE_CACHE    : disable shared memory cache of ssl sessions.
+ #   USE_REGPARM          : enable regparm optimization. Recommended on x86.
+-- 
+1.8.1.5
+

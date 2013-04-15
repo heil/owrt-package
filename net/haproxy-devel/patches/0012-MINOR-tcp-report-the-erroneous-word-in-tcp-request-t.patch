@@ -1,0 +1,27 @@
+From 33c60dece549953e5e57969b4c8f2cd2d4ea2b3c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 12 Apr 2013 08:26:32 +0200
+Subject: [PATCH 12/13] MINOR: tcp: report the erroneous word in tcp-request
+ track*
+
+We used to report the word after the fetch.
+---
+ src/proto_tcp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 7c03798..97bc33b 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -1124,7 +1124,7 @@ static int tcp_parse_request_rule(char **args, int arg, int section_type,
+ 		if (!(expr->fetch->val & where)) {
+ 			memprintf(err,
+ 			          "'%s %s %s' : fetch method '%s' extracts information from '%s', none of which is available here",
+-			          args[0], args[1], args[kw], args[arg], sample_src_names(expr->fetch->use));
++			          args[0], args[1], args[kw], args[arg-1], sample_src_names(expr->fetch->use));
+ 			free(expr);
+ 			return -1;
+ 		}
+-- 
+1.8.1.5
+
