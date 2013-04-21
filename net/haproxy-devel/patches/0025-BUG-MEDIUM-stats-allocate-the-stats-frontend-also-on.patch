@@ -1,0 +1,38 @@
+From 913195715d83f15abf0247037dc9bfe9cff327f8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 20 Apr 2013 09:48:50 +0200
+Subject: [PATCH 25/26] BUG/MEDIUM: stats: allocate the stats frontend also on
+ "stats bind-process"
+
+Bryan Talbot reported that a config with only "stats bind-process 1" in
+the global section would crash during parsing. This bug was introduced
+with this new statement in 1.5-dev13. The stats frontend must be allocated
+if it was not yet.
+
+No backport is needed. The workaround consists in having previously declared
+any other stats keyword (generally stats socket).
+---
+ src/dumpstats.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 17efeff..25f5441 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -337,6 +337,13 @@ static int stats_parse_global(char **args, int section_type, struct proxy *curpx
+ 		int cur_arg = 2;
+ 		unsigned int set = 0;
+ 
++		if (!global.stats_fe) {
++			if ((global.stats_fe = alloc_stats_fe("GLOBAL", file, line)) == NULL) {
++				memprintf(err, "'%s %s' : out of memory trying to allocate a frontend", args[0], args[1]);
++				return -1;
++			}
++		}
++
+ 		while (*args[cur_arg]) {
+ 			unsigned int low, high;
+ 
+-- 
+1.8.1.5
+
