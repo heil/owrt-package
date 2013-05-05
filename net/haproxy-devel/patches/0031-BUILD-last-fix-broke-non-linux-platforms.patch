@@ -1,0 +1,27 @@
+From c621d36ba3ff8b4ca2907f4dc966cfb13cbf3451 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 25 Apr 2013 17:35:22 +0200
+Subject: [PATCH 31/32] BUILD: last fix broke non-linux platforms
+
+src.tproxy_addr only exists on linux.
+---
+ src/cfgparse.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index efd46bc..6f2850c 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1813,7 +1813,9 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 				curproxy->conn_src.iface_name = strdup(defproxy.conn_src.iface_name);
+ 			curproxy->conn_src.iface_len = defproxy.conn_src.iface_len;
+ 			curproxy->conn_src.opts = defproxy.conn_src.opts;
++#if defined(CONFIG_HAP_CTTPROXY) || defined(CONFIG_HAP_LINUX_TPROXY)
+ 			curproxy->conn_src.tproxy_addr = defproxy.conn_src.tproxy_addr;
++#endif
+ 		}
+ 
+ 		if (curproxy->cap & PR_CAP_FE) {
+-- 
+1.8.1.5
+
