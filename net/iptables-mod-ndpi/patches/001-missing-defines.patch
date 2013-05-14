@@ -38,8 +38,8 @@ Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 +"kerberos","ldap","maplestory","mssql","pptp","warcraft3","wokf","meebo","facebook","twitter",\
 +"dropbox","gmail","gmaps","youtube","skype","google","dcerpc","netflow","sflow","httpconnect",\
 +"httpproxy","citrix","netflix","lastfm","grooveshark","skyfileprepaid","skyfilerudics","skyfilepostpaid","citrixonline","apple",\
-+"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti",\
-+"sap","upnp","llmnr","remotescan"
++"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti","lotusnotes",\
++"sap","gtp","upnp","llmnr","remotescan"
 +
 +
  #define NDPI_DETECTION_SUPPORT_IPV6
