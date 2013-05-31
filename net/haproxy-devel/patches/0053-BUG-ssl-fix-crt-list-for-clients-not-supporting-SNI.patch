@@ -1,0 +1,37 @@
+From 79274e2c4054e9170e570ce1f7d4a9a9725a5811 Mon Sep 17 00:00:00 2001
+From: Emmanuel Hocdet <manu@gandi.net>
+Date: Fri, 31 May 2013 12:47:44 +0200
+Subject: [PATCH 53/53] BUG: ssl: fix crt-list for clients not supporting SNI
+
+I left a mistake in my previous patch bringing the crt-list feature,
+it breaks clients with no SNI support.
+
+Also remove the useless wildp = NULL as per a previous discussion.
+---
+ src/ssl_sock.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index a99fe3f..8a39dad 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -197,7 +197,7 @@ static int ssl_sock_switchctx_cbk(SSL *ssl, int *al, struct bind_conf *s)
+ 	if (!servername) {
+ 		return (s->strict_sni ?
+ 			SSL_TLSEXT_ERR_ALERT_FATAL :
+-			SSL_TLSEXT_ERR_ALERT_WARNING);
++			SSL_TLSEXT_ERR_NOACK);
+ 	}
+ 
+ 	for (i = 0; i < trash.size; i++) {
+@@ -218,7 +218,6 @@ static int ssl_sock_switchctx_cbk(SSL *ssl, int *al, struct bind_conf *s)
+ 			node = n;
+ 			break;
+ 		}
+-		wildp = NULL; /* never match a wildcard after matching a neg */
+ 	}
+ 	if (!node && wildp) {
+ 		/* lookup in wildcards names */
+-- 
+1.8.1.5
+

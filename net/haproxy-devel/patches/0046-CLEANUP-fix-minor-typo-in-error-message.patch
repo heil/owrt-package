@@ -1,0 +1,26 @@
+From b837e68fc9044cb53ebed5a091611b3f6a583d51 Mon Sep 17 00:00:00 2001
+From: Prach Pongpanich <prachpub@gmail.com>
+Date: Tue, 14 May 2013 20:56:28 +0200
+Subject: [PATCH 46/46] CLEANUP: fix minor typo in error message.
+
+"accomodate" => "accommodate".
+---
+ src/haproxy.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 5b5bea4..ac9fba1 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -851,7 +851,7 @@ void init(int argc, char **argv)
+ 		      "  is too low on this platform to support maxconn and the number of listeners\n"
+ 		      "  and servers. You should rebuild haproxy specifying your system using TARGET=\n"
+ 		      "  in order to support other polling systems (poll, epoll, kqueue) or reduce the\n"
+-		      "  global maxconn setting to accomodate the system's limitation. For reference,\n"
++		      "  global maxconn setting to accommodate the system's limitation. For reference,\n"
+ 		      "  FD_SETSIZE=%d on this system, global.maxconn=%d resulting in a maximum of\n"
+ 		      "  %d file descriptors. You should thus reduce global.maxconn by %d. Also,\n"
+ 		      "  check build settings using 'haproxy -vv'.\n\n",
+-- 
+1.8.1.5
+

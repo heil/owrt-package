@@ -1,0 +1,291 @@
+From d5ca9abb0d0b45097a79b8cdeb2aea466106b9e3 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 28 May 2013 17:40:25 +0200
+Subject: [PATCH 49/53] MINOR: counters: make it easier to extend the amount of
+ tracked counters
+
+By properly affecting the flags and values, it becomes easier to add
+more tracked counters, for example for experimentation. It also slightly
+reduces the code and the number of tests. No counters were added with
+this patch.
+---
+ include/proto/proto_tcp.h |  7 +++++++
+ include/proto/session.h   | 16 +++++-----------
+ include/types/proto_tcp.h |  2 +-
+ include/types/session.h   |  9 ++++++---
+ src/cfgparse.c            | 12 ++++++------
+ src/peers.c               |  3 +--
+ src/proto_tcp.c           | 34 ++++++++++------------------------
+ src/session.c             |  6 ++----
+ 8 files changed, 38 insertions(+), 51 deletions(-)
+
+diff --git a/include/proto/proto_tcp.h b/include/proto/proto_tcp.h
+index 08500db..20ae2df 100644
+--- a/include/proto/proto_tcp.h
++++ b/include/proto/proto_tcp.h
+@@ -58,6 +58,13 @@ static inline struct stktable_key *addr_to_stktable_key(struct sockaddr_storage
+ 	return static_table_key;
+ }
+ 
++/* for a tcp-request action TCP_ACT_TRK_*, return a tracking index starting at
++ * zero for SC1. Unknown actions also return zero.
++ */
++static inline int tcp_trk_idx(int trk_action)
++{
++	return trk_action - TCP_ACT_TRK_SC1;
++}
+ 
+ #endif /* _PROTO_PROTO_TCP_H */
+ 
+diff --git a/include/proto/session.h b/include/proto/session.h
+index 3b6e1fc..5188639 100644
+--- a/include/proto/session.h
++++ b/include/proto/session.h
+@@ -80,17 +80,14 @@ static inline void session_stop_backend_counters(struct session *s)
+ 	void *ptr;
+ 	int i;
+ 
+-	if (!(s->flags & (SN_BE_TRACK_SC1|SN_BE_TRACK_SC2)))
++	if (likely(!(s->flags & SN_BE_TRACK_ANY)))
+ 		return;
+ 
+ 	for (i = 0; i < sizeof(s->stkctr) / sizeof(s->stkctr[0]); i++) {
+ 		if (!s->stkctr[i].entry)
+ 			continue;
+ 
+-		if ((i == 0) && !(s->flags & SN_BE_TRACK_SC1))
+-			continue;
+-
+-		if ((i == 1) && !(s->flags & SN_BE_TRACK_SC2))
++		if (!(s->flags & (SN_BE_TRACK_SC1 << i)))
+ 			continue;
+ 
+ 		ptr = stktable_data_ptr(s->stkctr[i].table, s->stkctr[i].entry, STKTABLE_DT_CONN_CUR);
+@@ -100,7 +97,7 @@ static inline void session_stop_backend_counters(struct session *s)
+ 		stksess_kill_if_expired(s->stkctr[i].table, s->stkctr[i].entry);
+ 		s->stkctr[i].entry = NULL;
+ 	}
+-	s->flags &= ~(SN_BE_TRACK_SC1|SN_BE_TRACK_SC2);
++	s->flags &= ~SN_BE_TRACK_ANY;
+ }
+ 
+ /* Increase total and concurrent connection count for stick entry <ts> of table
+@@ -169,17 +166,14 @@ static void inline session_inc_be_http_req_ctr(struct session *s)
+ 	void *ptr;
+ 	int i;
+ 
+-	if (likely(!(s->flags & (SN_BE_TRACK_SC1|SN_BE_TRACK_SC2))))
++	if (likely(!(s->flags & SN_BE_TRACK_ANY)))
+ 		return;
+ 
+ 	for (i = 0; i < sizeof(s->stkctr) / sizeof(s->stkctr[0]); i++) {
+ 		if (!s->stkctr[i].entry)
+ 			continue;
+ 
+-		if ((i == 0) && !(s->flags & SN_BE_TRACK_SC1))
+-			continue;
+-
+-		if ((i == 1) && !(s->flags & SN_BE_TRACK_SC2))
++		if (!(s->flags & (SN_BE_TRACK_SC1 << i)))
+ 			continue;
+ 
+ 		ptr = stktable_data_ptr(s->stkctr[i].table, s->stkctr[i].entry, STKTABLE_DT_HTTP_REQ_CNT);
+diff --git a/include/types/proto_tcp.h b/include/types/proto_tcp.h
+index 0ee2ec7..74863b4 100644
+--- a/include/types/proto_tcp.h
++++ b/include/types/proto_tcp.h
+@@ -32,7 +32,7 @@
+ enum {
+ 	TCP_ACT_ACCEPT = 1,
+ 	TCP_ACT_REJECT = 2,
+-	TCP_ACT_TRK_SC1 = 3,
++	TCP_ACT_TRK_SC1 = 3, /* TCP request tracking : must be contiguous */
+ 	TCP_ACT_TRK_SC2 = 4,
+ };
+ 
+diff --git a/include/types/session.h b/include/types/session.h
+index 7b52182..b5c7460 100644
+--- a/include/types/session.h
++++ b/include/types/session.h
+@@ -86,10 +86,13 @@
+ #define	SN_FINST_SHIFT	16		/* bit shift */
+ 
+ #define SN_IGNORE_PRST	0x00080000	/* ignore persistence */
+-#define SN_BE_TRACK_SC1 0x00100000	/* backend tracks stick-counter 1 */
+-#define SN_BE_TRACK_SC2 0x00200000	/* backend tracks stick-counter 2 */
+ 
+-#define SN_COMP_READY   0x00400000	/* the compression is initialized */
++#define SN_COMP_READY   0x00100000	/* the compression is initialized */
++
++/* session tracking flags: these ones must absolutely be contiguous */
++#define SN_BE_TRACK_SC1 0x00200000	/* backend tracks stick-counter 1 */
++#define SN_BE_TRACK_SC2 0x00400000	/* backend tracks stick-counter 2 */
++#define SN_BE_TRACK_ANY 0x00600000      /* union of all SN_BE_TRACK_* above */
+ 
+ 
+ /* WARNING: if new fields are added, they must be initialized in event_accept()
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 9907bfd..18fcedc 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6335,7 +6335,7 @@ int check_config_validity()
+ 		list_for_each_entry(trule, &curproxy->tcp_req.l4_rules, list) {
+ 			struct proxy *target;
+ 
+-			if (trule->action != TCP_ACT_TRK_SC1 && trule->action != TCP_ACT_TRK_SC2)
++			if (trule->action < TCP_ACT_TRK_SC1 || trule->action > TCP_ACT_TRK_SC2)
+ 				continue;
+ 
+ 			if (trule->act_prm.trk_ctr.table.n)
+@@ -6346,7 +6346,7 @@ int check_config_validity()
+ 			if (!target) {
+ 				Alert("Proxy '%s': unable to find table '%s' referenced by track-sc%d.\n",
+ 				      curproxy->id, trule->act_prm.trk_ctr.table.n,
+-				      trule->action == TCP_ACT_TRK_SC1 ? 1 : 2);
++				      1 + tcp_trk_idx(trule->action));
+ 				cfgerr++;
+ 			}
+ 			else if (target->table.size == 0) {
+@@ -6357,7 +6357,7 @@ int check_config_validity()
+ 			else if (!stktable_compatible_sample(trule->act_prm.trk_ctr.expr,  target->table.type)) {
+ 				Alert("Proxy '%s': stick-table '%s' uses a type incompatible with the 'track-sc%d' rule.\n",
+ 				      curproxy->id, trule->act_prm.trk_ctr.table.n ? trule->act_prm.trk_ctr.table.n : curproxy->id,
+-				      trule->action == TCP_ACT_TRK_SC1 ? 1 : 2);
++				      1 + tcp_trk_idx(trule->action));
+ 				cfgerr++;
+ 			}
+ 			else {
+@@ -6374,7 +6374,7 @@ int check_config_validity()
+ 		list_for_each_entry(trule, &curproxy->tcp_req.inspect_rules, list) {
+ 			struct proxy *target;
+ 
+-			if (trule->action != TCP_ACT_TRK_SC1 && trule->action != TCP_ACT_TRK_SC2)
++			if (trule->action < TCP_ACT_TRK_SC1 || trule->action > TCP_ACT_TRK_SC2)
+ 				continue;
+ 
+ 			if (trule->act_prm.trk_ctr.table.n)
+@@ -6385,7 +6385,7 @@ int check_config_validity()
+ 			if (!target) {
+ 				Alert("Proxy '%s': unable to find table '%s' referenced by track-sc%d.\n",
+ 				      curproxy->id, trule->act_prm.trk_ctr.table.n,
+-				      trule->action == TCP_ACT_TRK_SC1 ? 1 : 2);
++				      1 + tcp_trk_idx(trule->action));
+ 				cfgerr++;
+ 			}
+ 			else if (target->table.size == 0) {
+@@ -6396,7 +6396,7 @@ int check_config_validity()
+ 			else if (!stktable_compatible_sample(trule->act_prm.trk_ctr.expr,  target->table.type)) {
+ 				Alert("Proxy '%s': stick-table '%s' uses a type incompatible with the 'track-sc%d' rule.\n",
+ 				      curproxy->id, trule->act_prm.trk_ctr.table.n ? trule->act_prm.trk_ctr.table.n : curproxy->id,
+-				      trule->action == TCP_ACT_TRK_SC1 ? 1 : 2);
++				      1 + tcp_trk_idx(trule->action));
+ 				cfgerr++;
+ 			}
+ 			else {
+diff --git a/src/peers.c b/src/peers.c
+index 5e4ff35..61fb938 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1178,8 +1178,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 
+ 	/* init store persistence */
+ 	s->store_count = 0;
+-	s->stkctr[0].entry = NULL;
+-	s->stkctr[1].entry = NULL;
++	memset(s->stkctr, 0, sizeof(s->stkctr));
+ 
+ 	/* FIXME: the logs are horribly complicated now, because they are
+ 	 * defined in <p>, <p>, and later <be> and <be>.
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 5638257..86a67c4 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -901,8 +901,8 @@ int tcp_inspect_request(struct session *s, struct channel *req, int an_bit)
+ 					s->flags |= SN_FINST_R;
+ 				return 0;
+ 			}
+-			else if ((rule->action == TCP_ACT_TRK_SC1 && !s->stkctr[0].entry) ||
+-			         (rule->action == TCP_ACT_TRK_SC2 && !s->stkctr[1].entry)) {
++			else if ((rule->action >= TCP_ACT_TRK_SC1 && rule->action <= TCP_ACT_TRK_SC2) &&
++				 !s->stkctr[tcp_trk_idx(rule->action)].entry) {
+ 				/* Note: only the first valid tracking parameter of each
+ 				 * applies.
+ 				 */
+@@ -912,15 +912,9 @@ int tcp_inspect_request(struct session *s, struct channel *req, int an_bit)
+ 				key = stktable_fetch_key(t, s->be, s, &s->txn, SMP_OPT_DIR_REQ|SMP_OPT_FINAL, rule->act_prm.trk_ctr.expr);
+ 
+ 				if (key && (ts = stktable_get_entry(t, key))) {
+-					if (rule->action == TCP_ACT_TRK_SC1) {
+-						session_track_stkctr(&s->stkctr[0], t, ts);
+-						if (s->fe != s->be)
+-							s->flags |= SN_BE_TRACK_SC1;
+-					} else {
+-						session_track_stkctr(&s->stkctr[1], t, ts);
+-						if (s->fe != s->be)
+-							s->flags |= SN_BE_TRACK_SC2;
+-					}
++					session_track_stkctr(&s->stkctr[tcp_trk_idx(rule->action)], t, ts);
++					if (s->fe != s->be)
++						s->flags |= SN_BE_TRACK_SC1 << tcp_trk_idx(rule->action);
+ 				}
+ 			}
+ 			else {
+@@ -1061,8 +1055,8 @@ int tcp_exec_req_rules(struct session *s)
+ 				result = 0;
+ 				break;
+ 			}
+-			else if ((rule->action == TCP_ACT_TRK_SC1 && !s->stkctr[0].entry) ||
+-			         (rule->action == TCP_ACT_TRK_SC2 && !s->stkctr[1].entry)) {
++			else if ((rule->action >= TCP_ACT_TRK_SC1 && rule->action <= TCP_ACT_TRK_SC2) &&
++				 !s->stkctr[tcp_trk_idx(rule->action)].entry) {
+ 				/* Note: only the first valid tracking parameter of each
+ 				 * applies.
+ 				 */
+@@ -1071,12 +1065,8 @@ int tcp_exec_req_rules(struct session *s)
+ 				t = rule->act_prm.trk_ctr.table.t;
+ 				key = stktable_fetch_key(t, s->be, s, &s->txn, SMP_OPT_DIR_REQ|SMP_OPT_FINAL, rule->act_prm.trk_ctr.expr);
+ 
+-				if (key && (ts = stktable_get_entry(t, key))) {
+-					if (rule->action == TCP_ACT_TRK_SC1)
+-						session_track_stkctr(&s->stkctr[0], t, ts);
+-					else
+-						session_track_stkctr(&s->stkctr[1], t, ts);
+-				}
++				if (key && (ts = stktable_get_entry(t, key)))
++					session_track_stkctr(&s->stkctr[tcp_trk_idx(rule->action)], t, ts);
+ 			}
+ 			else {
+ 				/* otherwise it's an accept */
+@@ -1193,11 +1183,7 @@ static int tcp_parse_request_rule(char **args, int arg, int section_type,
+ 			arg++;
+ 		}
+ 		rule->act_prm.trk_ctr.expr = expr;
+-
+-		if (args[kw][8] == '1')
+-			rule->action = TCP_ACT_TRK_SC1;
+-		else
+-			rule->action = TCP_ACT_TRK_SC2;
++		rule->action = TCP_ACT_TRK_SC1 + args[kw][8] - '1';
+ 	}
+ 	else {
+ 		memprintf(err,
+diff --git a/src/session.c b/src/session.c
+index d44583b..404fd06 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -97,10 +97,8 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	 */
+ 	s->flags = 0;
+ 	s->logs.logwait = p->to_log;
+-	s->stkctr[0].entry = NULL;
+-	s->stkctr[1].entry = NULL;
+-	s->stkctr[0].table = NULL;
+-	s->stkctr[1].table = NULL;
++
++	memset(s->stkctr, 0, sizeof(s->stkctr));
+ 
+ 	s->listener = l;
+ 	s->fe  = p;
+-- 
+1.8.1.5
+

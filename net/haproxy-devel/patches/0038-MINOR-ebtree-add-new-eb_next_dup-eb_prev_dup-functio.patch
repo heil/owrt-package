@@ -1,0 +1,207 @@
+From 2b5702030daf1f6394cc7c7e0c2cda9ef90ae2e1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 7 May 2013 15:58:28 +0200
+Subject: [PATCH 38/40] MINOR: ebtree: add new eb_next_dup/eb_prev_dup()
+ functions to visit duplicates
+
+Sometimes it's very useful to visit duplicates of a same node, but doing
+so from the application is not convenient because keys have to be compared,
+while all the information is available during the next/prev steps.
+
+Let's introduce a couple of new eb_next_dup/eb_prev_dup functions to visit
+only duplicates of the current node and return NULL once it's done. Now we
+have all 3 combinations :
+  - next        : returns next node in the tree
+  - next_dup    : returns next dup in the sub-tree
+  - next_unique : returns next value after skipping dups
+
+(cherry picked from commit 3327b8ae6866f3878322a1a29e70b450226d216d)
+---
+ ebtree/eb32tree.h | 12 +++++++++++
+ ebtree/eb64tree.h | 12 +++++++++++
+ ebtree/ebmbtree.h | 12 +++++++++++
+ ebtree/ebpttree.h | 12 +++++++++++
+ ebtree/ebtree.h   | 61 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 109 insertions(+)
+
+diff --git a/ebtree/eb32tree.h b/ebtree/eb32tree.h
+index f36f09a..f33eb86 100644
+--- a/ebtree/eb32tree.h
++++ b/ebtree/eb32tree.h
+@@ -74,6 +74,18 @@ static inline struct eb32_node *eb32_prev(struct eb32_node *eb32)
+ 	return eb32_entry(eb_prev(&eb32->node), struct eb32_node, node);
+ }
+ 
++/* Return next leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb32_node *eb32_next_dup(struct eb32_node *eb32)
++{
++	return eb32_entry(eb_next_dup(&eb32->node), struct eb32_node, node);
++}
++
++/* Return previous leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb32_node *eb32_prev_dup(struct eb32_node *eb32)
++{
++	return eb32_entry(eb_prev_dup(&eb32->node), struct eb32_node, node);
++}
++
+ /* Return next node in the tree, skipping duplicates, or NULL if none */
+ static inline struct eb32_node *eb32_next_unique(struct eb32_node *eb32)
+ {
+diff --git a/ebtree/eb64tree.h b/ebtree/eb64tree.h
+index b97e0c4..2ab833f 100644
+--- a/ebtree/eb64tree.h
++++ b/ebtree/eb64tree.h
+@@ -74,6 +74,18 @@ static inline struct eb64_node *eb64_prev(struct eb64_node *eb64)
+ 	return eb64_entry(eb_prev(&eb64->node), struct eb64_node, node);
+ }
+ 
++/* Return next leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb64_node *eb64_next_dup(struct eb64_node *eb64)
++{
++	return eb64_entry(eb_next_dup(&eb64->node), struct eb64_node, node);
++}
++
++/* Return previous leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb64_node *eb64_prev_dup(struct eb64_node *eb64)
++{
++	return eb64_entry(eb_prev_dup(&eb64->node), struct eb64_node, node);
++}
++
+ /* Return next node in the tree, skipping duplicates, or NULL if none */
+ static inline struct eb64_node *eb64_next_unique(struct eb64_node *eb64)
+ {
+diff --git a/ebtree/ebmbtree.h b/ebtree/ebmbtree.h
+index fa25ac5..48dc130 100644
+--- a/ebtree/ebmbtree.h
++++ b/ebtree/ebmbtree.h
+@@ -72,6 +72,18 @@ static forceinline struct ebmb_node *ebmb_prev(struct ebmb_node *ebmb)
+ 	return ebmb_entry(eb_prev(&ebmb->node), struct ebmb_node, node);
+ }
+ 
++/* Return next leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct ebmb_node *ebmb_next_dup(struct ebmb_node *ebmb)
++{
++	return ebmb_entry(eb_next_dup(&ebmb->node), struct ebmb_node, node);
++}
++
++/* Return previous leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct ebmb_node *ebmb_prev_dup(struct ebmb_node *ebmb)
++{
++	return ebmb_entry(eb_prev_dup(&ebmb->node), struct ebmb_node, node);
++}
++
+ /* Return next node in the tree, skipping duplicates, or NULL if none */
+ static forceinline struct ebmb_node *ebmb_next_unique(struct ebmb_node *ebmb)
+ {
+diff --git a/ebtree/ebpttree.h b/ebtree/ebpttree.h
+index 6b52618..a1db03b 100644
+--- a/ebtree/ebpttree.h
++++ b/ebtree/ebpttree.h
+@@ -80,6 +80,18 @@ static forceinline struct ebpt_node *ebpt_prev(struct ebpt_node *ebpt)
+ 	return ebpt_entry(eb_prev(&ebpt->node), struct ebpt_node, node);
+ }
+ 
++/* Return next leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct ebpt_node *ebpt_next_dup(struct ebpt_node *ebpt)
++{
++	return ebpt_entry(eb_next_dup(&ebpt->node), struct ebpt_node, node);
++}
++
++/* Return previous leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct ebpt_node *ebpt_prev_dup(struct ebpt_node *ebpt)
++{
++	return ebpt_entry(eb_prev_dup(&ebpt->node), struct ebpt_node, node);
++}
++
+ /* Return next node in the tree, skipping duplicates, or NULL if none */
+ static forceinline struct ebpt_node *ebpt_next_unique(struct ebpt_node *ebpt)
+ {
+diff --git a/ebtree/ebtree.h b/ebtree/ebtree.h
+index eb7d021..e5bcb50 100644
+--- a/ebtree/ebtree.h
++++ b/ebtree/ebtree.h
+@@ -321,6 +321,16 @@ static inline int fls64(unsigned long long x)
+ #define container_of(ptr, type, name) ((type *)(((void *)(ptr)) - ((long)&((type *)0)->name)))
+ #endif
+ 
++/* returns a pointer to the structure of type <type> which has its member <name>
++ * stored at address <ptr>, unless <ptr> is 0, in which case 0 is returned.
++ */
++#ifndef container_of_safe
++#define container_of_safe(ptr, type, name) \
++	({ void *__p = (ptr); \
++		__p ? (type *)(__p - ((long)&((type *)0)->name)) : (type *)0; \
++	})
++#endif
++
+ /* Number of bits per node, and number of leaves per node */
+ #define EB_NODE_BITS          1
+ #define EB_NODE_BRANCHES      (1 << EB_NODE_BITS)
+@@ -515,6 +525,12 @@ static inline int eb_is_empty(struct eb_root *root)
+ 	return !root->b[EB_LEFT];
+ }
+ 
++/* Return non-zero if the node is a duplicate, otherwise zero */
++static inline int eb_is_dup(struct eb_node *node)
++{
++	return node->bit < 0;
++}
++
+ /* Return the first leaf in the tree starting at <root>, or NULL if none */
+ static inline struct eb_node *eb_first(struct eb_root *root)
+ {
+@@ -561,6 +577,51 @@ static inline struct eb_node *eb_next(struct eb_node *node)
+ 	return eb_walk_down(t, EB_LEFT);
+ }
+ 
++/* Return previous leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb_node *eb_prev_dup(struct eb_node *node)
++{
++	eb_troot_t *t = node->leaf_p;
++
++	while (eb_gettag(t) == EB_LEFT) {
++		/* Walking up from left branch. We must ensure that we never
++		 * walk beyond root.
++		 */
++		if (unlikely(eb_clrtag((eb_untag(t, EB_LEFT))->b[EB_RGHT]) == NULL))
++			return NULL;
++		/* if the current node leaves a dup tree, quit */
++		if ((eb_root_to_node(eb_untag(t, EB_LEFT)))->bit >= 0)
++			return NULL;
++		t = (eb_root_to_node(eb_untag(t, EB_LEFT)))->node_p;
++	}
++	/* Note that <t> cannot be NULL at this stage */
++	if ((eb_root_to_node(eb_untag(t, EB_RGHT)))->bit >= 0)
++		return NULL;
++	t = (eb_untag(t, EB_RGHT))->b[EB_LEFT];
++	return eb_walk_down(t, EB_RGHT);
++}
++
++/* Return next leaf node within a duplicate sub-tree, or NULL if none. */
++static inline struct eb_node *eb_next_dup(struct eb_node *node)
++{
++	eb_troot_t *t = node->leaf_p;
++
++	while (eb_gettag(t) != EB_LEFT) {
++		/* Walking up from right branch, so we cannot be below root */
++		/* if the current node leaves a dup tree, quit */
++		if ((eb_root_to_node(eb_untag(t, EB_RGHT)))->bit >= 0)
++			return NULL;
++		t = (eb_root_to_node(eb_untag(t, EB_RGHT)))->node_p;
++	}
++
++	/* Note that <t> cannot be NULL at this stage */
++	if ((eb_root_to_node(eb_untag(t, EB_LEFT)))->bit >= 0)
++		return NULL;
++	t = (eb_untag(t, EB_LEFT))->b[EB_RGHT];
++	if (eb_clrtag(t) == NULL)
++		return NULL;
++	return eb_walk_down(t, EB_LEFT);
++}
++
+ /* Return previous leaf node before an existing leaf node, skipping duplicates,
+  * or NULL if none. */
+ static inline struct eb_node *eb_prev_unique(struct eb_node *node)
+-- 
+1.8.1.5
+

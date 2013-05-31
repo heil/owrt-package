@@ -1,0 +1,88 @@
+From 1eb7592bba5ea06186f7f2f3b688648332affc48 Mon Sep 17 00:00:00 2001
+From: Pieter Baauw <piba.nl.dev@gmail.com>
+Date: Wed, 8 May 2013 23:30:23 +0200
+Subject: [PATCH 43/46] MINOR: tproxy: add support for OpenBSD
+
+OpenBSD uses (SOL_SOCKET, SO_BINDANY) to enable transparent
+proxy on a socket.
+
+This patch adds support for the relevant setsockopt() calls.
+---
+ include/common/compat.h |  1 +
+ src/haproxy.c           |  3 +++
+ src/proto_tcp.c         | 12 ++++++++++++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/include/common/compat.h b/include/common/compat.h
+index efc2a6e..0085a3a 100644
+--- a/include/common/compat.h
++++ b/include/common/compat.h
+@@ -96,6 +96,7 @@
+ #if defined(IP_FREEBIND)       \
+  || defined(IP_BINDANY)        \
+  || defined(IPV6_BINDANY)      \
++ || defined(SO_BINDANY)        \
+  || defined(IP_TRANSPARENT)    \
+  || defined(IPV6_TRANSPARENT)
+ #define CONFIG_HAP_TRANSPARENT
+diff --git a/src/haproxy.c b/src/haproxy.c
+index ee0bd65..5b5bea4 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -333,6 +333,9 @@ void display_build_opts()
+ #if defined(IPV6_BINDANY)
+ 	       " IPV6_BINDANY"
+ #endif
++#if defined(SO_BINDANY)
++	       " SO_BINDANY"
++#endif
+ 	       "\n");
+ #endif
+ 	putchar('\n');
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 0ae359a..5638257 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -142,6 +142,9 @@ int tcp_bind_socket(int fd, int flags, struct sockaddr_storage *local, struct so
+ #if defined(IP_BINDANY)
+ 			    || (setsockopt(fd, IPPROTO_IP, IP_BINDANY, &one, sizeof(one)) == 0)
+ #endif
++#if defined(SO_BINDANY)
++			    || (setsockopt(fd, SOL_SOCKET, SO_BINDANY, &one, sizeof(one)) == 0)
++#endif
+ 			    )
+ 				foreign_ok = 1;
+ 			else
+@@ -157,6 +160,9 @@ int tcp_bind_socket(int fd, int flags, struct sockaddr_storage *local, struct so
+ #if defined(IPV6_BINDANY)
+ 			    || (setsockopt(fd, IPPROTO_IPV6, IPV6_BINDANY, &one, sizeof(one)) == 0)
+ #endif
++#if defined(SO_BINDANY)
++			    || (setsockopt(fd, SOL_SOCKET, SO_BINDANY, &one, sizeof(one)) == 0)
++#endif
+ 			    )
+ 				foreign_ok = 1;
+ 			else
+@@ -654,6 +660,9 @@ int tcp_bind_listener(struct listener *listener, char *errmsg, int errlen)
+ #if defined(IP_BINDANY)
+ 			    && (setsockopt(fd, IPPROTO_IP, IP_BINDANY, &one, sizeof(one)) == -1)
+ #endif
++#if defined(SO_BINDANY)
++			    && (setsockopt(fd, SOL_SOCKET, SO_BINDANY, &one, sizeof(one)) == -1)
++#endif
+ 			    ) {
+ 				msg = "cannot make listening socket transparent";
+ 				err |= ERR_ALERT;
+@@ -667,6 +676,9 @@ int tcp_bind_listener(struct listener *listener, char *errmsg, int errlen)
+ #if defined(IPV6_BINDANY)
+ 			    && (setsockopt(fd, IPPROTO_IPV6, IPV6_BINDANY, &one, sizeof(one)) == -1)
+ #endif
++#if defined(SO_BINDANY)
++			    && (setsockopt(fd, SOL_SOCKET, SO_BINDANY, &one, sizeof(one)) == -1)
++#endif
+ 			    ) {
+ 				msg = "cannot make listening socket transparent";
+ 				err |= ERR_ALERT;
+-- 
+1.8.1.5
+

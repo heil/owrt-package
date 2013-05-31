@@ -38,7 +38,7 @@ define Package/iptables-mod-ndpi/description
 endef
 
 define Download/ndpi-netfilter
-  VERSION:=49517db15bbe11ca4d73c4d9fdf80314f2173502
+  VERSION:=a36ef68a19ad7c518022fff326ef859688636a96
   #VERSION:=81093ac2fd55be69e926d1208c97d898d8f9692e
   #VERSION:=9bf95d159586d5c2bbf517dae80bfa4c3bcd8937
   FILE:=ndpi-netfilter-$(PKG_VERSION).tar.gz
