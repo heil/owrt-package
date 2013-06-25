@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=varnish
-PKG_VERSION:=3.0.3
+PKG_VERSION:=3.0.4
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://repo.varnish-cache.org/source/
-PKG_MD5SUM:=714310c83fdbd2061d897dacd3f63d8b
+PKG_MD5SUM:=a130ce9c3504b9603a46542635e18701
 
 PKG_FIXUP:=autoreconf
 
@@ -25,7 +25,7 @@ define Package/varnish
   CATEGORY:=Network
   TITLE:=VARNISH CACHE make Websites fly
   URL:=http://www.varnish-cache.org/
-  DEPENDS:=+libpcre +libltdl +libncurses +logrotate +librt +bash +gcc-native +zlib  +libelf
+  DEPENDS:=+libpcre +libltdl +libncurses +logrotate +librt +bash +gcc-native +zlib  +libelf +libreadline
 endef
 
 define Package/varnish/description

@@ -1,0 +1,66 @@
+From 430f291a9940a24cbf1cf045eab6719344c70df9 Mon Sep 17 00:00:00 2001
+From: Godbach <nylzhaowei@gmail.com>
+Date: Thu, 20 Jun 2013 13:28:38 +0800
+Subject: [PATCH] CLEANUP: session: remove event_accept() which was not used
+ anymore
+
+Remove event_accept() in include/proto/proto_http.h and use correct function
+name in other two files instead of event_accept().
+
+Signed-off-by: Godbach <nylzhaowei@gmail.com>
+---
+ include/proto/proto_http.h | 1 -
+ include/types/session.h    | 2 +-
+ src/peers.c                | 4 ++--
+ 3 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 24e3581..979219e 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -63,7 +63,6 @@ extern char *get_http_auth_buff;
+ #define HTTP_IS_TOKEN(x) (http_is_token[(unsigned char)(x)])
+ #define HTTP_IS_VER_TOKEN(x) (http_is_ver_token[(unsigned char)(x)])
+ 
+-int event_accept(int fd);
+ int process_cli(struct session *t);
+ int process_srv_data(struct session *t);
+ int process_srv_conn(struct session *t);
+diff --git a/include/types/session.h b/include/types/session.h
+index 00ed4cb..42d37db 100644
+--- a/include/types/session.h
++++ b/include/types/session.h
+@@ -97,7 +97,7 @@
+ #define SN_BE_TRACK_ANY 0x00E00000      /* union of all SN_BE_TRACK_* above */
+ 
+ 
+-/* WARNING: if new fields are added, they must be initialized in event_accept()
++/* WARNING: if new fields are added, they must be initialized in session_accept()
+  * and freed in session_free() !
+  */
+ 
+diff --git a/src/peers.c b/src/peers.c
+index 998e61d..83781ba 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1094,7 +1094,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	struct task *t;
+ 
+ 	if ((s = pool_alloc2(pool2_session)) == NULL) { /* disable this proxy for a while */
+-		Alert("out of memory in event_accept().\n");
++		Alert("out of memory in peer_session_create().\n");
+ 		goto out_close;
+ 	}
+ 
+@@ -1113,7 +1113,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	 * it as soon as possible, which means closing it immediately for TCP.
+ 	 */
+ 	if ((t = task_new()) == NULL) { /* disable this proxy for a while */
+-		Alert("out of memory in event_accept().\n");
++		Alert("out of memory in peer_session_create().\n");
+ 		goto out_free_session;
+ 	}
+ 
+-- 
+1.8.1.5
+
