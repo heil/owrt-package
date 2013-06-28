@@ -1,0 +1,57 @@
+From 2dd1d1a93f70dddc0636f5cb2f5921998dc91e65 Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Wed, 19 Jun 2013 23:34:41 +0200
+Subject: [PATCH 4/7] BUG/MINOR: http: fix "set-tos" not working in certain
+ configurations
+
+s->req->prod->conn->addr.to.ss_family contains only useful data if
+conn_get_to_addr() is called early. If thats not the case (nothing in the
+configuration needs the destination address like logs, transparent, ...)
+then "set-tos" doesn't work.
+
+Fix this by checking s->req->prod->conn->addr.from.ss_family instead.
+Also fix a minor doc issue about set-tos in http-response.
+---
+ doc/configuration.txt | 3 ++-
+ src/proto_http.c      | 4 ++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index dddb07e..675bb8e 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2803,7 +2803,8 @@ http-request { allow | deny | tarpit | auth [realm <realm>] | redirect <rule> |
+ 
+ http-response { allow | deny | add-header <name> <fmt> | set-nice <nice> |
+                 set-header <name> <fmt> | set-log-level <level> |
+-                set-mark <mark> } [ { if | unless } <condition> ]
++                set-mark <mark> | set-tos <tos> }
++              [ { if | unless } <condition> ]
+   Access control for Layer 7 responses
+ 
+   May be used in sections:   defaults | frontend | listen | backend
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 8d98440..d21bd8a 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3213,7 +3213,7 @@ http_req_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 
+ 		case HTTP_REQ_ACT_SET_TOS:
+ #ifdef IP_TOS
+-			if (s->req->prod->conn->addr.to.ss_family == AF_INET)
++			if (s->req->prod->conn->addr.from.ss_family == AF_INET)
+ 				setsockopt(s->req->prod->conn->t.sock.fd, IPPROTO_IP, IP_TOS, &rule->arg.tos, sizeof(rule->arg.tos));
+ #endif
+ 			break;
+@@ -3299,7 +3299,7 @@ http_res_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 
+ 		case HTTP_RES_ACT_SET_TOS:
+ #ifdef IP_TOS
+-			if (s->req->prod->conn->addr.to.ss_family == AF_INET)
++			if (s->req->prod->conn->addr.from.ss_family == AF_INET)
+ 				setsockopt(s->req->prod->conn->t.sock.fd, IPPROTO_IP, IP_TOS, &rule->arg.tos, sizeof(rule->arg.tos));
+ #endif
+ 			break;
+-- 
+1.8.1.5
+

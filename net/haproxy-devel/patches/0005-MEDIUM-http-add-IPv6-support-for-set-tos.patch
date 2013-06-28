@@ -1,0 +1,97 @@
+From 67db8df12ba640f639492e23d554a9cd09dfe8ad Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Sun, 23 Jun 2013 17:37:13 +0200
+Subject: [PATCH 5/7] MEDIUM: http: add IPv6 support for "set-tos"
+
+As per RFC3260 #4 and BCP37 #4.2 and #5.2, the IPv6 counterpart of TOS
+is "traffic class".
+
+Add support for IPv6 traffic class in "set-tos" by moving the "set-tos"
+related code to the new inline function inet_set_tos(), handling IPv4
+(IP_TOS), IPv6 (IPV6_TCLASS) and IPv4-mapped sockets (IP_TOS, like
+::ffff:127.0.0.1).
+
+Also define - if missing - the IN6_IS_ADDR_V4MAPPED() macro in
+include/common/compat.h for compatibility.
+---
+ include/common/compat.h |  8 ++++++++
+ src/proto_http.c        | 30 ++++++++++++++++++++++--------
+ 2 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/include/common/compat.h b/include/common/compat.h
+index a0764b1..48ea1f7 100644
+--- a/include/common/compat.h
++++ b/include/common/compat.h
+@@ -129,6 +129,14 @@
+ #endif
+ #endif
+ 
++/* If IPv6 is supported, define IN6_IS_ADDR_V4MAPPED() if missing. */
++#if defined(IPV6_TCLASS) && !defined(IN6_IS_ADDR_V4MAPPED)
++#define IN6_IS_ADDR_V4MAPPED(a) \
++((((const uint32_t *) (a))[0] == 0) \
++&& (((const uint32_t *) (a))[1] == 0) \
++&& (((const uint32_t *) (a))[2] == htonl (0xffff)))
++#endif
++
+ #if defined(__dietlibc__)
+ #include <strings.h>
+ #endif
+diff --git a/src/proto_http.c b/src/proto_http.c
+index d21bd8a..8c336e6 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3158,6 +3158,26 @@ int http_handle_stats(struct session *s, struct channel *req)
+ 	return 1;
+ }
+ 
++/* Sets the TOS header in IPv4 and the traffic class header in IPv6 packets
++ * (as per RFC3260 #4 and BCP37 #4.2 and #5.2).
++ */
++static inline void inet_set_tos(int fd, struct sockaddr_storage from, int tos)
++{
++#ifdef IP_TOS
++	if (from.ss_family == AF_INET)
++		setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
++#endif
++#ifdef IPV6_TCLASS
++	if (from.ss_family == AF_INET6) {
++		if (IN6_IS_ADDR_V4MAPPED(&((struct sockaddr_in6 *)&from)->sin6_addr))
++			/* v4-mapped addresses need IP_TOS */
++			setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
++		else
++			setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof(tos));
++	}
++#endif
++}
++
+ /* Executes the http-request rules <rules> for session <s>, proxy <px> and
+  * transaction <txn>. Returns the first rule that prevents further processing
+  * of the request (auth, deny, ...) or NULL if it executed all rules or stopped
+@@ -3212,10 +3232,7 @@ http_req_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_TOS:
+-#ifdef IP_TOS
+-			if (s->req->prod->conn->addr.from.ss_family == AF_INET)
+-				setsockopt(s->req->prod->conn->t.sock.fd, IPPROTO_IP, IP_TOS, &rule->arg.tos, sizeof(rule->arg.tos));
+-#endif
++			inet_set_tos(s->req->prod->conn->t.sock.fd, s->req->prod->conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_MARK:
+@@ -3298,10 +3315,7 @@ http_res_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_TOS:
+-#ifdef IP_TOS
+-			if (s->req->prod->conn->addr.from.ss_family == AF_INET)
+-				setsockopt(s->req->prod->conn->t.sock.fd, IPPROTO_IP, IP_TOS, &rule->arg.tos, sizeof(rule->arg.tos));
+-#endif
++			inet_set_tos(s->req->prod->conn->t.sock.fd, s->req->prod->conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_MARK:
+-- 
+1.8.1.5
+
