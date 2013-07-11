@@ -1,0 +1,28 @@
+From 092502605e47e662669c53292a697c180026424f Mon Sep 17 00:00:00 2001
+From: Godbach <nylzhaowei@gmail.com>
+Date: Tue, 2 Jul 2013 01:19:15 +0800
+Subject: [PATCH 9/9] DOC: minor typo fix in documentation
+
+"http-reqsponse" => "http-response"
+
+Signed-off-by: Godbach <nylzhaowei@gmail.com>
+---
+ doc/configuration.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 8feee6e..5140ff1 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2875,7 +2875,7 @@ http-response { allow | deny | add-header <name> <fmt> | set-nice <nice> |
+ 
+   There is no limit to the number of http-response statements per instance.
+ 
+-  It is important to know that http-reqsponse rules are processed very early in
++  It is important to know that http-response rules are processed very early in
+   the HTTP processing, before "reqdel" or "reqrep" rules. That way, headers
+   added by "add-header"/"set-header" are visible by almost all further ACL
+   rules.
+-- 
+1.8.1.5
+
