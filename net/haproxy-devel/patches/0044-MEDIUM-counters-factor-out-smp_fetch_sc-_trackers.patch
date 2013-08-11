@@ -1,0 +1,104 @@
+From 563eef4e30a6df004d51e3a2d11ca15aebb3342d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 23 Jul 2013 18:32:02 +0200
+Subject: [PATCH 44/50] MEDIUM: counters: factor out smp_fetch_sc*_trackers
+
+smp_fetch_sc0_trackers, smp_fetch_sc1_trackers and smp_fetch_sc2_trackers
+were merged into a single function which relies on the fetch name to decide
+what to return.
+
+This is also a bug fix for this feature which has never worked till its bogus
+introduction by commit "2406db4 MEDIUM: counters: add sc1_trackers/sc2_trackers"
+(1.5-dev10).
+
+Instead of returning the value in the sample, it was returned as the fetch
+result!
+
+There is no need to backport this fix anyway since it's 1.5-specific and
+nobody uses the feature.
+---
+ src/session.c | 41 +++++++++++++----------------------------
+ 1 file changed, 13 insertions(+), 28 deletions(-)
+
+diff --git a/src/session.c b/src/session.c
+index 6198318..9be5faa 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -3098,37 +3098,22 @@ smp_fetch_sc_bytes_out_rate(struct proxy *px, struct session *l4, void *l7, unsi
+ 	return 1;
+ }
+ 
+-/* set temp integer to the number of active trackers on the SC0 entry */
+-static int
+-smp_fetch_sc0_trackers(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+-                       const struct arg *args, struct sample *smp, const char *kw)
+-{
+-	if (!l4->stkctr[0].entry)
+-		return 0;
+-
+-	return l4->stkctr[0].entry->ref_cnt;
+-}
+-
+-/* set temp integer to the number of active trackers on the SC0 entry */
++/* set <smp> to the number of active trackers on the SC entry in the session's
++ * tracked frontend counters. Supports being called as "sc[0-9]_trackers" only.
++ */
+ static int
+-smp_fetch_sc1_trackers(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++smp_fetch_sc_trackers(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                        const struct arg *args, struct sample *smp, const char *kw)
+ {
+-	if (!l4->stkctr[1].entry)
+-		return 0;
+-
+-	return l4->stkctr[1].entry->ref_cnt;
+-}
++	struct stkctr *stkctr = smp_fetch_sc_stkctr(l4, args, kw);
+ 
+-/* set temp integer to the number of active trackers on the SC0 entry */
+-static int
+-smp_fetch_sc2_trackers(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+-                       const struct arg *args, struct sample *smp, const char *kw)
+-{
+-	if (!l4->stkctr[2].entry)
++	if (!stkctr)
+ 		return 0;
+ 
+-	return l4->stkctr[2].entry->ref_cnt;
++	smp->flags = SMP_F_VOL_TEST;
++	smp->type = SMP_T_UINT;
++	smp->data.uint = stkctr->entry->ref_cnt;
++	return 1;
+ }
+ 
+ /* set temp integer to the number of used entries in the table pointed to by expr.
+@@ -3187,7 +3172,7 @@ static struct sample_fetch_kw_list smp_fetch_keywords = {ILH, {
+ 	{ "sc0_sess_cnt",       smp_fetch_sc_sess_cnt,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc0_sess_rate",      smp_fetch_sc_sess_rate,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc0_tracked",        smp_fetch_sc_tracked,         0,           NULL, SMP_T_BOOL, SMP_USE_INTRN, },
+-	{ "sc0_trackers",       smp_fetch_sc0_trackers,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
++	{ "sc0_trackers",       smp_fetch_sc_trackers,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc1_bytes_in_rate",  smp_fetch_sc_bytes_in_rate,   0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc1_bytes_out_rate", smp_fetch_sc_bytes_out_rate,  0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc1_clr_gpc0",       smp_fetch_sc_clr_gpc0,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+@@ -3206,7 +3191,7 @@ static struct sample_fetch_kw_list smp_fetch_keywords = {ILH, {
+ 	{ "sc1_sess_cnt",       smp_fetch_sc_sess_cnt,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc1_sess_rate",      smp_fetch_sc_sess_rate,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc1_tracked",        smp_fetch_sc_tracked,         0,           NULL, SMP_T_BOOL, SMP_USE_INTRN, },
+-	{ "sc1_trackers",       smp_fetch_sc1_trackers,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
++	{ "sc1_trackers",       smp_fetch_sc_trackers,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc2_bytes_in_rate",  smp_fetch_sc_bytes_in_rate,   0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc2_bytes_out_rate", smp_fetch_sc_bytes_out_rate,  0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc2_clr_gpc0",       smp_fetch_sc_clr_gpc0,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+@@ -3225,7 +3210,7 @@ static struct sample_fetch_kw_list smp_fetch_keywords = {ILH, {
+ 	{ "sc2_sess_cnt",       smp_fetch_sc_sess_cnt,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc2_sess_rate",      smp_fetch_sc_sess_rate,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "sc2_tracked",        smp_fetch_sc_tracked,         0,           NULL, SMP_T_BOOL, SMP_USE_INTRN, },
+-	{ "sc2_trackers",       smp_fetch_sc2_trackers,       0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
++	{ "sc2_trackers",       smp_fetch_sc_trackers,        0,           NULL, SMP_T_UINT, SMP_USE_INTRN, },
+ 	{ "src_bytes_in_rate",  smp_fetch_sc_bytes_in_rate,   ARG1(1,TAB), NULL, SMP_T_UINT, SMP_USE_L4CLI, },
+ 	{ "src_bytes_out_rate", smp_fetch_sc_bytes_out_rate,  ARG1(1,TAB), NULL, SMP_T_UINT, SMP_USE_L4CLI, },
+ 	{ "src_clr_gpc0",       smp_fetch_sc_clr_gpc0,        ARG1(1,TAB), NULL, SMP_T_UINT, SMP_USE_L4CLI, },
+-- 
+1.8.1.5
+
