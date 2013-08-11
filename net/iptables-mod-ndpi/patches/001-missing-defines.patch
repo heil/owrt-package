@@ -21,7 +21,7 @@ Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 +"DropBox","Gmail","Google_Maps","YouTube","Skype","Google","DCE_RPC","NetFlow_IPFIX","sFlow","HTTP_Connect_SSL_over_HTTP",\
 +"HTTP_Proxy","Citrix","Netflix","LastFM","Grooveshark","SkyFile_Prepaid","SkyFile_Rudics","SkyFile_Postpaid","CitrixOnline","Apple_iMessage_FaceTime",\
 +"Webex","WhatsApp","Apple_iCloud","Viber","Apple_iTunes","Radius","Windows_Update","TeamViewer","Tuenti","Lotus_Notes",\
-+"SAP","GTP","uPnP","LLMNR","RemoteScan","Spotify","H323","OpenVPN","NOE","CiscoVPN","TeamSpeak","Tor"
++"SAP","GTP","uPnP","LLMNR","RemoteScan","Spotify","H323","OpenVPN","NOE","CiscoVPN","TeamSpeak","Tor","RTCP","RSYNC","Oracle","Corba","UbuntuONE"
 +
 +
 +#define NDPI_PROTOCOL_SHORT_STRING "ukn","ftp","pop","smtp","imap","dns","ipp","http","mdns","ntp","netbios",\
@@ -39,7 +39,7 @@ Index: iptables-mod-ndpi-1.2/src/include/ndpi_protocols_osdpi.h
 +"dropbox","gmail","gmaps","youtube","skype","google","dcerpc","netflow","sflow","httpconnect",\
 +"httpproxy","citrix","netflix","lastfm","grooveshark","skyfileprepaid","skyfilerudics","skyfilepostpaid","citrixonline","apple",\
 +"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti","lotusnotes",\
-+"sap","gtp","upnp","llmnr","remotescan","spotify","h323","openvpn","noe","ciscovpn","teamspeak","tor"
++"sap","gtp","upnp","llmnr","remotescan","spotify","h323","openvpn","noe","ciscovpn","teamspeak","tor","tor","rtcp","rsync","oracle","corba","ubuntuone"
 +
 +
  #define NDPI_DETECTION_SUPPORT_IPV6

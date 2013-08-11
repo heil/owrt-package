@@ -2,12 +2,19 @@ Index: iptables-mod-ndpi-1.3/src/lib/ndpi_main.c
 ===================================================================
 --- iptables-mod-ndpi-1.3.orig/src/lib/ndpi_main.c
 +++ iptables-mod-ndpi-1.3/src/lib/ndpi_main.c
-@@ -34,7 +34,7 @@
+@@ -26,6 +26,7 @@
+ #ifndef __KERNEL__
+ #include <stdlib.h>
+ #include <errno.h>
++#include <time.h>
+ #endif
+ 
+ #include "ndpi_main.h"
+@@ -34,7 +35,6 @@
  
  #include "third_party/include/ahocorasick.h"
  
 -#include <time.h>
-+//#include <time.h>
  
  #ifdef __KERNEL__
  #define printf printk
