@@ -1,0 +1,35 @@
+From 82ffa39bfd34e5680cb65cc0b7ef625c0a274856 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 Aug 2013 17:19:08 +0200
+Subject: [PATCH 54/55] MINOR: config: warn when a server with no specific port
+ uses rdp-cookie
+
+Mathew Levett reported an issue which is a bit nasty and hard to track
+down. RDP cookies contain both the IP and the port, and haproxy matches
+them exactly. So if a server has no port specified (or a remapped port),
+it will never match a port specified in a cookie. Better warn the user
+when this is detected.
+---
+ src/cfgparse.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index d51e1b6..41c1949 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6885,6 +6885,12 @@ out_uri_auth_compat:
+ 				err_code |= ERR_WARN;
+ 			}
+ 
++			if ((newsrv->state & SRV_MAPPORTS) && (curproxy->options2 & PR_O2_RDPC_PRST)) {
++				Warning("config : %s '%s' : RDP cookie persistence will not work for server '%s' because it lacks an explicit port number.\n",
++				        proxy_type_str(curproxy), curproxy->id, newsrv->id);
++				err_code |= ERR_WARN;
++			}
++
+ #if defined(CONFIG_HAP_CTTPROXY) || defined(CONFIG_HAP_TRANSPARENT)
+ 			if (curproxy->mode != PR_MODE_HTTP && newsrv->conn_src.bind_hdr_occ) {
+ 				newsrv->conn_src.bind_hdr_occ = 0;
+-- 
+1.8.1.5
+

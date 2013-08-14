@@ -1,0 +1,37 @@
+From 380110368e11e00579149a0347104d2ff553c1e7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 Aug 2013 16:59:39 +0200
+Subject: [PATCH 53/55] MINOR: ssl: use MAXPATHLEN instead of PATH_MAX
+
+Apollon Oikonomopoulos reported a build failure on Hurd where PATH_MAX
+is not defined. The only place where it is referenced is ssl_sock.c,
+all other places use MAXPATHLEN instead, with a fallback to 128 when
+the OS does not define it. So let's switch to MAXPATHLEN as well.
+---
+ src/ssl_sock.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index ce1712d..8169d78 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -2543,14 +2543,14 @@ static int bind_parse_ciphers(char **args, int cur_arg, struct proxy *px, struct
+ /* parse the "crt" bind keyword */
+ static int bind_parse_crt(char **args, int cur_arg, struct proxy *px, struct bind_conf *conf, char **err)
+ {
+-	char path[PATH_MAX];
++	char path[MAXPATHLEN];
+ 	if (!*args[cur_arg + 1]) {
+ 		memprintf(err, "'%s' : missing certificate location", args[cur_arg]);
+ 		return ERR_ALERT | ERR_FATAL;
+ 	}
+ 
+ 	if ((*args[cur_arg + 1] != '/' ) && global.crt_base) {
+-		if ((strlen(global.crt_base) + 1 + strlen(args[cur_arg + 1]) + 1) > PATH_MAX) {
++		if ((strlen(global.crt_base) + 1 + strlen(args[cur_arg + 1]) + 1) > MAXPATHLEN) {
+ 			memprintf(err, "'%s' : path too long", args[cur_arg]);
+ 			return ERR_ALERT | ERR_FATAL;
+ 		}
+-- 
+1.8.1.5
+
