@@ -1,0 +1,177 @@
+From 47060b6ae03cbd83df465cefa885521058d76dfe Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 1 Aug 2013 21:11:42 +0200
+Subject: [PATCH 49/50] MINOR: cli: make it possible to enter multiple values
+ at once with "set table"
+
+The "set table" statement allows to create new entries with their respective
+values. Till now it was limited to a single data type per line, requiring as
+many "set table" statements as the desired data types to be set. Since this
+is only a parser limitation, this patch gets rid of it. It also allows the
+creation of a key with no data types (all reset to their default values).
+---
+ doc/configuration.txt     |  5 ++-
+ include/common/defaults.h |  3 +-
+ src/dumpstats.c           | 98 ++++++++++++++++++++++++-----------------------
+ 3 files changed, 56 insertions(+), 50 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 51c96de..c683387 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -12047,12 +12047,13 @@ set rate-limit http-compression global <value>
+   passed in number of kilobytes per second. The value is available in the "show
+   info" on the line "CompressBpsRateLim" in bytes.
+ 
+-set table <table> key <key> data.<data_type> <value>
++set table <table> key <key> [data.<data_type> <value>]*
+   Create or update a stick-table entry in the table. If the key is not present,
+   an entry is inserted. See stick-table in section 4.2 to find all possible
+   values for <data_type>. The most likely use consists in dynamically entering
+   entries for source IP addresses, with a flag in gpc0 to dynamically block an
+-  IP address or affect its quality of service.
++  IP address or affect its quality of service. It is possible to pass multiple
++  data_types in a single call.
+ 
+ set timeout cli <delay>
+   Change the CLI interface timeout for current connection. This can be useful
+diff --git a/include/common/defaults.h b/include/common/defaults.h
+index 874d2e2..30ab148 100644
+--- a/include/common/defaults.h
++++ b/include/common/defaults.h
+@@ -57,7 +57,8 @@
+ #define MAX_LINE_ARGS   64
+ 
+ // max # args on a stats socket
+-#define MAX_STATS_ARGS  16
++// This should cover at least 5 + twice the # of data_types
++#define MAX_STATS_ARGS  64
+ 
+ // max # of matches per regexp
+ #define	MAX_MATCH       10
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index e7498b4..46066b5 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -590,6 +590,7 @@ static void stats_sock_table_key_request(struct stream_interface *si, char **arg
+ 	unsigned char ip6_key[sizeof(struct in6_addr)];
+ 	long long value;
+ 	int data_type;
++	int cur_arg;
+ 	void *ptr;
+ 	struct freq_ctr_period *frqp;
+ 
+@@ -680,31 +681,6 @@ static void stats_sock_table_key_request(struct stream_interface *si, char **arg
+ 		break;
+ 
+ 	case STAT_CLI_O_SET:
+-		if (strncmp(args[5], "data.", 5) != 0) {
+-			si->applet.ctx.cli.msg = "\"data.<type>\" followed by a value expected\n";
+-			si->applet.st0 = STAT_CLI_PRINT;
+-			return;
+-		}
+-
+-		data_type = stktable_get_data_type(args[5] + 5);
+-		if (data_type < 0) {
+-			si->applet.ctx.cli.msg = "Unknown data type\n";
+-			si->applet.st0 = STAT_CLI_PRINT;
+-			return;
+-		}
+-
+-		if (!px->table.data_ofs[data_type]) {
+-			si->applet.ctx.cli.msg = "Data type not stored in this table\n";
+-			si->applet.st0 = STAT_CLI_PRINT;
+-			return;
+-		}
+-
+-		if (!*args[6] || strl2llrc(args[6], strlen(args[6]), &value) != 0) {
+-			si->applet.ctx.cli.msg = "Require a valid integer value to store\n";
+-			si->applet.st0 = STAT_CLI_PRINT;
+-			return;
+-		}
+-
+ 		if (ts)
+ 			stktable_touch(&px->table, ts, 1);
+ 		else {
+@@ -718,28 +694,56 @@ static void stats_sock_table_key_request(struct stream_interface *si, char **arg
+ 			stktable_store(&px->table, ts, 1);
+ 		}
+ 
+-		ptr = stktable_data_ptr(&px->table, ts, data_type);
+-		switch (stktable_data_types[data_type].std_type) {
+-		case STD_T_SINT:
+-			stktable_data_cast(ptr, std_t_sint) = value;
+-			break;
+-		case STD_T_UINT:
+-			stktable_data_cast(ptr, std_t_uint) = value;
+-			break;
+-		case STD_T_ULL:
+-			stktable_data_cast(ptr, std_t_ull) = value;
+-			break;
+-		case STD_T_FRQP:
+-			/* We set both the current and previous values. That way
+-			 * the reported frequency is stable during all the period
+-			 * then slowly fades out. This allows external tools to
+-			 * push measures without having to update them too often.
+-			 */
+-			frqp = &stktable_data_cast(ptr, std_t_frqp);
+-			frqp->curr_tick = now_ms;
+-			frqp->prev_ctr = 0;
+-			frqp->curr_ctr = value;
+-			break;
++		for (cur_arg = 5; *args[cur_arg]; cur_arg += 2) {
++			if (strncmp(args[cur_arg], "data.", 5) != 0) {
++				si->applet.ctx.cli.msg = "\"data.<type>\" followed by a value expected\n";
++				si->applet.st0 = STAT_CLI_PRINT;
++				return;
++			}
++
++			data_type = stktable_get_data_type(args[cur_arg] + 5);
++			if (data_type < 0) {
++				si->applet.ctx.cli.msg = "Unknown data type\n";
++				si->applet.st0 = STAT_CLI_PRINT;
++				return;
++			}
++
++			if (!px->table.data_ofs[data_type]) {
++				si->applet.ctx.cli.msg = "Data type not stored in this table\n";
++				si->applet.st0 = STAT_CLI_PRINT;
++				return;
++			}
++
++			if (!*args[cur_arg+1] || strl2llrc(args[cur_arg+1], strlen(args[cur_arg+1]), &value) != 0) {
++				si->applet.ctx.cli.msg = "Require a valid integer value to store\n";
++				si->applet.st0 = STAT_CLI_PRINT;
++				return;
++			}
++
++			ptr = stktable_data_ptr(&px->table, ts, data_type);
++
++			switch (stktable_data_types[data_type].std_type) {
++			case STD_T_SINT:
++				stktable_data_cast(ptr, std_t_sint) = value;
++				break;
++			case STD_T_UINT:
++				stktable_data_cast(ptr, std_t_uint) = value;
++				break;
++			case STD_T_ULL:
++				stktable_data_cast(ptr, std_t_ull) = value;
++				break;
++			case STD_T_FRQP:
++				/* We set both the current and previous values. That way
++				 * the reported frequency is stable during all the period
++				 * then slowly fades out. This allows external tools to
++				 * push measures without having to update them too often.
++				 */
++				frqp = &stktable_data_cast(ptr, std_t_frqp);
++				frqp->curr_tick = now_ms;
++				frqp->prev_ctr = 0;
++				frqp->curr_ctr = value;
++				break;
++			}
+ 		}
+ 		break;
+ 
+-- 
+1.8.1.5
+

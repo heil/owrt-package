@@ -1,0 +1,48 @@
+From ce54d1b9f2fdd250d864055a9db34f4a6315d37d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 23 Jul 2013 23:44:30 +0200
+Subject: [PATCH 48/50] MEDIUM: cli: adjust the method for feeding frequency
+ counters in tables
+
+Since commit 654694e1, it has been possible to feed some data into
+stick tables from the CLI. That commit considered that frequency
+counters would only have their previous value set, so that they
+progressively fade out. But this does not match any real world
+use case in fact. The only reason for feeding a freq counter is
+to pass some data learned outside. We certainly don't want to see
+such data start to vanish immediately, otherwise it will force the
+external scripts to loop very frequently to limit the losses.
+
+So let's set the current value instead in order to guarantee that
+the data remains stable over the full period, then starts to fade
+out between 1* and 2* the period.
+---
+ src/dumpstats.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index e4c3f43..e7498b4 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -730,11 +730,15 @@ static void stats_sock_table_key_request(struct stream_interface *si, char **arg
+ 			stktable_data_cast(ptr, std_t_ull) = value;
+ 			break;
+ 		case STD_T_FRQP:
+-			/* We only reset the previous value so that it slowly fades out */
++			/* We set both the current and previous values. That way
++			 * the reported frequency is stable during all the period
++			 * then slowly fades out. This allows external tools to
++			 * push measures without having to update them too often.
++			 */
+ 			frqp = &stktable_data_cast(ptr, std_t_frqp);
+ 			frqp->curr_tick = now_ms;
+-			frqp->prev_ctr = value;
+-			frqp->curr_ctr = 0;
++			frqp->prev_ctr = 0;
++			frqp->curr_ctr = value;
+ 			break;
+ 		}
+ 		break;
+-- 
+1.8.1.5
+
