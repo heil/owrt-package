@@ -1,0 +1,27 @@
+From f3a3e1389e40434da9e1fc295be6ff5a8037effb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 31 Aug 2013 08:16:26 +0200
+Subject: [PATCH 58/60] DOC: add a mention about the limited chunk size
+
+We now indicate that PD flags can be returned for chunk sizes >= 2GB.
+---
+ doc/configuration.txt | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 87de595..4bb2572 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -11448,7 +11448,8 @@ easier finding and understanding.
+      PD   The proxy blocked an incorrectly formatted chunked encoded message in
+           a request or a response, after the server has emitted its headers. In
+           most cases, this will indicate an invalid message from the server to
+-          the client.
++          the client. Haproxy supports chunk sizes of up to 2GB - 1 (2147483647
++          bytes). Any larger size will be considered as an error.
+ 
+      PH   The proxy blocked the server's response, because it was invalid,
+           incomplete, dangerous (cache control), or matched a security filter.
+-- 
+1.8.1.5
+

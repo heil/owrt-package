@@ -1,0 +1,31 @@
+From afeb987c5c62a25def46fcbaeaa31ee4aec977f1 Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Fri, 30 Aug 2013 14:17:46 +0200
+Subject: [PATCH 57/60] BUG/MINOR: log: junk at the end of syslog packet
+
+With a facily of 2 or 1 digit, the send size was wrong and bytes with
+unknown value were sent.
+The size was calculated using the start of the buffer and not the start
+of the data which varies with the number of digits of the facility.
+
+This bug was reported by Samuel Stoller and reported by Lukas Tribus.
+---
+ src/log.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/log.c b/src/log.c
+index f1fe40c..ae6f0a3 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -847,7 +847,7 @@ void __send_log(struct proxy *p, int level, char *message, size_t size)
+ 		} while (fac_level && log_ptr > dataptr);
+ 		*log_ptr = '<';
+ 
+-		sent = sendto(*plogfd, log_ptr, size + log_ptr - dataptr,
++		sent = sendto(*plogfd, log_ptr, size - (log_ptr - dataptr),
+ 			      MSG_DONTWAIT | MSG_NOSIGNAL,
+ 			      (struct sockaddr *)&logsrv->addr, get_addr_len(&logsrv->addr));
+ 		if (sent < 0) {
+-- 
+1.8.1.5
+

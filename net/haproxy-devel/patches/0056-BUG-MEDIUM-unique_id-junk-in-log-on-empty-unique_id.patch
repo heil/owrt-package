@@ -1,0 +1,77 @@
+From 5b7ea3afa18351b2243fac6e9131327ff9d71911 Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Wed, 28 Aug 2013 15:44:19 +0200
+Subject: [PATCH 56/60] BUG/MEDIUM: unique_id: junk in log on empty unique_id
+
+When a request fail, the unique_id was allocated but not generated.
+The string was not initialized and junk was printed in the log with %ID.
+
+This patch changes the behavior of the unique_id. The unique_id is now
+generated when a request failed.
+
+This bug was reported by Patrick Hemmer.
+---
+ src/log.c        | 10 +++++++++-
+ src/proto_http.c |  9 +++++----
+ 2 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/src/log.c b/src/log.c
+index 369dc34..f1fe40c 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -1488,8 +1488,10 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
+ 				break;
+ 
+ 			case LOG_FMT_UNIQUEID: // %ID
++				ret = NULL;
+ 				src = s->unique_id;
+-				ret = lf_text(tmplog, src, maxsize - (tmplog - dst), tmp);
++				if (src)
++					ret = lf_text(tmplog, src, maxsize - (tmplog - dst), tmp);
+ 				if (ret == NULL)
+ 					goto out;
+ 				tmplog = ret;
+@@ -1541,6 +1543,12 @@ void sess_log(struct session *s)
+ 			level = LOG_ERR;
+ 	}
+ 
++	/* if unique-id was not generated */
++	if (!s->unique_id && !LIST_ISEMPTY(&s->fe->format_unique_id)) {
++		if ((s->unique_id = pool_alloc2(pool2_uniqueid)) != NULL)
++			build_logline(s, s->unique_id, UNIQUEID_LEN, &s->fe->format_unique_id);
++	}
++
+ 	tmplog = update_log_hdr();
+ 	size = tmplog - logline;
+ 	size += build_logline(s, tmplog, sizeof(logline) - size, &s->fe->logformat);
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 8d6eaf5..6ab2676 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2635,9 +2635,6 @@ int http_wait_for_request(struct session *s, struct channel *req, int an_bit)
+ 		}
+ 	}
+ 
+-	if (!LIST_ISEMPTY(&s->fe->format_unique_id))
+-		s->unique_id = pool_alloc2(pool2_uniqueid);
+-
+ 	/* 4. We may have to convert HTTP/0.9 requests to HTTP/1.0 */
+ 	if (unlikely(msg->sl.rq.v_l == 0) && !http_upgrade_v09_to_v10(txn))
+ 		goto return_bad_req;
+@@ -3950,8 +3947,12 @@ int http_process_request(struct session *s, struct channel *req, int an_bit)
+ 
+ 	/* add unique-id if "header-unique-id" is specified */
+ 
+-	if (!LIST_ISEMPTY(&s->fe->format_unique_id))
++	if (!LIST_ISEMPTY(&s->fe->format_unique_id)) {
++		if ((s->unique_id = pool_alloc2(pool2_uniqueid)) == NULL)
++			goto return_bad_req;
++		s->unique_id[0] = '\0';
+ 		build_logline(s, s->unique_id, UNIQUEID_LEN, &s->fe->format_unique_id);
++	}
+ 
+ 	if (s->fe->header_unique_id && s->unique_id) {
+ 		chunk_printf(&trash, "%s: %s", s->fe->header_unique_id, s->unique_id);
+-- 
+1.8.1.5
+
