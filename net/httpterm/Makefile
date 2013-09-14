@@ -9,12 +9,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=httpterm
-PKG_VERSION:=1.7.1
+PKG_VERSION:=1.7.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=httpterm-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://1wt.eu/tools/httpterm/
-PKG_MD5SUM:=7ba871c3350cfbb2cdf6da8ceb2b2cf2
+PKG_MD5SUM:=531c0a83c5a6e75cb4b8eb212b56492c
 
 include $(INCLUDE_DIR)/package.mk
 
