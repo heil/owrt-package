@@ -1,0 +1,29 @@
+From a33410cf94db24d3ec83003a40aeec62897cca97 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Tue, 17 Sep 2013 15:47:48 +0200
+Subject: [PATCH 66/75] BUILD: ssl: compilation issue with openssl v0.9.6.
+
+Failed to compile with openssl 0.9.6 since the 'verifyhost' feature.
+---
+ src/ssl_sock.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 4ae27fc..105aa1d 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -855,7 +855,11 @@ static int ssl_sock_srv_verifycbk(int ok, X509_STORE_CTX *ctx)
+ 		for (i = 0; !ok && i < sk_GENERAL_NAME_num(alt_names); i++) {
+ 			GENERAL_NAME *name = sk_GENERAL_NAME_value(alt_names, i);
+ 			if (name->type == GEN_DNS) {
++#if OPENSSL_VERSION_NUMBER < 0x00907000L
++				if (ASN1_STRING_to_UTF8((unsigned char **)&str, name->d.ia5) >= 0) {
++#else
+ 				if (ASN1_STRING_to_UTF8((unsigned char **)&str, name->d.dNSName) >= 0) {
++#endif
+ 					ok = ssl_sock_srv_hostcheck(str, servername);
+ 					OPENSSL_free(str);
+ 				}
+-- 
+1.8.1.5
+

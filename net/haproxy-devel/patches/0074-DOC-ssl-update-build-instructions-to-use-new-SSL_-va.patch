@@ -1,0 +1,35 @@
+From 130ddf79faec46556f3da648ef27eed05eee4059 Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Tue, 1 Oct 2013 00:28:03 +0200
+Subject: [PATCH 74/75] DOC: ssl: update build instructions to use new SSL_*
+ variables
+
+Since commit 9a05945bd ("BUILD: add SSL_INC/SSL_LIB variables to force the
+path to openssl") we have SSL_INC and SSL_LIB to point to the libssl
+installation.
+
+This commits updates the build instructions in README accordingly.
+---
+ README | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/README b/README
+index 1742680..b90e54e 100644
+--- a/README
++++ b/README
+@@ -97,9 +97,9 @@ keyword and install it to a local directory, so your system is not affected :
+     $ ./config --prefix=$STATICLIBSSL no-shared
+     $ make && make install_sw
+ 
+-When building haproxy, pass that path via ADDINC and ADDLIB to make and include
+-libdl ("-ldl").
+-    $ make TARGET=linux2628 USE_OPENSSL=1 ADDINC=-I$STATICLIBSSL/include ADDLIB="-L$STATICLIBSSL/lib -ldl"
++When building haproxy, pass that path via SSL_INC and SSL_LIB to make and
++include additional libs with ADDLIB if needed (in this case for example libdl):
++    $ make TARGET=linux26 USE_OPENSSL=1 SSL_INC=$STATICLIBSSL/include SSL_LIB=$STATICLIBSSL/lib ADDLIB=-ldl
+ 
+ It is also possible to include native support for ZLIB to benefit from HTTP
+ compression. For this, pass "USE_ZLIB=1" on the "make" command line and ensure
+-- 
+1.8.1.5
+

@@ -1,0 +1,52 @@
+From 7ef0edf7fffd5c844cd11f784cfd099e23d2af89 Mon Sep 17 00:00:00 2001
+From: Apollon Oikonomopoulos <apoikos@gmail.com>
+Date: Sun, 29 Sep 2013 23:03:51 +0300
+Subject: [PATCH 71/75] DOC: add manpage references to all system calls
+
+Add a man section to every system call reference, giving users pointers to the
+respective manpages.
+
+Signed-off-by: Apollon Oikonomopoulos <apoikos@gmail.com>
+---
+ doc/haproxy.1 | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/doc/haproxy.1 b/doc/haproxy.1
+index d58e2c7..6296767 100644
+--- a/doc/haproxy.1
++++ b/doc/haproxy.1
+@@ -110,25 +110,25 @@ Show even more statistics (implies '\-s').
+ 
+ .TP
+ \fB\-dk\fP
+-Disable use of kqueue(). kqueue() is available only on BSD systems.
++Disable use of \fBkqueue\fP(2). \fBkqueue\fP(2) is available only on BSD systems.
+ 
+ .TP
+ \fB\-ds\fP
+-Disable use of speculative epoll(). epoll() is available only on Linux 2.6
+-and some custom Linux 2.4 systems.
++Disable use of speculative \fBepoll\fP(7). \fBepoll\fP(7) is available only on
++Linux 2.6 and some custom Linux 2.4 systems.
+ 
+ .TP
+ \fB\-de\fP
+-Disable use of epoll(). epoll() is available only on Linux 2.6
++Disable use of \fBepoll\fP(7). \fBepoll\fP(7) is available only on Linux 2.6
+ and some custom Linux 2.4 systems.
+ 
+ .TP
+ \fB\-dp\fP
+-Disables use of poll(). select() might be used instead.
++Disables use of \fBpoll\fP(2). \fBselect\fP(2) might be used instead.
+ 
+ .TP
+ \fB\-dS\fP
+-Disables use of splice(), which is broken on older kernels.
++Disables use of \fBsplice\fP(2), which is broken on older kernels.
+ 
+ .TP
+ \fB\-db\fP
+-- 
+1.8.1.5
+

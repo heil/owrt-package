@@ -1,0 +1,81 @@
+From 2b8fd54287efef535b6a212a4a4ed35e4a333a24 Mon Sep 17 00:00:00 2001
+From: Godbach <nylzhaowei@gmail.com>
+Date: Mon, 30 Sep 2013 11:23:10 +0800
+Subject: [PATCH 75/75] DOC: fix typo in comments
+
+Hi Willy,
+
+There is a patch to fix typo in comments, please check the attachment
+for you information.
+
+The commit log is as below:
+
+commit 9824d1b3740ac2746894f1aa611c795366c84210
+Author: Godbach <nylzhaowei@gmail.com>
+Date:   Mon Sep 30 11:05:42 2013 +0800
+
+    DOC: fix typo in comments
+
+      0x20000000 -> 0x40000000
+      vuf -> buf
+      ethod -> Method
+
+    Signed-off-by: Godbach <nylzhaowei@gmail.com>
+
+--
+Best Regards,
+Godbach
+
+From 9824d1b3740ac2746894f1aa611c795366c84210 Mon Sep 17 00:00:00 2001
+From: Godbach <nylzhaowei@gmail.com>
+Date: Mon, 30 Sep 2013 11:05:42 +0800
+Subject: [PATCH] DOC: fix typo in comments
+
+  0x20000000 -> 0x40000000
+  vuf -> buf
+  ethod -> Method
+
+Signed-off-by: Godbach <nylzhaowei@gmail.com>
+---
+ include/types/channel.h    | 4 ++--
+ include/types/proto_http.h | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/types/channel.h b/include/types/channel.h
+index ee5f1b8..42160af 100644
+--- a/include/types/channel.h
++++ b/include/types/channel.h
+@@ -118,7 +118,7 @@
+ #define CF_NEVER_WAIT     0x08000000  /* never wait for sending data (permanent) */
+ 
+ #define CF_WAKE_ONCE      0x10000000  /* pretend there is activity on this channel (one-shoot) */
+-/* unused: 0x20000000, 0x20000000, 0x80000000 */
++/* unused: 0x20000000, 0x40000000, 0x80000000 */
+ 
+ /* Use these masks to clear the flags before going back to lower layers */
+ #define CF_CLEAR_READ     (~(CF_READ_NULL|CF_READ_PARTIAL|CF_READ_ERROR|CF_READ_ATTACHED))
+@@ -266,7 +266,7 @@ struct channel {
+    eventually leave the buffer. So as long as ->to_forward is larger than
+    global.maxrewrite, we can fill the buffer. If ->to_forward is smaller than
+    global.maxrewrite, then we don't want to fill the buffer with more than
+-   vuf->size - global.maxrewrite + ->to_forward.
++   buf->size - global.maxrewrite + ->to_forward.
+ 
+    A buffer may contain up to 5 areas :
+      - the data waiting to be sent. These data are located between buf->p-o and
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index 1d7c92f..d0fa766 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -121,7 +121,7 @@
+ 
+ /* these ones define a request start line */
+ #define HTTP_MSG_RQMETH        2 // parsing the Method
+-#define HTTP_MSG_RQMETH_SP     3 // space(s) after the ethod
++#define HTTP_MSG_RQMETH_SP     3 // space(s) after the Method
+ #define HTTP_MSG_RQURI         4 // parsing the Request URI
+ #define HTTP_MSG_RQURI_SP      5 // space(s) after the Request URI
+ #define HTTP_MSG_RQVER         6 // parsing the Request Version
+-- 
+1.8.1.5
+
