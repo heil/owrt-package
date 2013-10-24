@@ -1,0 +1,33 @@
+From de6617b48648a42586d44ff5301a8f09cad48939 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 15 Oct 2013 11:43:19 +0200
+Subject: [PATCH 89/91] MINOR: http: some exported functions were not in the
+ header file
+
+Export the following functions:
+ - find_hdr_value_end
+ - http_header_match2
+ - http_remove_header2
+ - http_header_add_tail2
+---
+ include/proto/proto_http.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 979219e..7f58d7a 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -95,6 +95,10 @@ int http_find_full_header2(const char *name, int len,
+ int http_find_header2(const char *name, int len,
+ 		      char *sol, struct hdr_idx *idx,
+ 		      struct hdr_ctx *ctx);
++char *find_hdr_value_end(char *s, const char *e);
++int http_header_match2(const char *hdr, const char *end, const char *name, int len);
++int http_remove_header2(struct http_msg *msg, struct hdr_idx *idx, struct hdr_ctx *ctx);
++int http_header_add_tail2(struct http_msg *msg, struct hdr_idx *hdr_idx, const char *text, int len);
+ void http_sess_log(struct session *s);
+ void http_perform_server_redirect(struct session *s, struct stream_interface *si);
+ void http_return_srv_error(struct session *s, struct stream_interface *si);
+-- 
+1.8.1.5
+

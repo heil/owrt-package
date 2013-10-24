@@ -1,0 +1,37 @@
+From 472b1ee115f45129ea3fc19e26f85b3ec9715abe Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 14 Oct 2013 22:41:30 +0200
+Subject: [PATCH 85/91] BUG/MEDIUM: http: accept full buffers on
+ smp_prefetch_http
+
+Bertrand Jacquin reported a but when using tcp_request content rules
+on large POST HTTP requests. The issue is that smp_prefetch_http()
+first tries to validate an input buffer, but only if the buffer is
+not full. This test is wrong since it must only be performed after
+the parsing has failed, otherwise we don't accept POST requests which
+fill the buffer as valid HTTP requests.
+
+This bug is 1.5-specific, no backport needed.
+---
+ src/proto_http.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 5e10ba2..0e9e429 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8927,10 +8927,8 @@ smp_prefetch_http(struct proxy *px, struct session *s, void *l7, unsigned int op
+ 			buffer_slow_realign(s->req->buf);
+ 
+ 		if (unlikely(txn->req.msg_state < HTTP_MSG_BODY)) {
+-			if ((msg->msg_state == HTTP_MSG_ERROR) ||
+-			    buffer_full(s->req->buf, global.tune.maxrewrite)) {
++			if (msg->msg_state == HTTP_MSG_ERROR)
+ 				return 0;
+-			}
+ 
+ 			/* Try to decode HTTP request */
+ 			if (likely(msg->next < s->req->buf->i))
+-- 
+1.8.1.5
+

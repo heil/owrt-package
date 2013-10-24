@@ -1,0 +1,61 @@
+From 5068d96ac184e45f8aa3f28dd11701cffca60b87 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 4 Oct 2013 16:27:27 +0200
+Subject: [PATCH 90/91] MINOR: http: change url_decode to return the size of
+ the decoded string.
+
+Currently url_decode returns 1 or 0 depending on whether it could decode
+the string or not. For some future use cases, it will be needed to get the
+decoded string length after a successful decoding, so let's make it return
+that value, and fall back to a negative one in case of error.
+---
+ src/proto_http.c | 2 +-
+ src/standard.c   | 8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 0e9e429..831eeeb 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2861,7 +2861,7 @@ int http_process_req_stat_post(struct stream_interface *si, struct http_txn *txn
+ 				*value++ = '\0';
+ 			}
+ 
+-			if (!url_decode(key) || !url_decode(value))
++			if (url_decode(key) < 0 || url_decode(value) < 0)
+ 				break;
+ 
+ 			/* Now we can check the key to see what to do */
+diff --git a/src/standard.c b/src/standard.c
+index cd60a94..b519f57 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1047,13 +1047,13 @@ char *encode_string(char *start, char *stop,
+ 
+ /* Decode an URL-encoded string in-place. The resulting string might
+  * be shorter. If some forbidden characters are found, the conversion is
+- * aborted, the string is truncated before the issue and non-zero is returned,
+- * otherwise the operation returns non-zero indicating success.
++ * aborted, the string is truncated before the issue and a negative value is
++ * returned, otherwise the operation returns the length of the decoded string.
+  */
+ int url_decode(char *string)
+ {
+ 	char *in, *out;
+-	int ret = 0;
++	int ret = -1;
+ 
+ 	in = string;
+ 	out = string;
+@@ -1074,7 +1074,7 @@ int url_decode(char *string)
+ 		}
+ 		in++;
+ 	}
+-	ret = 1; /* success */
++	ret = out - string; /* success */
+  end:
+ 	*out = 0;
+ 	return ret;
+-- 
+1.8.1.5
+

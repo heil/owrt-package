@@ -1,0 +1,36 @@
+From 27f5134e60b3eb5a84dea54dffe40777d8325bb3 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Wed, 9 Oct 2013 06:51:49 +0200
+Subject: [PATCH 81/91] DOC: missing information for the "description" keyword
+
+This keyword was not documented.
+---
+ doc/configuration.txt | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index bd4f851..7aff1e6 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2242,6 +2242,18 @@ default_backend <backend>
+   See also : "use_backend", "reqsetbe", "reqisetbe"
+ 
+ 
++description <string>
++  Describe a listen, frontend or backend.
++  May be used in sections :   defaults | frontend | listen | backend
++                                 no    |    yes   |   yes  |   yes
++  Arguments : string
++
++  Allows to add a sentence to describe the related object in the HAProxy HTML
++  stats page. The description will be printed on the right of the object name
++  it describes.
++  No need to backslash spaces in the <string> arguments.
++
++
+ disabled
+   Disable a proxy, frontend or backend.
+   May be used in sections :   defaults | frontend | listen | backend
+-- 
+1.8.1.5
+

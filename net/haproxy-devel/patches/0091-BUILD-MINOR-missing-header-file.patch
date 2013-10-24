@@ -1,0 +1,26 @@
+From a054d410db7e3498b66181c0f29cdbf0dd08a532 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 16 Oct 2013 16:19:38 +0200
+Subject: [PATCH 91/91] BUILD/MINOR: missing header file
+
+In the header file "types/proto_http.h", the list are used
+but the header file "mini-clist.h" is not included.
+---
+ include/types/proto_http.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index d0fa766..5a671b0 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -24,6 +24,7 @@
+ 
+ #include <common/chunk.h>
+ #include <common/config.h>
++#include <common/mini-clist.h>
+ 
+ #include <types/hdr_idx.h>
+ 
+-- 
+1.8.1.5
+

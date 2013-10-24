@@ -1,0 +1,29 @@
+From 369da8565a2acb2227387451982e2a12eea4b110 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Tue, 8 Oct 2013 11:39:35 +0200
+Subject: [PATCH 79/91] BUG/MINOR: ssl: verifyhost does not match empty strings
+ on wildcard.
+
+RFC6125 does not specify if wildcard matches empty strings but
+classical browsers implementations does.
+After the fix foo*bar.exemple.om matches foobar.exemple.com.
+---
+ src/ssl_sock.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index ecbd6f5..06c744a 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -811,7 +811,7 @@ static int ssl_sock_srv_hostcheck(const char *pattern, const char *hostname)
+ 
+ 	/* Make sure the leftmost label of the hostname is long enough
+ 	 * that the wildcard can match */
+-	if (hostname_left_label_end - hostname < pattern_left_label_end - pattern)
++	if (hostname_left_label_end - hostname < (pattern_left_label_end - pattern) - 1)
+ 		return 0;
+ 
+ 	/* Finally compare the string on either side of the
+-- 
+1.8.1.5
+

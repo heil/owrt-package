@@ -1,0 +1,42 @@
+From 9bf3ba28e15f4dcbb9ed5d2dfac32c5a43e82d94 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Mon, 7 Oct 2013 14:31:44 +0200
+Subject: [PATCH 77/91] BUG/MINOR: ssl: potential memory leaks using
+ ssl_c_key_alg or ssl_c_sig_alg.
+
+The leak occurs in an error case which practically never happens.
+---
+ src/ssl_sock.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 105aa1d..e79190a 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -2027,8 +2027,10 @@ smp_fetch_ssl_c_sig_alg(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	nid = OBJ_obj2nid((ASN1_OBJECT *)(crt->cert_info->signature->algorithm));
+ 
+ 	smp->data.str.str = (char *)OBJ_nid2sn(nid);
+-	if (!smp->data.str.str)
++	if (!smp->data.str.str) {
++		X509_free(crt);
+ 		return 0;
++	}
+ 
+ 	smp->type = SMP_T_CSTR;
+ 	smp->data.str.len = strlen(smp->data.str.str);
+@@ -2061,8 +2063,10 @@ smp_fetch_ssl_c_key_alg(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	nid = OBJ_obj2nid((ASN1_OBJECT *)(crt->cert_info->key->algor->algorithm));
+ 
+ 	smp->data.str.str = (char *)OBJ_nid2sn(nid);
+-	if (!smp->data.str.str)
++	if (!smp->data.str.str) {
++		X509_free(crt);
+ 		return 0;
++	}
+ 
+ 	smp->type = SMP_T_CSTR;
+ 	smp->data.str.len = strlen(smp->data.str.str);
+-- 
+1.8.1.5
+
