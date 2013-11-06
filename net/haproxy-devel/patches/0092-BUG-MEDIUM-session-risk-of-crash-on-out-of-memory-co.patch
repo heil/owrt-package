@@ -1,0 +1,39 @@
+From 05bf5e1c36194b62e963c422498070a545c2f555 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 20 Oct 2013 23:10:28 +0200
+Subject: [PATCH 92/97] BUG/MEDIUM: session: risk of crash on out of memory
+ conditions
+
+In session_accept(), if we face a memory allocation error, we try to
+emit an HTTP 500 error message in HTTP mode. The problem is that we
+must not use http_error_message() for this since it dereferences the
+session which can be NULL in this case.
+
+We don't need the session to build the error message anyway since
+this function only uses it to retrieve the backend and frontend to
+get the most suited error message. Let's pick it ourselves, we're
+at the beginning of the session, only the frontend is relevant.
+
+This bug is 1.5-specific.
+---
+ src/session.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/session.c b/src/session.c
+index ed55ca4..76bc8f3 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -232,7 +232,9 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+  out_close:
+ 	if (ret < 0 && l->xprt == &raw_sock && p->mode == PR_MODE_HTTP) {
+ 		/* critical error, no more memory, try to emit a 500 response */
+-		struct chunk *err_msg = http_error_message(s, HTTP_ERR_500);
++		struct chunk *err_msg = &p->errmsg[HTTP_ERR_500];
++		if (!err_msg->str)
++			err_msg = &http_err_chunks[HTTP_ERR_500];
+ 		send(cfd, err_msg->str, err_msg->len, MSG_DONTWAIT|MSG_NOSIGNAL);
+ 	}
+ 
+-- 
+1.8.1.5
+

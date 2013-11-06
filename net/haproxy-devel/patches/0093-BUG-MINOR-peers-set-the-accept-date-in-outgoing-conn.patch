@@ -1,0 +1,34 @@
+From ae727bf9b419d58f92b830fd2b938ab8442c7cea Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 1 Oct 2013 17:06:10 +0200
+Subject: [PATCH 93/97] BUG/MINOR: peers: set the accept date in outgoing
+ connections
+
+Without this, "show sess" on the CLI reports a wrong age.
+---
+ src/peers.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/peers.c b/src/peers.c
+index 7247d76..0516d0c 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1181,11 +1181,14 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	memset(s->stkctr, 0, sizeof(s->stkctr));
+ 
+ 	/* FIXME: the logs are horribly complicated now, because they are
+-	 * defined in <p>, <p>, and later <be> and <be>.
++	 * defined in <p>, <p>, and later <be> and <be>. We still initialize
++	 * a few of them to help troubleshooting (eg: show sess shows them).
+ 	 */
+ 
+ 	s->logs.logwait = 0;
+ 	s->logs.level = 0;
++	s->logs.accept_date = date; /* user-visible date for logging */
++	s->logs.tv_accept = now;  /* corrected date for internal use */
+ 	s->do_log = NULL;
+ 
+ 	/* default error reporting function, may be changed by analysers */
+-- 
+1.8.1.5
+
