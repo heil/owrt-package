@@ -1,0 +1,53 @@
+From 60eccc18419763680f1cd08abfe8711e9170f9b0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 14 Nov 2013 16:00:12 +0100
+Subject: [PATCH 099/126] BUG/MINOR: acl: remove patterns from the tree before
+ freeing them
+
+A call to free_pattern_tree() upon exit() is made to free all ACL
+patterns allocated in a tree (strings or IP addresses). Unfortunately
+it happens that this function has been bogus from the beginning, it
+walks over the whole tree, frees the nodes but forgets to remove them
+from the tree prior to freeing them. So after visiting a leaf, the
+next eb_next() call will require to revisit some of the upper nodes
+that were just freed. This can remain unnoticed for a long time because
+free() often just marks the area as free. But in cases of aggressive
+memory freeing, the location will not be mapped anymore and the process
+segfaults.
+
+Note that the bug has no impact other than polluting kernel logs and
+frightening sysadmins, since it happens just before exit().
+
+Simply adding the debug code below makes it easier to reproduce the
+same bug :
+
+	while (node) {
+		next = eb_next(node);
++		node->node_p = (void *)-1;
+		free(node);
+		node = next;
+	}
+
+Many thanks to the StackExchange team for their very detailed bug report
+that permitted to quickly understand this non-obvious bug!
+
+This fix should be backported to 1.4 which introduced the bug.
+---
+ src/acl.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/acl.c b/src/acl.c
+index 0920a9e..af7d36b 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -871,6 +871,7 @@ static void free_pattern_tree(struct eb_root *root)
+ 	node = eb_first(root);
+ 	while (node) {
+ 		next = eb_next(node);
++		eb_delete(node);
+ 		free(node);
+ 		node = next;
+ 	}
+-- 
+1.8.1.5
+

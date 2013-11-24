@@ -1,0 +1,55 @@
+From a360844735bdf582ec867a4a66219997462b6883 Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Fri, 1 Nov 2013 16:46:15 +0900
+Subject: [PATCH 111/126] CLEANUP: Make parameters of srv_downtime and
+ srv_getinter const
+
+The parameters of srv_downtime and srv_getinter are not modified
+and thus may be const.
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ include/proto/server.h | 4 ++--
+ src/server.c           | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/include/proto/server.h b/include/proto/server.h
+index ded640a..b2df045 100644
+--- a/include/proto/server.h
++++ b/include/proto/server.h
+@@ -32,8 +32,8 @@
+ #include <proto/queue.h>
+ #include <proto/freq_ctr.h>
+ 
+-int srv_downtime(struct server *s);
+-int srv_getinter(struct server *s);
++int srv_downtime(const struct server *s);
++int srv_getinter(const struct server *s);
+ 
+ /* increase the number of cumulated connections on the designated server */
+ static void inline srv_inc_sess_ctr(struct server *s)
+diff --git a/src/server.c b/src/server.c
+index 98a9fbe..e542bb7 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -22,7 +22,7 @@ static struct srv_kw_list srv_keywords = {
+ 	.list = LIST_HEAD_INIT(srv_keywords.list)
+ };
+ 
+-int srv_downtime(struct server *s)
++int srv_downtime(const struct server *s)
+ {
+ 	if ((s->state & SRV_RUNNING) && s->last_change < now.tv_sec)		// ignore negative time
+ 		return s->down_time;
+@@ -30,7 +30,7 @@ int srv_downtime(struct server *s)
+ 	return now.tv_sec - s->last_change + s->down_time;
+ }
+ 
+-int srv_getinter(struct server *s)
++int srv_getinter(const struct server *s)
+ {
+ 	if ((s->state & SRV_CHECKED) && (s->health == s->rise + s->fall - 1))
+ 		return s->inter;
+-- 
+1.8.1.5
+

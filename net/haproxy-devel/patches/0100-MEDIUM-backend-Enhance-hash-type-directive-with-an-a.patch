@@ -1,0 +1,542 @@
+From 98634f0c7b8d6aff0086fef9fedd90ffc79abcc2 Mon Sep 17 00:00:00 2001
+From: Bhaskar <bhaskar@tumblr.com>
+Date: Tue, 29 Oct 2013 23:30:51 -0400
+Subject: [PATCH 100/126] MEDIUM: backend: Enhance hash-type directive with an
+ algorithm options
+
+Summary:
+In testing at tumblr, we found that using djb2 hashing instead of the
+default sdbm hashing resulted is better workload distribution to our backends.
+
+This commit implements a change, that allows the user to specify the hash
+function they want to use. It does not limit itself to consistent hashing
+scenarios.
+
+The supported hash functions are sdbm (default), and djb2.
+
+For a discussion of the feature and analysis, see mailing list thread
+"Consistent hashing alternative to sdbm" :
+
+      http://marc.info/?l=haproxy&m=138213693909219
+
+Note: This change does NOT make changes to new features, for instance,
+applying an avalance hashing always being performed before applying
+consistent hashing.
+---
+ Makefile                |  2 +-
+ doc/configuration.txt   | 90 ++++++++++++++++++++++++++++++-------------------
+ include/common/hash.h   | 28 +++++++++++++++
+ include/types/backend.h |  6 ++++
+ src/backend.c           | 76 +++++++++++++++++++++++++++--------------
+ src/cfgparse.c          | 18 ++++++++--
+ src/hash.c              | 61 +++++++++++++++++++++++++++++++++
+ 7 files changed, 217 insertions(+), 64 deletions(-)
+ create mode 100644 include/common/hash.h
+ create mode 100644 src/hash.c
+
+diff --git a/Makefile b/Makefile
+index 2acaee4..4c30cc0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -637,7 +637,7 @@ OBJS = src/haproxy.o src/sessionhash.o src/base64.o src/protocol.o \
+        src/stream_interface.o src/dumpstats.o src/proto_tcp.o \
+        src/session.o src/hdr_idx.o src/ev_select.o src/signal.o \
+        src/acl.o src/sample.o src/memory.o src/freq_ctr.o src/auth.o \
+-       src/compression.o src/payload.o
++       src/compression.o src/payload.o src/hash.o
+ 
+ EBTREE_OBJS = $(EBTREE_DIR)/ebtree.o \
+               $(EBTREE_DIR)/eb32tree.o $(EBTREE_DIR)/eb64tree.o \
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index ba8057f..643afd9 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2496,45 +2496,65 @@ grace <time>
+   simplify it.
+ 
+ 
+-hash-type <method>
++hash-type <method> <function>
+   Specify a method to use for mapping hashes to servers
+   May be used in sections :   defaults | frontend | listen | backend
+                                  yes   |    no    |   yes  |   yes
+   Arguments :
+-    map-based   the hash table is a static array containing all alive servers.
+-                The hashes will be very smooth, will consider weights, but will
+-                be static in that weight changes while a server is up will be
+-                ignored. This means that there will be no slow start. Also,
+-                since a server is selected by its position in the array, most
+-                mappings are changed when the server count changes. This means
+-                that when a server goes up or down, or when a server is added
+-                to a farm, most connections will be redistributed to different
+-                servers. This can be inconvenient with caches for instance.
+-
+-    avalanche   this mechanism uses the default map-based hashing described
+-                above but applies a full avalanche hash before performing the
+-                mapping. The result is a slightly less smooth hash for most
+-                situations, but the hash becomes better than pure map-based
+-                hashes when the number of servers is a multiple of the size of
+-                the input set. When using URI hash with a number of servers
+-                multiple of 64, it's desirable to change the hash type to
+-                this value.
+-
+-    consistent  the hash table is a tree filled with many occurrences of each
+-                server. The hash key is looked up in the tree and the closest
+-                server is chosen. This hash is dynamic, it supports changing
+-                weights while the servers are up, so it is compatible with the
+-                slow start feature. It has the advantage that when a server
+-                goes up or down, only its associations are moved. When a server
+-                is added to the farm, only a few part of the mappings are
+-                redistributed, making it an ideal algorithm for caches.
+-                However, due to its principle, the algorithm will never be very
+-                smooth and it may sometimes be necessary to adjust a server's
+-                weight or its ID to get a more balanced distribution. In order
+-                to get the same distribution on multiple load balancers, it is
+-                important that all servers have the same IDs.
+-
+-  The default hash type is "map-based" and is recommended for most usages.
++    <method> is the method used to select a server from the hash computed by
++             the <function> :
++
++      map-based   the hash table is a static array containing all alive servers.
++                  The hashes will be very smooth, will consider weights, but
++                  will be static in that weight changes while a server is up
++                  will be ignored. This means that there will be no slow start.
++                  Also, since a server is selected by its position in the array,
++                  most mappings are changed when the server count changes. This
++                  means that when a server goes up or down, or when a server is
++                  added to a farm, most connections will be redistributed to
++                  different servers. This can be inconvenient with caches for
++                  instance.
++
++      avalanche   this mechanism uses the default map-based hashing described
++                  above but applies a full avalanche hash before performing the
++                  mapping. The result is a slightly less smooth hash for most
++                  situations, but the hash becomes better than pure map-based
++                  hashes when the number of servers is a multiple of the size of
++                  the input set. When using URI hash with a number of servers
++                  multiple of 64, it's desirable to change the hash type to
++                  this value.
++
++      consistent  the hash table is a tree filled with many occurrences of each
++                  server. The hash key is looked up in the tree and the closest
++                  server is chosen. This hash is dynamic, it supports changing
++                  weights while the servers are up, so it is compatible with the
++                  slow start feature. It has the advantage that when a server
++                  goes up or down, only its associations are moved. When a
++                  server is added to the farm, only a few part of the mappings
++                  are redistributed, making it an ideal method for caches.
++                  However, due to its principle, the distribution will never be
++                  very smooth and it may sometimes be necessary to adjust a
++                  server's weight or its ID to get a more balanced distribution.
++                  In order to get the same distribution on multiple load
++                  balancers, it is important that all servers have the exact
++                  same IDs. Note: by default, a full avalanche hash is always
++                  performed before applying the consistent hash.
++
++    <function> is the hash function to be used :
++
++       sdbm   this function was created intially for sdbm (a public-domain
++              reimplementation of ndbm) database library. It was found to do
++              well in scrambling bits, causing better distribution of the keys
++              and fewer splits. It also happens to be a good general hashing
++              function with good distribution.
++
++       djb2   this function was first proposed by Dan Bernstein many years ago
++              on comp.lang.c. Studies have shown that for certain workload this
++              function provides a better distribution than sdbm.
++
++  The default hash type is "map-based" and is recommended for most usages. The
++  default function is "sdbm", the selection of a function should be based on
++  the range of the values being hashed.
+ 
+   See also : "balance", "server"
+ 
+diff --git a/include/common/hash.h b/include/common/hash.h
+new file mode 100644
+index 0000000..f6875c9
+--- /dev/null
++++ b/include/common/hash.h
+@@ -0,0 +1,28 @@
++/*
++ * include/common/hash.h
++ * Macros for different hashing function.
++ *
++ * Copyright (C) 2000-2011 Willy Tarreau - w@1wt.eu
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation, version 2.1
++ * exclusively.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifndef _COMMON_HASH_H_
++#define _COMMON_HASH_H_
++
++unsigned long hash_djb2(const char *key, int len);
++unsigned long hash_sdbm(const char *key, int len);
++
++#endif /* _COMMON_HASH_H_ */
+diff --git a/include/types/backend.h b/include/types/backend.h
+index 1183b36..1a433cf 100644
+--- a/include/types/backend.h
++++ b/include/types/backend.h
+@@ -108,6 +108,12 @@
+ #define BE_LB_HASH_AVAL   0x200000 /* run an avalanche hash before a map */
+ #define BE_LB_HASH_TYPE   0x300000 /* get/clear hash types */
+ 
++/* BE_LB_HFCN_* is the hash function, to be used with BE_LB_HASH_FUNC */
++#define BE_LB_HFCN_SDBM   0x000000 /* sdbm hash */
++#define BE_LB_HFCN_DJB2   0x400000 /* djb2 hash */
++#define BE_LB_HASH_FUNC   0xC00000 /* get/clear hash function */
++
++
+ /* various constants */
+ 
+ /* The scale factor between user weight and effective weight allows smooth
+diff --git a/src/backend.c b/src/backend.c
+index 48c8761..bf4a81d 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -23,6 +23,7 @@
+ #include <common/compat.h>
+ #include <common/config.h>
+ #include <common/debug.h>
++#include <common/hash.h>
+ #include <common/ticks.h>
+ #include <common/time.h>
+ 
+@@ -51,6 +52,25 @@
+ #include <proto/stream_interface.h>
+ #include <proto/task.h>
+ 
++/* helper function to invoke the correct hash method */
++static unsigned long gen_hash(const struct proxy* px, const char* key, unsigned long len)
++{
++	unsigned long hash;
++
++	switch (px->lbprm.algo & BE_LB_HASH_FUNC) {
++	case BE_LB_HFCN_DJB2:
++		hash = hash_djb2(key, len);
++		break;
++	case BE_LB_HFCN_SDBM:
++		/* this is the default hash function */
++	default:
++		hash = hash_sdbm(key, len);
++		break;
++	}
++
++	return hash;
++}
++
+ /*
+  * This function recounts the number of usable active and backup servers for
+  * proxy <p>. These numbers are returned into the p->srv_act and p->srv_bck.
+@@ -153,6 +173,7 @@ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len)
+ 	unsigned long hash = 0;
+ 	int c;
+ 	int slashes = 0;
++	const char *start, *end;
+ 
+ 	if (px->lbprm.tot_weight == 0)
+ 		return NULL;
+@@ -164,8 +185,9 @@ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len)
+ 	if (px->uri_len_limit)
+ 		uri_len = MIN(uri_len, px->uri_len_limit);
+ 
++	start = end = uri;
+ 	while (uri_len--) {
+-		c = *uri++;
++		c = *end++;
+ 		if (c == '/') {
+ 			slashes++;
+ 			if (slashes == px->uri_dirs_depth1) /* depth+1 */
+@@ -173,9 +195,10 @@ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len)
+ 		}
+ 		else if (c == '?' && !px->uri_whole)
+ 			break;
+-
+-		hash = c + (hash << 6) + (hash << 16) - hash;
+ 	}
++
++	hash = gen_hash(px, start, (end - start));
++
+ 	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
+ 		hash = full_hash(hash);
+  hash_done:
+@@ -197,6 +220,7 @@ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len)
+ struct server *get_server_ph(struct proxy *px, const char *uri, int uri_len)
+ {
+ 	unsigned long hash = 0;
++	const char *start, *end;
+ 	const char *p;
+ 	const char *params;
+ 	int plen;
+@@ -223,15 +247,18 @@ struct server *get_server_ph(struct proxy *px, const char *uri, int uri_len)
+ 				 * skip the equal symbol
+ 				 */
+ 				p += plen + 1;
++				start = end = p;
+ 				uri_len -= plen + 1;
+ 
+-				while (uri_len && *p != '&') {
+-					hash = *p + (hash << 6) + (hash << 16) - hash;
++				while (uri_len && *end != '&') {
+ 					uri_len--;
+-					p++;
++					end++;
+ 				}
++				hash = gen_hash(px, start, (end - start));
++
+ 				if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
+ 					hash = full_hash(hash);
++
+ 				if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+ 					return chash_get_server_hash(px, hash);
+ 				else
+@@ -263,6 +290,7 @@ struct server *get_server_ph_post(struct session *s)
+ 	unsigned long    len  = msg->body_len;
+ 	const char      *params = b_ptr(req->buf, (int)(msg->sov - req->buf->o));
+ 	const char      *p    = params;
++	const char      *start, *end;
+ 
+ 	if (len > buffer_len(req->buf) - msg->sov)
+ 		len = buffer_len(req->buf) - msg->sov;
+@@ -282,12 +310,13 @@ struct server *get_server_ph_post(struct session *s)
+ 				 * skip the equal symbol
+ 				 */
+ 				p += plen + 1;
++				start = end = p;
+ 				len -= plen + 1;
+ 
+-				while (len && *p != '&') {
++				while (len && *end != '&') {
+ 					if (unlikely(!HTTP_IS_TOKEN(*p))) {
+ 						/* if in a POST, body must be URI encoded or it's not a URI.
+-						 * Do not interprete any possible binary data as a parameter.
++						 * Do not interpret any possible binary data as a parameter.
+ 						 */
+ 						if (likely(HTTP_IS_LWS(*p))) /* eol, uncertain uri len */
+ 							break;
+@@ -295,13 +324,15 @@ struct server *get_server_ph_post(struct session *s)
+ 									      * This body does not contain parameters.
+ 									      */
+ 					}
+-					hash = *p + (hash << 6) + (hash << 16) - hash;
+ 					len--;
+-					p++;
++					end++;
+ 					/* should we break if vlen exceeds limit? */
+ 				}
++				hash = gen_hash(px, start, (end - start));
++
+ 				if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
+ 					hash = full_hash(hash);
++
+ 				if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+ 					return chash_get_server_hash(px, hash);
+ 				else
+@@ -338,6 +369,7 @@ struct server *get_server_hh(struct session *s)
+ 	unsigned long    len;
+ 	struct hdr_ctx   ctx;
+ 	const char      *p;
++	const char *start, *end;
+ 
+ 	/* tot_weight appears to mean srv_count */
+ 	if (px->lbprm.tot_weight == 0)
+@@ -362,14 +394,11 @@ struct server *get_server_hh(struct session *s)
+ 	len = ctx.vlen;
+ 	p = (char *)ctx.line + ctx.val;
+ 	if (!px->hh_match_domain) {
+-		while (len) {
+-			hash = *p + (hash << 6) + (hash << 16) - hash;
+-			len--;
+-			p++;
+-		}
++		hash = gen_hash(px, p, len);
+ 	} else {
+ 		int dohash = 0;
+ 		p += len - 1;
++		start = end = p;
+ 		/* special computation, use only main domain name, not tld/host
+ 		 * going back from the end of string, start hashing at first
+ 		 * dot stop at next.
+@@ -378,17 +407,20 @@ struct server *get_server_hh(struct session *s)
+ 		 */
+ 		while (len) {
+ 			if (*p == '.') {
+-				if (!dohash)
++				if (!dohash) {
+ 					dohash = 1;
++					start = end = p - 1;
++				}
+ 				else
+ 					break;
+ 			} else {
+ 				if (dohash)
+-					hash = *p + (hash << 6) + (hash << 16) - hash;
++					start--;
+ 			}
+ 			len--;
+ 			p--;
+ 		}
++		hash = gen_hash(px, start, (end - start));
+ 	}
+ 	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
+ 		hash = full_hash(hash);
+@@ -405,7 +437,6 @@ struct server *get_server_rch(struct session *s)
+ 	unsigned long    hash = 0;
+ 	struct proxy    *px   = s->be;
+ 	unsigned long    len;
+-	const char      *p;
+ 	int              ret;
+ 	struct sample    smp;
+ 	int rewind;
+@@ -433,12 +464,8 @@ struct server *get_server_rch(struct session *s)
+ 	/* Found a the hh_name in the headers.
+ 	 * we will compute the hash based on this value ctx.val.
+ 	 */
+-	p = smp.data.str.str;
+-	while (len) {
+-		hash = *p + (hash << 6) + (hash << 16) - hash;
+-		len--;
+-		p++;
+-	}
++	hash = gen_hash(px, smp.data.str.str, len);
++
+ 	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
+ 		hash = full_hash(hash);
+  hash_done:
+@@ -1318,7 +1345,6 @@ int backend_parse_balance(const char **args, char **err, struct proxy *curproxy)
+ 			}
+ 			curproxy->hh_match_domain = 1;
+ 		}
+-
+ 	}
+ 	else if (!strncmp(args[0], "rdp-cookie", 10)) {
+ 		curproxy->lbprm.algo &= ~BE_LB_ALGO;
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 41c1949..051f600 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -4085,19 +4085,18 @@ stats_error_parsing:
+ 		}
+ 	}
+ 	else if (!strcmp(args[0], "hash-type")) { /* set hashing method */
++		curproxy->lbprm.algo &= ~(BE_LB_HASH_TYPE | BE_LB_HASH_FUNC);
++
+ 		if (warnifnotcap(curproxy, PR_CAP_BE, file, linenum, args[0], NULL))
+ 			err_code |= ERR_WARN;
+ 
+ 		if (strcmp(args[1], "consistent") == 0) {	/* use consistent hashing */
+-			curproxy->lbprm.algo &= ~BE_LB_HASH_TYPE;
+ 			curproxy->lbprm.algo |= BE_LB_HASH_CONS;
+ 		}
+ 		else if (strcmp(args[1], "map-based") == 0) {	/* use map-based hashing */
+-			curproxy->lbprm.algo &= ~BE_LB_HASH_TYPE;
+ 			curproxy->lbprm.algo |= BE_LB_HASH_MAP;
+ 		}
+ 		else if (strcmp(args[1], "avalanche") == 0) {	/* use full hash before map-based hashing */
+-			curproxy->lbprm.algo &= ~BE_LB_HASH_TYPE;
+ 			curproxy->lbprm.algo |= BE_LB_HASH_AVAL;
+ 		}
+ 		else {
+@@ -4105,6 +4104,19 @@ stats_error_parsing:
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+ 			goto out;
+ 		}
++
++		/* set the hash function to use */
++		if (!*args[2]) {
++			curproxy->lbprm.algo |= BE_LB_HFCN_SDBM;
++		} else if (!strcmp(args[2], "sdbm")) {
++			curproxy->lbprm.algo |= BE_LB_HFCN_SDBM;
++		} else if (!strcmp(args[2], "djb2")) {
++			curproxy->lbprm.algo |= BE_LB_HFCN_DJB2;
++		} else {
++			Alert("parsing [%s:%d] : '%s' only supports 'sdbm' and 'djb2' hash functions.\n", file, linenum, args[0]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
+ 	}
+ 	else if (!strcmp(args[0], "server") || !strcmp(args[0], "default-server")) {  /* server address */
+ 		int cur_arg;
+diff --git a/src/hash.c b/src/hash.c
+new file mode 100644
+index 0000000..8da3003
+--- /dev/null
++++ b/src/hash.c
+@@ -0,0 +1,61 @@
++/*
++ * Hash function implementation
++ *
++ * See mailing list thread on "Consistent hashing alternative to sdbm"
++ * http://marc.info/?l=haproxy&m=138213693909219
++ *
++ * Copyright 2000-2010 Willy Tarreau <w@1wt.eu>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version
++ * 2 of the License, or (at your option) any later version.
++ *
++ */
++
++
++#include <common/hash.h>
++
++
++unsigned long hash_djb2(const char *key, int len)
++{
++	unsigned long hash = 5381;
++
++	/* the hash unrolled eight times */
++	for (; len >= 8; len -= 8) {
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++		hash = ((hash << 5) + hash) + *key++;
++	}
++	switch (len) {
++		case 7: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 6: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 5: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 4: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 3: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 2: hash = ((hash << 5) + hash) + *key++; /* fallthrough... */
++		case 1: hash = ((hash << 5) + hash) + *key++; break;
++		default: /* case 0: */ break;
++	}
++	return hash;
++}
++
++unsigned long hash_sdbm(const char *key, int len)
++{
++	unsigned long hash = 0;
++	int c;
++
++	while (len--) {
++		c = *key++;
++		hash = c + (hash << 6) + (hash << 16) - hash;
++	}
++
++	return hash;
++}
++
++
+-- 
+1.8.1.5
+
