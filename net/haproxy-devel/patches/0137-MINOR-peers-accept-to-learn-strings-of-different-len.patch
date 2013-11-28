@@ -1,0 +1,126 @@
+From 86a446e685a50d952cdadbd98552c968028ba59f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 25 Nov 2013 23:02:37 +0100
+Subject: [PATCH 137/142] MINOR: peers: accept to learn strings of different
+ lengths
+
+While analysing old bug (9d9179b) with Emeric, we first believed
+that the fix was wrong and that there was a potential for learning
+one extra character in the peers learning code for strings due to
+the use of table->key_size instead of table->key_size-1. In fact it
+cannot happen with a normally behaving sender because the key sizes
+are compared when synchronizing the table.
+
+But this unveiled a suboptimal handling of strings. It can be quite
+common to see admins reload haproxy to increase some key sizes when
+seeing that user agents or cookies get truncated, or conversely to
+reduce them after seeing they take too much memory and are never full.
+The problem is that this will get rid of the table's contents because
+of the size mismatch. While this is understandable for properly
+formatted data (eg: IP addresses, integers, SSLIDs...) it's too bad
+for strings.
+
+So instead, make an exception to accept string of incompatible lengths
+and let the synchronization code truncate them to the appropriate size
+just as if the keys were learned normally.
+
+Thanks to this change, it is now possible to change the "len" parameter
+of a string stick-table and restart without losing its contents.
+---
+ src/peers.c | 62 ++++++++++++++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 45 insertions(+), 17 deletions(-)
+
+diff --git a/src/peers.c b/src/peers.c
+index 0516d0c..2c8d9cc 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -390,8 +390,13 @@ switchstate:
+ 				for (st = curpeers->tables; st; st = st->next) {
+ 					/* If table name matches */
+ 					if (strcmp(st->table->id, trash.str) == 0) {
+-						/* If key size mismatches */
+-						if (key_size != st->table->key_size) {
++						/* Check key size mismatches, except for strings
++						 * which may be truncated as long as they fit in
++						 * a buffer.
++						 */
++						if (key_size != st->table->key_size &&
++						    (key_type != STKTABLE_TYPE_STRING ||
++						     1 + 4 + 4 + key_size - 1 >= trash.size)) {
+ 							si->applet.st0 = PEER_SESSION_EXIT;
+ 							si->applet.st1 = PEER_SESSION_ERRSIZE;
+ 							goto switchstate;
+@@ -625,32 +630,55 @@ switchstate:
+ 						pushack = ntohl(netinteger);
+ 					}
+ 
+-					/* read key. We try to read it directly
+-					 * to the target memory location so that
+-					 * we are certain there is always enough
+-					 * space. However, if the allocation fails,
+-					 * we fall back to trash and we ignore the
+-					 * input data not to block the sync of other
+-					 * tables (think about a full table with
+-					 * "nopurge" for example).
++					/* Read key. The string keys are read in two steps, the first step
++					 * consists in reading whatever fits into the table directly into
++					 * the pre-allocated key. The second step consists in simply
++					 * draining all exceeding data. This can happen for example after a
++					 * config reload with a smaller key size for the stick table than
++					 * what was previously set, or when facing the impossibility to
++					 * allocate a new stksess (for example when the table is full with
++					 * "nopurge").
+ 					 */
+ 					if (ps->table->table->type == STKTABLE_TYPE_STRING) {
++						unsigned int to_read, to_store;
++
+ 						/* read size first */
+ 						reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+ 						if (reql <= 0) /* closed or EOL not found */
+ 							goto incomplete;
+ 
+ 						totl += reql;
+-						newts = stksess_new(ps->table->table, NULL);
+-						reql = bo_getblk(si->ob, newts ? (char *)newts->key.key : trash.str, ntohl(netinteger), totl);
+-						if (reql <= 0) /* closed or EOL not found */
++
++						to_store = 0;
++						to_read = ntohl(netinteger);
++
++						if (to_read + totl > si->ob->buf->size) {
++							/* impossible to read a key this large, abort */
++							reql = -1;
+ 							goto incomplete;
++						}
+ 
+-						/* always truncate the string to the approprite size */
++						newts = stksess_new(ps->table->table, NULL);
+ 						if (newts)
+-							newts->key.key[MIN(ntohl(netinteger), ps->table->table->key_size)] = 0;
+-
+-						totl += reql;
++							to_store = MIN(to_read, ps->table->table->key_size - 1);
++
++						/* we read up to two blocks, the first one goes into the key,
++						 * the rest is drained into the trash.
++						 */
++						if (to_store) {
++							reql = bo_getblk(si->ob, (char *)newts->key.key, to_store, totl);
++							if (reql <= 0) /* closed or incomplete */
++								goto incomplete;
++							newts->key.key[reql] = 0;
++							totl += reql;
++							to_read -= reql;
++						}
++						if (to_read) {
++							reql = bo_getblk(si->ob, trash.str, to_read, totl);
++							if (reql <= 0) /* closed or incomplete */
++								goto incomplete;
++							totl += reql;
++						}
+ 					}
+ 					else if (ps->table->table->type == STKTABLE_TYPE_INTEGER) {
+ 						newts = stksess_new(ps->table->table, NULL);
+-- 
+1.8.1.5
+

@@ -1,0 +1,209 @@
+From 671b6f02b56930086b8f7fc9123928afc340b775 Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Mon, 25 Nov 2013 10:46:39 +0900
+Subject: [PATCH 134/142] MEDIUM: Add enable and disable agent unix socket
+ commands
+
+The syntax of this new commands are:
+
+enable agent <backend>/<server>
+disable agent <backend>/<server>
+
+These commands allow temporarily stopping and subsequently
+re-starting an auxiliary agent check. The effect of this is as follows:
+
+New checks are only initialised when the agent is in the enabled. Thus,
+disable agent will prevent any new agent checks from begin initiated until
+the agent re-enabled using enable agent.
+
+When an agent is disabled the processing of an auxiliary agent check that
+was initiated while the agent was set as enabled is as follows: All
+results that would alter the weight, specifically "drain" or a weight
+returned by the agent, are ignored. The processing of agent check is
+otherwise unchanged.
+
+The motivation for this feature is to allow the weight changing effects
+of the agent checks to be paused to allow the weight of a server to be
+configured using set weight without being overridden by the agent.
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ doc/configuration.txt  | 31 +++++++++++++++++++++++++++++++
+ include/types/server.h |  1 +
+ src/checks.c           | 28 ++++++++++++++++++++++++----
+ src/dumpstats.c        | 24 +++++++++++++++++++++++-
+ 4 files changed, 79 insertions(+), 5 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 8094bab..f54dbd2 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -12051,6 +12051,28 @@ clear table <table> [ data.<type> <operator> <value> ] | [ key <key> ]
+         $ echo "show table http_proxy" | socat stdio /tmp/sock1
+     >>> # table: http_proxy, type: ip, size:204800, used:1
+ 
++enable agent <backend>/<server>
++  Mark the auxiliary agent check as temporarily stopped.
++
++  In the case where an agent check is being run as a auxiliary check, due
++  to the agent-check parameter of a server directive, new checks are only
++  initialised when the agent is in the enabled. Thus, disable agent will
++  prevent any new agent checks from begin initiated until the agent
++  re-enabled using enable agent.
++
++  When an agent is disabled the processing of an auxiliary agent check that
++  was initiated while the agent was set as enabled is as follows: All
++  results that would alter the weight, specifically "drain" or a weight
++  returned by the agent, are ignored. The processing of agent check is
++  otherwise unchanged.
++
++  The motivation for this feature is to allow the weight changing effects
++  of the agent checks to be paused to allow the weight of a server to be
++  configured using set weight without being overridden by the agent.
++
++  This command is restricted and can only be issued on sockets configured for
++  level "admin".
++
+ disable frontend <frontend>
+   Mark the frontend as temporarily stopped. This corresponds to the mode which
+   is used during a soft restart : the frontend releases the port but can be
+@@ -12082,6 +12104,15 @@ disable server <backend>/<server>
+   This command is restricted and can only be issued on sockets configured for
+   level "admin".
+ 
++enable agent <backend>/<server>
++  Resume auxiliary agent check that was temporarily stopped.
++
++  See "disable agent" for details of the effect of temporarily starting
++  and stopping an auxiliary agent.
++
++  This command is restricted and can only be issued on sockets configured for
++  level "admin".
++
+ enable frontend <frontend>
+   Resume a frontend which was temporarily stopped. It is possible that some of
+   the listening ports won't be able to bind anymore (eg: if another process
+diff --git a/include/types/server.h b/include/types/server.h
+index 51f70de..96c4318 100644
+--- a/include/types/server.h
++++ b/include/types/server.h
+@@ -74,6 +74,7 @@
+ 
+ /* check flags */
+ #define CHK_STATE_RUNNING	0x0001  /* this check is currently running */
++#define CHK_STATE_DISABLED	0x0002  /* this check is currently administratively disabled */
+ 
+ /* various constants */
+ #define SRV_UWGHT_RANGE 256
+diff --git a/src/checks.c b/src/checks.c
+index 2113c8c..eb8ce81 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -836,7 +836,6 @@ static void event_srv_chk_w(struct connection *conn)
+ 	goto out_wakeup;
+ }
+ 
+-
+ /*
+  * This function is used only for server health-checks. It handles the server's
+  * reply to an HTTP request, SSL HELLO or MySQL client Auth. It calls
+@@ -992,19 +991,36 @@ static void event_srv_chk_r(struct connection *conn)
+ 		short status = HCHK_STATUS_L7RSP;
+ 		const char *desc = "Unknown feedback string";
+ 		const char *down_cmd = NULL;
++		int disabled;
+ 
+ 		if (!done)
+ 			goto wait_more_data;
+ 
+ 		cut_crlf(check->bi->data);
+ 
++		/*
++		 * The agent may have been disabled after a check was
++		 * initialised.  If so, ignore weight changes and drain
++		 * settings from the agent.  Note that the setting is
++		 * always present in the state of the agent the server,
++		 * regardless of if the agent is being run as a primary or
++		 * secondary check. That is, regardless of if the check
++		 * parameter of this function is the agent or check field
++		 * of the server.
++		 */
++		disabled = check->server->agent.state & CHK_STATE_DISABLED;
++
+ 		if (strchr(check->bi->data, '%')) {
++			if (disabled)
++				break;
+ 			desc = server_parse_weight_change_request(s, check->bi->data);
+ 			if (!desc) {
+ 				status = HCHK_STATUS_L7OKD;
+ 				desc = check->bi->data;
+ 			}
+ 		} else if (!strcasecmp(check->bi->data, "drain")) {
++			if (disabled)
++				break;
+ 			desc = server_parse_weight_change_request(s, "0%");
+ 			if (!desc) {
+ 				desc = "drain";
+@@ -1315,10 +1331,14 @@ static struct task *process_chk(struct task *t)
+ 		if (!expired) /* woke up too early */
+ 			return t;
+ 
+-		/* we don't send any health-checks when the proxy is stopped or when
+-		 * the server should not be checked.
++		/* we don't send any health-checks when the proxy is
++		 * stopped, the server should not be checked or the check
++		 * is disabled.
+ 		 */
+-		if (!(s->state & SRV_CHECKED) || s->proxy->state == PR_STSTOPPED || (s->state & SRV_MAINTAIN))
++		if (!(s->state & SRV_CHECKED) ||
++		    s->proxy->state == PR_STSTOPPED ||
++		    (s->state & SRV_MAINTAIN) ||
++		    (check->state & CHK_STATE_DISABLED))
+ 			goto reschedule;
+ 
+ 		/* we'll initiate a new check */
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 3d60b09..adac834 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -1294,6 +1294,17 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 		}
+ 	}
+ 	else if (strcmp(args[0], "enable") == 0) {
++		if (strcmp(args[1], "agent") == 0) {
++			struct server *sv;
++
++			sv = expect_server_admin(s, si, args[2]);
++			if (!sv)
++				return 1;
++
++			sv->agent.state &= ~CHK_STATE_DISABLED;
++
++			return 1;
++		}
+ 		if (strcmp(args[1], "server") == 0) {
+ 			struct server *sv;
+ 
+@@ -1355,7 +1366,18 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 		}
+ 	}
+ 	else if (strcmp(args[0], "disable") == 0) {
+-		if (strcmp(args[1], "server") == 0) {
++		if (strcmp(args[1], "agent") == 0) {
++			struct server *sv;
++
++			sv = expect_server_admin(s, si, args[2]);
++			if (!sv)
++				return 1;
++
++			sv->agent.state |= CHK_STATE_DISABLED;
++
++			return 1;
++		}
++		else if (strcmp(args[1], "server") == 0) {
+ 			struct server *sv;
+ 
+ 			sv = expect_server_admin(s, si, args[2]);
+-- 
+1.8.1.5
+
