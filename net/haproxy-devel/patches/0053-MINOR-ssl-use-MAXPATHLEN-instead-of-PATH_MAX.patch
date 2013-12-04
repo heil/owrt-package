@@ -1,7 +1,7 @@
 From 380110368e11e00579149a0347104d2ff553c1e7 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 13 Aug 2013 16:59:39 +0200
-Subject: [PATCH 53/55] MINOR: ssl: use MAXPATHLEN instead of PATH_MAX
+Subject: [PATCH 053/179] MINOR: ssl: use MAXPATHLEN instead of PATH_MAX
 
 Apollon Oikonomopoulos reported a build failure on Hurd where PATH_MAX
 is not defined. The only place where it is referenced is ssl_sock.c,

@@ -1,7 +1,7 @@
 From a0b68eddef149fd4ba26a26d6e25d34692478bfd Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 18:26:32 +0200
-Subject: [PATCH 43/50] MEDIUM: counters: factor out
+Subject: [PATCH 043/179] MEDIUM: counters: factor out
  smp_fetch_sc*_bytes_out_rate
 
 smp_fetch_sc0_bytes_out_rate, smp_fetch_sc1_bytes_out_rate, smp_fetch_sc2_bytes_out_rate,

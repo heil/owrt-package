@@ -1,7 +1,7 @@
 From c8c65700de05636693cdfbe9fb81f12b1c0b0f84 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 15:09:35 +0200
-Subject: [PATCH 32/50] MEDIUM: counters: factor out smp_fetch_sc*_conn_rate
+Subject: [PATCH 032/179] MEDIUM: counters: factor out smp_fetch_sc*_conn_rate
 
 smp_fetch_sc0_conn_rate, smp_fetch_sc1_conn_rate, smp_fetch_sc2_conn_rate,
 smp_fetch_src_conn_rate and smp_fetch_conn_rate were merged into a single

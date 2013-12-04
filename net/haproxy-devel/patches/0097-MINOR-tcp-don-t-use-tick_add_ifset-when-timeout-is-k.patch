@@ -1,8 +1,8 @@
 From 0bb166be5e8432246ca9a00fe5232325a76cacf8 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 4 Nov 2013 15:56:53 +0100
-Subject: [PATCH 97/97] MINOR: tcp: don't use tick_add_ifset() when timeout is
- known to be set
+Subject: [PATCH 097/179] MINOR: tcp: don't use tick_add_ifset() when timeout
+ is known to be set
 
 These two useless tests propably result from a copy-paste. The test is
 performed in the condition to enter the block.

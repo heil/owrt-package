@@ -1,7 +1,7 @@
 From 3c3dfd5c618cd18382b33091f10465792758f162 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 4 Nov 2013 18:09:12 +0100
-Subject: [PATCH 96/97] MINOR: acl: add a warning when an ACL keyword is used
+Subject: [PATCH 096/179] MINOR: acl: add a warning when an ACL keyword is used
  without any value
 
 It's quite common to write directives like the following :

@@ -1,7 +1,7 @@
 From a33410cf94db24d3ec83003a40aeec62897cca97 Mon Sep 17 00:00:00 2001
 From: Emeric Brun <ebrun@exceliance.fr>
 Date: Tue, 17 Sep 2013 15:47:48 +0200
-Subject: [PATCH 66/75] BUILD: ssl: compilation issue with openssl v0.9.6.
+Subject: [PATCH 066/179] BUILD: ssl: compilation issue with openssl v0.9.6.
 
 Failed to compile with openssl 0.9.6 since the 'verifyhost' feature.
 ---

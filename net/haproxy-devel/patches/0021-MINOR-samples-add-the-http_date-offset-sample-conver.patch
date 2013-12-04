@@ -1,7 +1,7 @@
 From 276fae9ab95a9addf6b867c78903d31ab4da8d3a Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 25 Jul 2013 14:36:01 +0200
-Subject: [PATCH 21/50] MINOR: samples: add the http_date([<offset>]) sample
+Subject: [PATCH 021/179] MINOR: samples: add the http_date([<offset>]) sample
  converter.
 
 Converts an integer supposed to contain a date since epoch to

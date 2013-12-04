@@ -1,7 +1,7 @@
 From 53aea10fe9835e59c40cb4aef29ff32b95e82e97 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 17:39:02 +0200
-Subject: [PATCH 42/50] MEDIUM: counters: factor out smp_fetch_sc*_kbytes_out
+Subject: [PATCH 042/179] MEDIUM: counters: factor out smp_fetch_sc*_kbytes_out
 
 smp_fetch_sc0_kbytes_out, smp_fetch_sc1_kbytes_out, smp_fetch_sc2_kbytes_out,
 smp_fetch_src_kbytes_out and smp_fetch_kbytes_out were merged into a single

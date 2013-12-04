@@ -1,7 +1,7 @@
 From 2c42ef5b91f95d03d9689021e9e1e289ff83e1ab Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Wed, 9 Oct 2013 21:57:02 +0200
-Subject: [PATCH 82/91] DOC: missing http-send-name-header keyword in keyword
+Subject: [PATCH 082/179] DOC: missing http-send-name-header keyword in keyword
  table
 
 This one was in the doc but not in the keyword matrix.

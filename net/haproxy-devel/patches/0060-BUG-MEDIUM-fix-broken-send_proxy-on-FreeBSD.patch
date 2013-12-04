@@ -1,7 +1,7 @@
 From 95742a43aaddf8a262339833688b75b5907f95c6 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 3 Sep 2013 09:02:11 +0200
-Subject: [PATCH 60/60] BUG/MEDIUM: fix broken send_proxy on FreeBSD
+Subject: [PATCH 060/179] BUG/MEDIUM: fix broken send_proxy on FreeBSD
 
 David Berard reported that send-proxy was broken on FreeBSD and tracked the
 issue to be an error returned by send(). We already had the same issue in

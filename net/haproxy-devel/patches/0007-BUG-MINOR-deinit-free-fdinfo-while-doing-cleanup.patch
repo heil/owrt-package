@@ -1,7 +1,7 @@
 From 4cc1b0d4ef283b5ace5249483ec7eb3b1fc5d193 Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Wed, 26 Jun 2013 16:49:51 +0800
-Subject: [PATCH 7/7] BUG/MINOR: deinit: free fdinfo while doing cleanup
+Subject: [PATCH 007/179] BUG/MINOR: deinit: free fdinfo while doing cleanup
 
 Both fdinfo and fdtab are allocated memory in init() while haproxy is starting,
 but only fdtab is freed in deinit(), fdinfo should also be freed.

@@ -1,7 +1,7 @@
 From 5b7ea3afa18351b2243fac6e9131327ff9d71911 Mon Sep 17 00:00:00 2001
 From: William Lallemand <wlallemand@exceliance.fr>
 Date: Wed, 28 Aug 2013 15:44:19 +0200
-Subject: [PATCH 56/60] BUG/MEDIUM: unique_id: junk in log on empty unique_id
+Subject: [PATCH 056/179] BUG/MEDIUM: unique_id: junk in log on empty unique_id
 
 When a request fail, the unique_id was allocated but not generated.
 The string was not initialized and junk was printed in the log with %ID.

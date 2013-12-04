@@ -1,7 +1,7 @@
 From 130ddf79faec46556f3da648ef27eed05eee4059 Mon Sep 17 00:00:00 2001
 From: Lukas Tribus <luky-37@hotmail.com>
 Date: Tue, 1 Oct 2013 00:28:03 +0200
-Subject: [PATCH 74/75] DOC: ssl: update build instructions to use new SSL_*
+Subject: [PATCH 074/179] DOC: ssl: update build instructions to use new SSL_*
  variables
 
 Since commit 9a05945bd ("BUILD: add SSL_INC/SSL_LIB variables to force the

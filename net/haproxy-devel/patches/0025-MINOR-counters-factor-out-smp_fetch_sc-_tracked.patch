@@ -1,7 +1,7 @@
 From 88821241d460fae569f4d423eebc21ca4dfb9e44 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 22 Jul 2013 18:29:29 +0200
-Subject: [PATCH 25/50] MINOR: counters: factor out smp_fetch_sc*_tracked
+Subject: [PATCH 025/179] MINOR: counters: factor out smp_fetch_sc*_tracked
 
 The new function makes use of the sc# in the keyword to
 get the counter ID.

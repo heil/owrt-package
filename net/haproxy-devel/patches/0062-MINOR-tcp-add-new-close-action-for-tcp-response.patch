@@ -1,7 +1,7 @@
 From cc1e04b1e8934212ca7e2535d84e8a5ec0717799 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 11 Sep 2013 23:20:29 +0200
-Subject: [PATCH 62/63] MINOR: tcp: add new "close" action for tcp-response
+Subject: [PATCH 062/179] MINOR: tcp: add new "close" action for tcp-response
 
 This new action immediately closes the connection with the server
 when the condition is met. The first such rule executed ends the

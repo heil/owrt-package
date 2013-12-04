@@ -1,8 +1,8 @@
 From 8cc16530c46d10f2bcbdfb9836fd5b203d9eed45 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Sun, 29 Sep 2013 11:36:53 +0200
-Subject: [PATCH 69/75] BUG/MINOR: acl: fix improper string size assignment in
- proxy argument
+Subject: [PATCH 069/179] BUG/MINOR: acl: fix improper string size assignment
+ in proxy argument
 
 This minor bug was found using the coccinelle script "da.cocci". The
 len was initialized twice instead of setting the size. It's harmless

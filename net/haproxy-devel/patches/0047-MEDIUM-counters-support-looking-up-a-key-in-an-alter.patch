@@ -1,7 +1,7 @@
 From 0f791d42b610d20fcc3ee1713d73c9d45e7ad4f6 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 19:56:43 +0200
-Subject: [PATCH 47/50] MEDIUM: counters: support looking up a key in an
+Subject: [PATCH 047/179] MEDIUM: counters: support looking up a key in an
  alternate table
 
 sc_* sample fetches now take an optional parameter which allows to look

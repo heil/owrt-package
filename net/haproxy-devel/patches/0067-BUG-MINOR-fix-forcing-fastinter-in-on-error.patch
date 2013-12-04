@@ -1,7 +1,7 @@
 From 1d57e508104ccd085c1e70d147edcba9f6960c1b Mon Sep 17 00:00:00 2001
 From: Sergiy Prykhodko <pservit@gmail.com>
 Date: Sat, 21 Sep 2013 12:05:00 +0300
-Subject: [PATCH 67/75] BUG/MINOR: fix forcing fastinter in "on-error"
+Subject: [PATCH 067/179] BUG/MINOR: fix forcing fastinter in "on-error"
 
 health_adjust() should requeue the task after changing its expire timer.
 

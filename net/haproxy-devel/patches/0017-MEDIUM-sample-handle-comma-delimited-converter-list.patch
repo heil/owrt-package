@@ -1,7 +1,7 @@
 From 833cc79434be9c5d33267a389766b850579334f2 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 24 Jul 2013 15:34:19 +0200
-Subject: [PATCH 17/50] MEDIUM: sample: handle comma-delimited converter list
+Subject: [PATCH 017/179] MEDIUM: sample: handle comma-delimited converter list
 
 We now support having a comma-delimited converter list, which can start
 right after the fetch keyword. The immediate benefit is that it allows

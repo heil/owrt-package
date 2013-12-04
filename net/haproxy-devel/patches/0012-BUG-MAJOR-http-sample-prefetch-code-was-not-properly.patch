@@ -1,8 +1,8 @@
 From 506d050600ffa767345766bdc19752284c971a9f Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Sat, 6 Jul 2013 13:29:24 +0200
-Subject: [PATCH 12/50] BUG/MAJOR: http: sample prefetch code was not properly
- migrated
+Subject: [PATCH 012/179] BUG/MAJOR: http: sample prefetch code was not
+ properly migrated
 
 When ACLs and samples were converged in 1.5-dev18, function
 "acl_prefetch_http" was not properly converted after commit 8ed669b1.

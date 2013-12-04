@@ -1,7 +1,7 @@
 From fa8e2bc68c583a227ebc78bab5779b84065b28da Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 18 Jul 2013 22:21:54 +0200
-Subject: [PATCH 16/50] OPTIM: splicing: use splice() for the last block when
+Subject: [PATCH 016/179] OPTIM: splicing: use splice() for the last block when
  relevant
 
 Splicing is avoided for small transfers because it's generally cheaper

@@ -1,7 +1,7 @@
 From e28f1ecf2b59696b2d55f758145ecea8d53302ea Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Wed, 9 Oct 2013 15:23:01 +0200
-Subject: [PATCH 80/91] BUILD/MINOR: missing header file
+Subject: [PATCH 080/179] BUILD/MINOR: missing header file
 
 In the header file "common/regex.h", the C keyword NULL is used. This
 keyword is referenced into the header file "stdlib.h", but this is not

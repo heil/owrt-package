@@ -1,7 +1,7 @@
 From 44f6539e4796ac2069130185700fd48df3af2bdc Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 25 Jun 2013 07:56:20 +0200
-Subject: [PATCH 6/7] DOC: remove the comment saying that SSL certs are not
+Subject: [PATCH 006/179] DOC: remove the comment saying that SSL certs are not
  checked on the server side
 
 Server certificate check was added in 1.5-dev13 but the comment on the "ssl"

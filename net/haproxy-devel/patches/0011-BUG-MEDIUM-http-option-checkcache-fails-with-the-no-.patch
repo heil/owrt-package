@@ -1,7 +1,7 @@
 From 5b15f9004d13b8a7e5e665929cad97a2c0beebd3 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 4 Jul 2013 12:46:56 +0200
-Subject: [PATCH 11/50] BUG/MEDIUM: http: "option checkcache" fails with the
+Subject: [PATCH 011/179] BUG/MEDIUM: http: "option checkcache" fails with the
  no-cache header
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

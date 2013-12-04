@@ -1,7 +1,8 @@
 From 27f5134e60b3eb5a84dea54dffe40777d8325bb3 Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Wed, 9 Oct 2013 06:51:49 +0200
-Subject: [PATCH 81/91] DOC: missing information for the "description" keyword
+Subject: [PATCH 081/179] DOC: missing information for the "description"
+ keyword
 
 This keyword was not documented.
 ---

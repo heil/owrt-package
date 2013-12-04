@@ -1,7 +1,7 @@
 From 3b46c5c47d454172fa693cf9dd75dd168dc2cf57 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 00:22:50 +0200
-Subject: [PATCH 31/50] MEDIUM: counters: factor out smp_fetch_sc*_conn_cnt
+Subject: [PATCH 031/179] MEDIUM: counters: factor out smp_fetch_sc*_conn_cnt
 
 smp_fetch_sc0_conn_cnt, smp_fetch_sc1_conn_cnt, smp_fetch_sc2_conn_cnt,
 smp_fetch_src_conn_cnt and smp_fetch_conn_cnt were merged into a single

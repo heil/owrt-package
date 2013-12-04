@@ -1,7 +1,7 @@
 From 7ef0edf7fffd5c844cd11f784cfd099e23d2af89 Mon Sep 17 00:00:00 2001
 From: Apollon Oikonomopoulos <apoikos@gmail.com>
 Date: Sun, 29 Sep 2013 23:03:51 +0300
-Subject: [PATCH 71/75] DOC: add manpage references to all system calls
+Subject: [PATCH 071/179] DOC: add manpage references to all system calls
 
 Add a man section to every system call reference, giving users pointers to the
 respective manpages.

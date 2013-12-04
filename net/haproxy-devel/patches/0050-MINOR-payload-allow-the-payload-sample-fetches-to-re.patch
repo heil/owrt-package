@@ -1,7 +1,7 @@
 From 00f0084752eab236af80e61291d672e835790cff Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Fri, 2 Aug 2013 11:07:32 +0200
-Subject: [PATCH 50/50] MINOR: payload: allow the payload sample fetches to
+Subject: [PATCH 050/179] MINOR: payload: allow the payload sample fetches to
  retrieve arbitrary lengths
 
 When using req.payload and res.payload to look up for specific content at an

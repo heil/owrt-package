@@ -1,7 +1,7 @@
 From b5e0af0b6bd054b2919911aabee52e46c5ed30bb Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 22 Jul 2013 23:47:07 +0200
-Subject: [PATCH 28/50] MEDIUM: counters: factor out smp_fetch_sc*_gpc0_rate
+Subject: [PATCH 028/179] MEDIUM: counters: factor out smp_fetch_sc*_gpc0_rate
 
 smp_fetch_sc0_gpc0, smp_fetch_sc1_gpc0, smp_fetch_sc2_gpc0,
 smp_fetch_src_gpc0 and smp_fetch_gpc0 were merged into a single

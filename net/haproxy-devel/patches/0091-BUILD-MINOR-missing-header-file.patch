@@ -1,7 +1,7 @@
 From a054d410db7e3498b66181c0f29cdbf0dd08a532 Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Wed, 16 Oct 2013 16:19:38 +0200
-Subject: [PATCH 91/91] BUILD/MINOR: missing header file
+Subject: [PATCH 091/179] BUILD/MINOR: missing header file
 
 In the header file "types/proto_http.h", the list are used
 but the header file "mini-clist.h" is not included.

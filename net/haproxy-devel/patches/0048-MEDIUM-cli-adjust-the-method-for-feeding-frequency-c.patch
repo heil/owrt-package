@@ -1,7 +1,7 @@
 From ce54d1b9f2fdd250d864055a9db34f4a6315d37d Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 23:44:30 +0200
-Subject: [PATCH 48/50] MEDIUM: cli: adjust the method for feeding frequency
+Subject: [PATCH 048/179] MEDIUM: cli: adjust the method for feeding frequency
  counters in tables
 
 Since commit 654694e1, it has been possible to feed some data into

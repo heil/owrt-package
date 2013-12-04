@@ -1,7 +1,7 @@
 From 0fc36e3ae99ccbe6de88cf64093f3045e526d088 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 4 Jul 2013 11:44:27 +0200
-Subject: [PATCH 10/50] BUG/MAJOR: http: don't emit the send-name-header when
+Subject: [PATCH 010/179] BUG/MAJOR: http: don't emit the send-name-header when
  no server is available
 
 Lukas Benes reported that http-send-name-header causes a segfault if no

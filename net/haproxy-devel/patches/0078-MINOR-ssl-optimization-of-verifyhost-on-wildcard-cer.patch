@@ -1,7 +1,7 @@
 From a848dae3f02f8206d32ef58c358b7f167e96ae0f Mon Sep 17 00:00:00 2001
 From: Emeric Brun <ebrun@exceliance.fr>
 Date: Tue, 8 Oct 2013 11:27:28 +0200
-Subject: [PATCH 78/91] MINOR: ssl: optimization of verifyhost on wildcard
+Subject: [PATCH 078/179] MINOR: ssl: optimization of verifyhost on wildcard
  certificates.
 
 Optimizes verifyhost on wildcard certificates avoiding travel several times

@@ -1,7 +1,7 @@
 From 79c412b67380c0e316863b060d31980b5fa3deb6 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 30 Oct 2013 19:30:32 +0100
-Subject: [PATCH 95/97] BUG/MEDIUM: acl: do not evaluate next terms after a
+Subject: [PATCH 095/179] BUG/MEDIUM: acl: do not evaluate next terms after a
  miss
 
 When a condition does something like :

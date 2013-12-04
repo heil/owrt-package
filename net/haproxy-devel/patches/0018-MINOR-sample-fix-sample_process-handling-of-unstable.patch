@@ -1,8 +1,8 @@
 From 18387e2e486fb3d6c1623c1911752639622288d2 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 25 Jul 2013 12:02:38 +0200
-Subject: [PATCH 18/50] MINOR: sample: fix sample_process handling of unstable
- data
+Subject: [PATCH 018/179] MINOR: sample: fix sample_process handling of
+ unstable data
 
 sample_process() used to return NULL on changing data, regardless of the
 SMP_OPT_FINAL flag. Let's change this so that it is now possible to

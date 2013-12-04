@@ -1,7 +1,7 @@
 From 5068d96ac184e45f8aa3f28dd11701cffca60b87 Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Fri, 4 Oct 2013 16:27:27 +0200
-Subject: [PATCH 90/91] MINOR: http: change url_decode to return the size of
+Subject: [PATCH 090/179] MINOR: http: change url_decode to return the size of
  the decoded string.
 
 Currently url_decode returns 1 or 0 depending on whether it could decode

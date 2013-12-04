@@ -1,8 +1,8 @@
 From 9a05945bd08be144bc6ae0551f7c2fa2b8359d12 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 17 Sep 2013 15:26:39 +0200
-Subject: [PATCH 64/75] BUILD: add SSL_INC/SSL_LIB variables to force the path
- to openssl
+Subject: [PATCH 064/179] BUILD: add SSL_INC/SSL_LIB variables to force the
+ path to openssl
 
 When trying to build with various versions of openssl, forcing the
 path is still cumbersome. Let's add SSL_INC and SSL_LIB similar to

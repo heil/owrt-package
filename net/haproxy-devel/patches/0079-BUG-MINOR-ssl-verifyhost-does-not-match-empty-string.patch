@@ -1,8 +1,8 @@
 From 369da8565a2acb2227387451982e2a12eea4b110 Mon Sep 17 00:00:00 2001
 From: Emeric Brun <ebrun@exceliance.fr>
 Date: Tue, 8 Oct 2013 11:39:35 +0200
-Subject: [PATCH 79/91] BUG/MINOR: ssl: verifyhost does not match empty strings
- on wildcard.
+Subject: [PATCH 079/179] BUG/MINOR: ssl: verifyhost does not match empty
+ strings on wildcard.
 
 RFC6125 does not specify if wildcard matches empty strings but
 classical browsers implementations does.

@@ -1,8 +1,8 @@
 From 4d4149cf3eca8c70afc5ee8601d0358bb8e1ccd0 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 19:33:46 +0200
-Subject: [PATCH 46/50] MEDIUM: counters: support passing the counter number as
- a fetch argument
+Subject: [PATCH 046/179] MEDIUM: counters: support passing the counter number
+ as a fetch argument
 
 One very annoying issue when trying to extend the sticky counters beyond
 the current 3 counters is that it requires a massive copy-paste of fetch

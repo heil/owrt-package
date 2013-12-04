@@ -1,8 +1,8 @@
 From 9ca6936c80cf02b37d6bcf2f58ef2bfdac0d52b2 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 22 Oct 2013 19:10:06 +0200
-Subject: [PATCH 86/91] BUG/MINOR: acl: implicit arguments of ACL keywords were
- not properly resolved
+Subject: [PATCH 086/179] BUG/MINOR: acl: implicit arguments of ACL keywords
+ were not properly resolved
 
 William Lallemand reported a bug which happens when an ACL keyword using an
 implicit argument (eg: a proxy name) is used : the keyword is not properly

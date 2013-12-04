@@ -1,7 +1,7 @@
 From 5b8ad22228d95adf8aaf3bdb79fa07f447adff1b Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 25 Jul 2013 12:17:57 +0200
-Subject: [PATCH 19/50] CLEANUP: acl: move the 3 remaining sample fetches to
+Subject: [PATCH 019/179] CLEANUP: acl: move the 3 remaining sample fetches to
  samples.c
 
 There is no more reason for having "always_true", "always_false" and "env"

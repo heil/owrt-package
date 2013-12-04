@@ -1,7 +1,7 @@
 From 2e97957cdc037ba1ea5d0697818302f10205f30f Mon Sep 17 00:00:00 2001
 From: Apollon Oikonomopoulos <apoikos@gmail.com>
 Date: Sun, 29 Sep 2013 23:04:13 +0300
-Subject: [PATCH 72/75] DOC: update manpage reference to haproxy-en.txt
+Subject: [PATCH 072/179] DOC: update manpage reference to haproxy-en.txt
 
 The manpage refers to haproxy-en.txt, which is obsolete. Update the reference
 to point to configuration.txt, together with the location on Debian systems.

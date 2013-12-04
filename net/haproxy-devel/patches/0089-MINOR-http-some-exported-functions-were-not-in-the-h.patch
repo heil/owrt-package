@@ -1,7 +1,7 @@
 From de6617b48648a42586d44ff5301a8f09cad48939 Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Tue, 15 Oct 2013 11:43:19 +0200
-Subject: [PATCH 89/91] MINOR: http: some exported functions were not in the
+Subject: [PATCH 089/179] MINOR: http: some exported functions were not in the
  header file
 
 Export the following functions:

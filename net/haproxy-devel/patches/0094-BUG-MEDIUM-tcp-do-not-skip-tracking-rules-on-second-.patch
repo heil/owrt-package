@@ -1,7 +1,7 @@
 From 44778ad87d9aa4127b6968a18413b74487c0b762 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 30 Oct 2013 19:24:00 +0100
-Subject: [PATCH 94/97] BUG/MEDIUM: tcp: do not skip tracking rules on second
+Subject: [PATCH 094/179] BUG/MEDIUM: tcp: do not skip tracking rules on second
  pass
 
 The track-sc* tcp rules are bogus. The test to verify if the

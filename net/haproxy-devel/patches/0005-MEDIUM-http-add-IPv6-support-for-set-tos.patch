@@ -1,7 +1,7 @@
 From 67db8df12ba640f639492e23d554a9cd09dfe8ad Mon Sep 17 00:00:00 2001
 From: Lukas Tribus <luky-37@hotmail.com>
 Date: Sun, 23 Jun 2013 17:37:13 +0200
-Subject: [PATCH 5/7] MEDIUM: http: add IPv6 support for "set-tos"
+Subject: [PATCH 005/179] MEDIUM: http: add IPv6 support for "set-tos"
 
 As per RFC3260 #4 and BCP37 #4.2 and #5.2, the IPv6 counterpart of TOS
 is "traffic class".

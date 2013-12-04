@@ -1,7 +1,7 @@
 From 05bf5e1c36194b62e963c422498070a545c2f555 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Sun, 20 Oct 2013 23:10:28 +0200
-Subject: [PATCH 92/97] BUG/MEDIUM: session: risk of crash on out of memory
+Subject: [PATCH 092/179] BUG/MEDIUM: session: risk of crash on out of memory
  conditions
 
 In session_accept(), if we face a memory allocation error, we try to

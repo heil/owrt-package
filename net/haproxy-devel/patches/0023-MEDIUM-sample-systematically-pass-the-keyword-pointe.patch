@@ -1,8 +1,8 @@
 From ef38c39287f3154663181b3101ef7b3424a71af0 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 22 Jul 2013 16:29:32 +0200
-Subject: [PATCH 23/50] MEDIUM: sample: systematically pass the keyword pointer
- to the keyword
+Subject: [PATCH 023/179] MEDIUM: sample: systematically pass the keyword
+ pointer to the keyword
 
 We're having a lot of duplicate code just because of minor variants between
 fetch functions that could be dealt with if the functions had the pointer to

@@ -1,7 +1,7 @@
 From 468f493081de75fe95b6ee19bdcfbfd84927eb9f Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 1 Aug 2013 16:50:16 +0200
-Subject: [PATCH 22/50] DOC: minor improvements to the part on the stats
+Subject: [PATCH 022/179] DOC: minor improvements to the part on the stats
  socket.
 
 Some people regularly ask for some details, which proves the doc is far

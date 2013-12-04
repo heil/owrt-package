@@ -1,8 +1,8 @@
 From a65536ca4ebac0b016f9dcfd905c0431fca597f5 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 22 Jul 2013 22:40:11 +0200
-Subject: [PATCH 26/50] MINOR: counters: provide a generic function to retrieve
- a stkctr for sc* and src.
+Subject: [PATCH 026/179] MINOR: counters: provide a generic function to
+ retrieve a stkctr for sc* and src.
 
 This function aims at simplifying the prefetching of the table and entry
 when using any of the session counters fetches. The principle is that the

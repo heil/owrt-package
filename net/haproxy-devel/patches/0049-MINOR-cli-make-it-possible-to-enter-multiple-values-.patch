@@ -1,7 +1,7 @@
 From 47060b6ae03cbd83df465cefa885521058d76dfe Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 1 Aug 2013 21:11:42 +0200
-Subject: [PATCH 49/50] MINOR: cli: make it possible to enter multiple values
+Subject: [PATCH 049/179] MINOR: cli: make it possible to enter multiple values
  at once with "set table"
 
 The "set table" statement allows to create new entries with their respective

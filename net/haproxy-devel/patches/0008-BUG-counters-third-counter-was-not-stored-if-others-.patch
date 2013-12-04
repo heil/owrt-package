@@ -1,7 +1,7 @@
 From 7af7d5957d04e8160a4e4e4eb6049c056ec06097 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 1 Jul 2013 18:07:03 +0200
-Subject: [PATCH 8/9] BUG: counters: third counter was not stored if others
+Subject: [PATCH 008/179] BUG: counters: third counter was not stored if others
  unset
 
 Commit e25c917a introduced a third tracking counter bug forgot

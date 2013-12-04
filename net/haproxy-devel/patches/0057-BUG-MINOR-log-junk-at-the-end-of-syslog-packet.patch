@@ -1,7 +1,7 @@
 From afeb987c5c62a25def46fcbaeaa31ee4aec977f1 Mon Sep 17 00:00:00 2001
 From: William Lallemand <wlallemand@exceliance.fr>
 Date: Fri, 30 Aug 2013 14:17:46 +0200
-Subject: [PATCH 57/60] BUG/MINOR: log: junk at the end of syslog packet
+Subject: [PATCH 057/179] BUG/MINOR: log: junk at the end of syslog packet
 
 With a facily of 2 or 1 digit, the send size was wrong and bytes with
 unknown value were sent.

@@ -1,7 +1,7 @@
 From 9f09521f2d2deacfb4b1b10b23eb5525b9941c62 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 13 Aug 2013 17:51:07 +0200
-Subject: [PATCH 55/55] BUG/MEDIUM: unique_id: HTTP request counter must be
+Subject: [PATCH 055/179] BUG/MEDIUM: unique_id: HTTP request counter must be
  unique!
 
 The HTTP request counter is incremented non atomically, which means that

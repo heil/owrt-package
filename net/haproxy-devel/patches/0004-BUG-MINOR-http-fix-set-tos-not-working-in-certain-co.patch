@@ -1,7 +1,7 @@
 From 2dd1d1a93f70dddc0636f5cb2f5921998dc91e65 Mon Sep 17 00:00:00 2001
 From: Lukas Tribus <luky-37@hotmail.com>
 Date: Wed, 19 Jun 2013 23:34:41 +0200
-Subject: [PATCH 4/7] BUG/MINOR: http: fix "set-tos" not working in certain
+Subject: [PATCH 004/179] BUG/MINOR: http: fix "set-tos" not working in certain
  configurations
 
 s->req->prod->conn->addr.to.ss_family contains only useful data if

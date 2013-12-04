@@ -1,8 +1,8 @@
 From dc13c11c1e1e4888227a291e5eac7156e057b27a Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Fri, 21 Jun 2013 23:16:39 +0200
-Subject: [PATCH 3/3] BUG/MEDIUM: prevent gcc from moving empty keywords lists
- into BSS
+Subject: [PATCH 003/179] BUG/MEDIUM: prevent gcc from moving empty keywords
+ lists into BSS
 
 Benoit Dolez reported a failure to start haproxy 1.5-dev19. The
 process would immediately report an internal error with missing

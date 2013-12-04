@@ -1,7 +1,7 @@
 From ed5a4aefaee68e1046a55218be7853739e3484c0 Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Mon, 14 Oct 2013 14:07:36 +0200
-Subject: [PATCH 84/91] CLEANUP: regex: Create regex_comp function that
+Subject: [PATCH 084/179] CLEANUP: regex: Create regex_comp function that
  compiles regex using compilation options
 
 The current file "regex.h" define an abstraction for the regex. It

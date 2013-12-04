@@ -1,7 +1,7 @@
 From 472b1ee115f45129ea3fc19e26f85b3ec9715abe Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 14 Oct 2013 22:41:30 +0200
-Subject: [PATCH 85/91] BUG/MEDIUM: http: accept full buffers on
+Subject: [PATCH 085/179] BUG/MEDIUM: http: accept full buffers on
  smp_prefetch_http
 
 Bertrand Jacquin reported a but when using tcp_request content rules

@@ -1,7 +1,7 @@
 From cf47763c921dedcf4ab78d9683dba7e9a6bd67eb Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 16:04:37 +0200
-Subject: [PATCH 37/50] MEDIUM: counters: factor out
+Subject: [PATCH 037/179] MEDIUM: counters: factor out
  smp_fetch_sc*_http_req_rate
 
 smp_fetch_sc0_http_req_rate, smp_fetch_sc1_http_req_rate, smp_fetch_sc2_http_req_rate,

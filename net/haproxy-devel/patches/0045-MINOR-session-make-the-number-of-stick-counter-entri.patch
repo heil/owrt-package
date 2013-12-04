@@ -1,7 +1,7 @@
 From b4c8493a9f0177689646670b035d095be6f38891 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 23 Jul 2013 19:15:30 +0200
-Subject: [PATCH 45/50] MINOR: session: make the number of stick counter
+Subject: [PATCH 045/179] MINOR: session: make the number of stick counter
  entries more configurable
 
 In preparation of more flexibility in the stick counters, make their

@@ -1,7 +1,7 @@
 From 47e8eba9a7586b9d70003ee0e7a8191257180968 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 11 Sep 2013 23:28:46 +0200
-Subject: [PATCH 63/63] MINOR: payload: provide the "res.len" fetch method
+Subject: [PATCH 063/179] MINOR: payload: provide the "res.len" fetch method
 
 This fetch method returns the response buffer len, similarly
 to req.len for the request. Previously it was only possible

@@ -1,7 +1,7 @@
 From ef37a66628186326b9ed65e47396fbcd6337eee7 Mon Sep 17 00:00:00 2001
 From: Thierry FOURNIER <tfournier@exceliance.fr>
 Date: Tue, 15 Oct 2013 13:41:44 +0200
-Subject: [PATCH 88/91] CLEANUP: The function "regex_exec" needs the string
+Subject: [PATCH 088/179] CLEANUP: The function "regex_exec" needs the string
  length but in many case they expect null terminated char.
 
 If haproxy is compiled with the USE_PCRE_JIT option, the length of the

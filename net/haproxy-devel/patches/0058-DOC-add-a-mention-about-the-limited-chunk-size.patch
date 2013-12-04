@@ -1,7 +1,7 @@
 From f3a3e1389e40434da9e1fc295be6ff5a8037effb Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Sat, 31 Aug 2013 08:16:26 +0200
-Subject: [PATCH 58/60] DOC: add a mention about the limited chunk size
+Subject: [PATCH 058/179] DOC: add a mention about the limited chunk size
 
 We now indicate that PD flags can be returned for chunk sizes >= 2GB.
 ---

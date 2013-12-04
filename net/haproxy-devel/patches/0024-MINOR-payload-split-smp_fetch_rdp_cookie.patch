@@ -1,7 +1,7 @@
 From cadd8c9ec33b6cea21256f755a6b4fe986d30927 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 22 Jul 2013 18:09:52 +0200
-Subject: [PATCH 24/50] MINOR: payload: split smp_fetch_rdp_cookie()
+Subject: [PATCH 024/179] MINOR: payload: split smp_fetch_rdp_cookie()
 
 This function is also called directly from backend.c, so let's stop
 building fake args to call it as a sample fetch, and have a lower

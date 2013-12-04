@@ -1,7 +1,7 @@
 From 092502605e47e662669c53292a697c180026424f Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Tue, 2 Jul 2013 01:19:15 +0800
-Subject: [PATCH 9/9] DOC: minor typo fix in documentation
+Subject: [PATCH 009/179] DOC: minor typo fix in documentation
 
 "http-reqsponse" => "http-response"
 

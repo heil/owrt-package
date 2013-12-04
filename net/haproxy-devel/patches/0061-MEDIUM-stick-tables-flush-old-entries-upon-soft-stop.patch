@@ -1,7 +1,8 @@
 From 3a925c155d888aed83608e4ad6474702f28aac02 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 4 Sep 2013 17:54:01 +0200
-Subject: [PATCH 61/63] MEDIUM: stick-tables: flush old entries upon soft-stop
+Subject: [PATCH 061/179] MEDIUM: stick-tables: flush old entries upon
+ soft-stop
 
 When a process with large stick tables is replaced by a new one and remains
 present until the last connection finishes, it keeps these data in memory

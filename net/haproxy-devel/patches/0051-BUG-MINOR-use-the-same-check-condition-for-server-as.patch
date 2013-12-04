@@ -1,7 +1,7 @@
 From 8f9fd2f0a0893761afeb6800c7b62a51d782af0e Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Wed, 7 Aug 2013 09:48:23 +0800
-Subject: [PATCH 51/55] BUG/MINOR: use the same check condition for server as
+Subject: [PATCH 051/179] BUG/MINOR: use the same check condition for server as
  other algorithms
 
 Such load balance algorithms as roundrobin, leastconn and first will check the

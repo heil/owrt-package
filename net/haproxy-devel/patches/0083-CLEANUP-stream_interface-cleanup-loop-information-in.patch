@@ -1,8 +1,8 @@
 From e68e02dc1d93ae5c684fb2c12adffe3d9b87fce9 Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Fri, 11 Oct 2013 15:48:29 +0800
-Subject: [PATCH 83/91] CLEANUP: stream_interface: cleanup loop information in
- si_conn_send_loop()
+Subject: [PATCH 083/179] CLEANUP: stream_interface: cleanup loop information
+ in si_conn_send_loop()
 
 Though si_conn_send_loop() does not loop over ->snd_buf() after commit ed7f836,
 there is still some codes left which use `while` but only execute once. This

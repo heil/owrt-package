@@ -1,7 +1,7 @@
 From be55431f9f4910de2d02922cabfd0ed2f0e7a776 Mon Sep 17 00:00:00 2001
 From: Evan Broder <evan@stripe.com>
 Date: Thu, 27 Jun 2013 00:05:25 -0700
-Subject: [PATCH 59/60] MINOR: ssl: Add statement 'verifyhost' to "server"
+Subject: [PATCH 059/179] MINOR: ssl: Add statement 'verifyhost' to "server"
  statements
 
 verifyhost allows you to specify a hostname that the remote server's

@@ -1,7 +1,7 @@
 From 61d39a0e2a047df78f7f3bfcf5584090913cdc65 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 18 Jul 2013 21:49:32 +0200
-Subject: [PATCH 14/50] BUG/MEDIUM: splicing: fix abnormal CPU usage with
+Subject: [PATCH 014/179] BUG/MEDIUM: splicing: fix abnormal CPU usage with
  splicing
 
 Mark Janssen reported an issue in 1.5-dev19 which was introduced

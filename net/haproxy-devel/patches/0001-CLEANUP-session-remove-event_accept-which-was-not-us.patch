@@ -1,8 +1,8 @@
 From 430f291a9940a24cbf1cf045eab6719344c70df9 Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Thu, 20 Jun 2013 13:28:38 +0800
-Subject: [PATCH] CLEANUP: session: remove event_accept() which was not used
- anymore
+Subject: [PATCH 001/179] CLEANUP: session: remove event_accept() which was not
+ used anymore
 
 Remove event_accept() in include/proto/proto_http.h and use correct function
 name in other two files instead of event_accept().

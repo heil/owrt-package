@@ -1,7 +1,7 @@
 From 6236d3abe4fe7e698f0fd26d6cf51f0d4c6d872a Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 25 Jul 2013 14:28:25 +0200
-Subject: [PATCH 20/50] MINOR: sample: add a new "date" fetch to return the
+Subject: [PATCH 020/179] MINOR: sample: add a new "date" fetch to return the
  current date
 
 Returns the current date as the epoch (number of seconds since 01/01/1970).

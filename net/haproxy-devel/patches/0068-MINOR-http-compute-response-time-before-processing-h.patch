@@ -1,7 +1,7 @@
 From 7959a55e15566baa936b9880d216868e5390d8e5 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 23 Sep 2013 16:44:27 +0200
-Subject: [PATCH 68/75] MINOR: http: compute response time before processing
+Subject: [PATCH 068/179] MINOR: http: compute response time before processing
  headers
 
 At the moment, HTTP response time is computed after response headers are

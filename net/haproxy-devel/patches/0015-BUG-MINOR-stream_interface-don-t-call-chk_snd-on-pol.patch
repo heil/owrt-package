@@ -1,7 +1,7 @@
 From 5007d2aa33c25f521f94733af56422062f80ba4b Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 18 Jul 2013 22:09:48 +0200
-Subject: [PATCH 15/50] BUG/MINOR: stream_interface: don't call chk_snd() on
+Subject: [PATCH 015/179] BUG/MINOR: stream_interface: don't call chk_snd() on
  polled events
 
 As explained in previous patch, we incorrectly call chk_snd() when

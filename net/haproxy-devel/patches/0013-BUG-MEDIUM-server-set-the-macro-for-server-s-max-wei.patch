@@ -1,7 +1,7 @@
 From a34bdc0ea402ea5be1e9d7f80eaddec772b94393 Mon Sep 17 00:00:00 2001
 From: Godbach <nylzhaowei@gmail.com>
 Date: Mon, 22 Jul 2013 07:44:53 +0800
-Subject: [PATCH 13/50] BUG/MEDIUM: server: set the macro for server's max
+Subject: [PATCH 013/179] BUG/MEDIUM: server: set the macro for server's max
  weight SRV_UWGHT_MAX to SRV_UWGHT_RANGE
 
 The max weight of server is 256 now, but SRV_UWGHT_MAX is still 255. As a result,
