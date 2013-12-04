@@ -1,0 +1,94 @@
+From 06d97f935c3b30c9d1a3923827d8cdb85d6072bc Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 2 Dec 2013 17:45:48 +0100
+Subject: [PATCH 169/179] MEDIUM: log-format: relax parsing of '%' followed by
+ unsupported characters
+
+At the moment when a '%' character is followed by any unhandled character,
+it is considered as a variable name, and if it cannot be resolved, a warning
+is emitted and the configuration goes on.
+
+When we start using log-format for redirect rules, it may happen that some
+people accidently use '%' instead of '%%' without understanding the cause
+of the issue. Thus we do two things here :
+
+   - if a single '%' is followed by a blank or a digit, we fix it and emit a
+     warning explaining how this should be done ; this ensures that existing
+     configs continue to work ;
+
+   - if a single '%' is followed by an unknown variable name, we report it
+     and explain how to emit a verbatim '%' in case this is what the user
+     desired.
+---
+ doc/configuration.txt |  3 ++-
+ src/log.c             | 17 +++++++++++++----
+ 2 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 838b33a..b2ef7e3 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -11049,7 +11049,8 @@ less common information such as the client's SSL certificate's DN, or to log
+ the key that would be used to store an entry into a stick table.
+ 
+ Note: spaces must be escaped. A space character is considered as a separator.
+-HAproxy will automatically merge consecutive separators.
++In order to emit a verbatim '%', it must be preceeded by another '%' resulting
++in '%%'. HAProxy will automatically merge consecutive separators.
+ 
+ Flags are :
+   * Q: quote a string
+diff --git a/src/log.c b/src/log.c
+index dd65e26..3c461a3 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -280,12 +280,12 @@ int parse_logformat_var(char *arg, int arg_len, char *var, int var_len, struct p
+ 					LIST_ADDQ(list_format, &node->list);
+ 				}
+ 				if (logformat_keywords[j].replace_by)
+-					Warning("parsing [%s:%d] : deprecated variable '%s' in '%s', please replace it with '%s'\n",
++					Warning("parsing [%s:%d] : deprecated variable '%s' in '%s', please replace it with '%s'.\n",
+ 					        curproxy->conf.args.file, curproxy->conf.args.line,
+ 					        logformat_keywords[j].name, fmt_directive(curproxy), logformat_keywords[j].replace_by);
+ 				return 0;
+ 			} else {
+-				Warning("parsing [%s:%d] : '%s' : format variable '%s' is reserved for HTTP mode\n",
++				Warning("parsing [%s:%d] : '%s' : format variable '%s' is reserved for HTTP mode.\n",
+ 				        curproxy->conf.args.file, curproxy->conf.args.line, fmt_directive(curproxy),
+ 				        logformat_keywords[j].name);
+ 				return -1;
+@@ -295,7 +295,7 @@ int parse_logformat_var(char *arg, int arg_len, char *var, int var_len, struct p
+ 
+ 	j = var[var_len];
+ 	var[var_len] = 0;
+-	Warning("parsing [%s:%d] : no such format variable '%s' in '%s'\n",
++	Warning("parsing [%s:%d] : no such format variable '%s' in '%s'. If you wanted to emit the '%%' character verbatim, you need to use '%%%%' in log-format expressions.\n",
+ 	        curproxy->conf.args.file, curproxy->conf.args.line, var, fmt_directive(curproxy));
+ 	var[var_len] = j;
+ 	return -1;
+@@ -442,12 +442,21 @@ void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list
+ 				cformat = LF_STEXPR;
+ 				var = str + 1;         // store expr in variable name
+ 			}
+-			else if (isalnum((int)*str)) { // variable name
++			else if (isalpha((int)*str)) { // variable name
+ 				cformat = LF_VAR;
+ 				var = str;
+ 			}
+ 			else if (*str == '%')
+ 				cformat = LF_TEXT;     // convert this character to a litteral (useful for '%')
++			else if (isdigit(*str) || isblank(*str)) {
++				/* single '%' followed by blank or digit, send them both */
++				cformat = LF_TEXT;
++				pformat = LF_TEXT; /* finally we include the previous char as well */
++				sp = str - 1; /* send both the '%' and the current char */
++				Warning("parsing [%s:%d] : Fixed missing '%%' before '%c' at position %d in %s line : '%s'. Please use '%%%%' when you need the '%%' character in a log-format expression.\n",
++					curproxy->conf.args.file, curproxy->conf.args.line, *str, (int)(str - backfmt), fmt_directive(curproxy), fmt);
++
++			}
+ 			else
+ 				cformat = LF_INIT;     // handle other cases of litterals
+ 			break;
+-- 
+1.8.1.5
+

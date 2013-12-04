@@ -1,0 +1,50 @@
+From e155ec245a81e3e4b26325ebec6ac4c0b3f46874 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 18 Nov 2013 18:33:22 +0100
+Subject: [PATCH 110/179] BUG/MINOR: http: fix build warning introduced with
+ url32/url32_src
+
+commit 39c63c5 "url32+src - like base32+src but whole url including parameters"
+was missing the last argument "const char *kw", resulting in the build warning
+below :
+
+src/proto_http.c:10351:2: warning: initialization from incompatible pointer type [enabled by default]
+src/proto_http.c:10351:2: warning: (near initialization for 'sample_fetch_keywords.kw[50].process') [enabled by default]
+src/proto_http.c:10352:2: warning: initialization from incompatible pointer type [enabled by default]
+src/proto_http.c:10352:2: warning: (near initialization for 'sample_fetch_keywords.kw[51].process') [enabled by default]
+
+It's harmless since it's not needed there anyway.
+---
+ src/proto_http.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index f037b1e..f432e65 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -10052,7 +10052,7 @@ smp_fetch_url_param_val(struct proxy *px, struct session *l4, void *l7, unsigned
+  */
+ static int
+ smp_fetch_url32(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+-                 const struct arg *args, struct sample *smp)
++                 const struct arg *args, struct sample *smp, const char *kw)
+ {
+ 	struct http_txn *txn = l7;
+ 	struct hdr_ctx ctx;
+@@ -10100,11 +10100,11 @@ smp_fetch_url32(struct proxy *px, struct session *l4, void *l7, unsigned int opt
+  */
+ static int
+ smp_fetch_url32_src(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+-                     const struct arg *args, struct sample *smp)
++                     const struct arg *args, struct sample *smp, const char *kw)
+ {
+ 	struct chunk *temp;
+ 
+-	if (!smp_fetch_url32(px, l4, l7, opt, args, smp))
++	if (!smp_fetch_url32(px, l4, l7, opt, args, smp, kw))
+ 		return 0;
+ 
+ 	temp = get_trash_chunk();
+-- 
+1.8.1.5
+

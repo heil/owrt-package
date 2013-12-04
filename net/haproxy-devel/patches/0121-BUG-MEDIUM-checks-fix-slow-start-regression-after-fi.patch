@@ -1,0 +1,72 @@
+From e7b73485d0a2dbf7572f78756234337d1277b46c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 21 Nov 2013 11:50:50 +0100
+Subject: [PATCH 121/179] BUG/MEDIUM: checks: fix slow start regression after
+ fix attempt
+
+Commit 2e99390 (BUG/MEDIUM: checks: fix slowstart behaviour when server
+tracking is in use) moved the slowstart task initialization within the
+health check code and leaves it unset when checks are disabled. The
+problem is that it's possible to trigger slowstart from the CLI by
+issuing "disable server XXX / enable server XXX" even when checks are
+disabled. The result is a crash when trying to wake up the slowstart
+task of that server.
+
+Move the task initialization earlier so that it is done even if the
+checks are disabled.
+
+This patch should be backported to 1.4 since the commit above was
+backported there.
+---
+ src/checks.c | 28 ++++++++++++++--------------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 44ad4b7..7269ac9 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1553,6 +1553,20 @@ int start_checks() {
+ 	 */
+ 	for (px = proxy; px; px = px->next) {
+ 		for (s = px->srv; s; s = s->next) {
++			if (s->slowstart) {
++				if ((t = task_new()) == NULL) {
++					Alert("Starting [%s:%s] check: out of memory.\n", px->id, s->id);
++					return -1;
++				}
++				/* We need a warmup task that will be called when the server
++				 * state switches from down to up.
++				 */
++				s->warmup = t;
++				t->process = server_warmup;
++				t->context = s;
++				t->expire = TICK_ETERNITY;
++			}
++
+ 			if (!(s->state & SRV_CHECKED))
+ 				continue;
+ 
+@@ -1576,20 +1590,6 @@ int start_checks() {
+ 	 */
+ 	for (px = proxy; px; px = px->next) {
+ 		for (s = px->srv; s; s = s->next) {
+-			if (s->slowstart) {
+-				if ((t = task_new()) == NULL) {
+-					Alert("Starting [%s:%s] check: out of memory.\n", px->id, s->id);
+-					return -1;
+-				}
+-				/* We need a warmup task that will be called when the server
+-				 * state switches from down to up.
+-				 */
+-				s->warmup = t;
+-				t->process = server_warmup;
+-				t->context = s;
+-				t->expire = TICK_ETERNITY;
+-			}
+-
+ 			if (!(s->state & SRV_CHECKED))
+ 				continue;
+ 
+-- 
+1.8.1.5
+

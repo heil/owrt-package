@@ -1,0 +1,31 @@
+From 38d5892634a2101285653e90fc59e2fb6484a9f0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 16 Nov 2013 00:15:40 +0100
+Subject: [PATCH 104/179] OPTIM/MINOR: mark the source address as already known
+ on accept()
+
+Commit 986a9d2d12 moved the source address from the stream interface
+to the session, but it did not set the flag on the connection to
+report that the source address is known. Thus when logs are enabled,
+we had a call to getpeername() which is redundant with the result
+from accept(). This patch simply sets the flag.
+---
+ src/session.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/session.c b/src/session.c
+index 76bc8f3..9ed68b1 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -107,7 +107,7 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	/* OK, we're keeping the session, so let's properly initialize the session */
+ 	s->si[0].conn->t.sock.fd = cfd;
+ 	s->si[0].conn->ctrl = l->proto;
+-	s->si[0].conn->flags = CO_FL_NONE;
++	s->si[0].conn->flags = CO_FL_NONE | CO_FL_ADDR_FROM_SET;
+ 	s->si[0].conn->err_code = CO_ER_NONE;
+ 	s->si[0].conn->addr.from = *addr;
+ 	s->si[0].conn->target = &l->obj_type;
+-- 
+1.8.1.5
+

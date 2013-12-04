@@ -1,0 +1,70 @@
+From 2f1f955c8cf7a1ab13a5a6f119719d0d3449859b Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Mon, 25 Nov 2013 10:46:37 +0900
+Subject: [PATCH 132/179] MEDIUM: Do not mark a server as down if the agent is
+ unavailable
+
+In the case where agent-port is used and the agent
+check is a secondary check to not mark a server as down
+if the agent becomes unavailable.
+
+In this configuration the agent should only cause a server to be marked
+as down if the agent returns "fail", "stopped" or "down".
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ doc/configuration.txt |  4 ++++
+ src/checks.c          | 15 +++++++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 25fbf8f..8094bab 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -7700,6 +7700,10 @@ agent-check
+ 
+     This currently has the same behaviour as "down".
+ 
++  Failure to connect to the agent is not considered an error as connectivity
++  is tested by the regular health check which is enabled by the "check"
++  parameter.
++
+   Requires the ""agent-port" parameter to be set.
+   See also the "agent-check" parameter.
+ 
+diff --git a/src/checks.c b/src/checks.c
+index cffba02..4ab29e5 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -228,6 +228,12 @@ static void set_server_check_status(struct check *check, short status, const cha
+ 		tv_zero(&check->start);
+ 	}
+ 
++	/* Failure to connect to the agent as a secondary check should not
++	 * cause the server to be marked down. So only log status changes
++	 * for HCHK_STATUS_* statuses */
++	if (check == &s->agent && check->status < HCHK_STATUS_L7TOUT)
++		return;
++
+ 	if (s->proxy->options2 & PR_O2_LOGHCHKS &&
+ 	(((check->health != 0) && (check->result & SRV_CHK_FAILED)) ||
+ 	    ((check->health != s->rise + s->fall - 1) && (check->result & SRV_CHK_PASSED)) ||
+@@ -608,6 +614,15 @@ static void check_failed(struct check *check)
+ {
+ 	struct server *s = check->server;
+ 
++	/* The agent secondary check should only cause a server to be marked
++	 * as down if check->status is HCHK_STATUS_L7STS, which indicates
++	 * that the agent returned "fail", "stopped" or "down".
++	 * The implication here is that failure to connect to the agent
++	 * as a secondary check should not cause the server to be marked
++	 * down. */
++	if (check == &s->agent && check->status != HCHK_STATUS_L7STS)
++		return;
++
+ 	if (check->health > s->rise) {
+ 		check->health--; /* still good */
+ 		s->counters.failed_checks++;
+-- 
+1.8.1.5
+

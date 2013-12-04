@@ -1,0 +1,130 @@
+From afc47ee7fc779ec1d4682ee76eb082c8174740cd Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Mon, 25 Nov 2013 10:46:35 +0900
+Subject: [PATCH 130/179] MEDIUM: Remove option lb-agent-chk
+
+Remove option lb-agent-chk and thus the facility to configure
+a stand-alone agent health check. This feature was added by
+"MEDIUM: checks: Add agent health check". It will be replaced
+by subsequent patches with a features to allow an agent check
+to be run as either a secondary check, along with any of the existing
+checks, or as part of an http check with the status returned
+in an HTTP header.
+
+This patch does not entirely revert "MEDIUM: checks: Add agent health
+check". The infrastructure it provides to parse the results of an
+agent health check remains and will be re-used by the planned features
+that are mentioned above.
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ doc/configuration.txt | 53 ++++++---------------------------------------------
+ src/cfgparse.c        |  7 -------
+ 2 files changed, 6 insertions(+), 54 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 0b4844b..75b77c3 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -1173,7 +1173,6 @@ option httpclose                     (*)  X          X         X         X
+ option httplog                            X          X         X         X
+ option http_proxy                    (*)  X          X         X         X
+ option independent-streams           (*)  X          X         X         X
+-option lb-agent-chk                       X          -         X         X
+ option ldap-check                         X          -         X         X
+ option log-health-checks             (*)  X          -         X         X
+ option log-separate-errors           (*)  X          X         X         -
+@@ -3823,9 +3822,9 @@ option httpchk <method> <uri> <version>
+           option httpchk OPTIONS * HTTP/1.1\r\nHost:\ www
+           server apache1 192.168.1.1:443 check port 80
+ 
+-  See also : "option lb-agent-chk", "option ssl-hello-chk", "option smtpchk",
+-             "option mysql-check", "option pgsql-check", "http-check" and
+-             the "check", "port" and "inter" server options.
++  See also : "option ssl-hello-chk", "option smtpchk", "option mysql-check",
++             "option pgsql-check", "http-check" and the "check", "port" and
++             "inter" server options.
+ 
+ 
+ option httpclose
+@@ -3962,45 +3961,6 @@ no option independent-streams
+   See also : "timeout client", "timeout server" and "timeout tunnel"
+ 
+ 
+-option lb-agent-chk
+-  Use a TCP connection to obtain a metric of server health
+-  May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |     no   |   yes  |   yes
+-  Arguments : none
+-
+-  This alters health checking behaviour by connecting making a TCP
+-  connection and reading an ASCII string. The string should have one of
+-  the following forms:
+-
+-  * An ASCII representation of an positive integer percentage.
+-     e.g. "75%"
+-
+-     Values in this format will set the weight proportional to the initial
+-     weight of a server as configured when haproxy starts.
+-
+-  * The string "drain".
+-
+-    This will cause the weight of a server to be set to 0, and thus it will
+-    not accept any new connections other than those that are accepted via
+-    persistence.
+-
+-  * The string "down", optionally followed by a description string.
+-
+-    Mark the server as down and log the description string as the reason.
+-
+-  * The string "stopped", optionally followed by a description string.
+-
+-    This currently has the same behaviour as down (iii).
+-
+-  * The string "fail", optionally followed by a description string.
+-
+-    This currently has the same behaviour as down (iii).
+-
+-  The use of an alternate check-port, used to obtain agent heath check
+-  information described above as opposed to the port of the service, may be
+-  useful in conjunction with this option.
+-
+-
+ option ldap-check
+   Use LDAPv3 health checks for server testing
+   May be used in sections :   defaults | frontend | listen | backend
+@@ -7735,10 +7695,9 @@ check
+   backend. It is possible to change the address using the "addr" parameter, the
+   port using the "port" parameter, the source address using the "source"
+   address, and the interval and timers using the "inter", "rise" and "fall"
+-  parameters. The request method is define in the backend using the
+-  "httpchk", "lb-agent-chk", "smtpchk", "mysql-check", "pgsql-check" and
+-  "ssl-hello-chk" options. Please refer to those options and parameters for
+-  more information.
++  parameters. The request method is define in the backend using the "httpchk",
++  "smtpchk", "mysql-check", "pgsql-check" and "ssl-hello-chk" options. Please
++  refer to those options and parameters for more information.
+ 
+   Supported in default-server: No
+ 
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 0303db8..724b434 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -3571,13 +3571,6 @@ stats_error_parsing:
+ 				}
+ 			}
+ 		}
+-		else if (!strcmp(args[1], "lb-agent-chk")) {
+-			/* use dynmaic health check */
+-			free(curproxy->check_req);
+-			curproxy->check_req = NULL;
+-			curproxy->options2 &= ~PR_O2_CHK_ANY;
+-			curproxy->options2 |= PR_O2_LB_AGENT_CHK;
+-		}
+ 		else if (!strcmp(args[1], "pgsql-check")) {
+ 			/* use PostgreSQL request to check servers' health */
+ 			if (warnifnotcap(curproxy, PR_CAP_BE, file, linenum, args[1], NULL))
+-- 
+1.8.1.5
+

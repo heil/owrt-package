@@ -1,0 +1,76 @@
+From bc16cd81c4a213a9bcd8915a7b1384abea1d7bee Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 27 Nov 2013 16:52:23 +0100
+Subject: [PATCH 138/179] BUG/MAJOR: fix haproxy crash when using server
+ tracking instead of checks
+
+Igor at owind reported a very recent bug (just present in latest snapshot).
+Commit "4a741432 MEDIUM: Paramatise functions over the check of a server"
+causes up/down to die with tracked servers due to a typo.
+
+The following call in set_server_down causes the server to put itself
+down recurseively because "check" is the current server's check, so once
+fed to the function again, it will pass through the exact same path (note
+we have the exact symmetry in set_server_up) :
+
+	for (srv = s->tracknext; srv; srv = srv->tracknext)
+		if (!(srv->state & SRV_MAINTAIN))
+			/* Only notify tracking servers that are not already in maintenance. */
+			set_server_down(check);
+
+Instead we should stop the tracking server being visited in the loop :
+
+	for (srv = s->tracknext; srv; srv = srv->tracknext)
+		if (!(srv->state & SRV_MAINTAIN))
+			/* Only notify tracking servers that are not already in maintenance. */
+			set_server_down(&srv->check);
+
+But that's not exactly enough because srv->check->server is only set when
+checks are enabled, so ->server is NULL for tracking servers, still causing a
+crash upon first iteration. The fix is easy and consists in always initializing
+check->server when creating a new server, which is what was already done a few
+patches later by 69d29f9 (MEDIUM: cfgparse: Factor out check initialisation).
+
+With the fix above alone on top of current version or snapshot 20131122, the
+problem disappears.
+
+Thanks to Igor for testing and reporting the issue.
+---
+ src/checks.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 6acdbe6..1cbc81e 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -454,10 +454,10 @@ void set_server_down(struct check *check)
+ 		s->counters.down_trans++;
+ 
+ 		if (s->state & SRV_CHECKED)
+-			for(srv = s->tracknext; srv; srv = srv->tracknext)
+-				if (! (srv->state & SRV_MAINTAIN))
++			for (srv = s->tracknext; srv; srv = srv->tracknext)
++				if (!(srv->state & SRV_MAINTAIN))
+ 					/* Only notify tracking servers that are not already in maintenance. */
+-					set_server_down(check);
++					set_server_down(&srv->check);
+ 	}
+ 
+ 	check->health = 0; /* failure */
+@@ -530,10 +530,10 @@ void set_server_up(struct check *check) {
+ 		send_log(s->proxy, LOG_NOTICE, "%s.\n", trash.str);
+ 
+ 		if (s->state & SRV_CHECKED)
+-			for(srv = s->tracknext; srv; srv = srv->tracknext)
+-				if (! (srv->state & SRV_MAINTAIN))
++			for (srv = s->tracknext; srv; srv = srv->tracknext)
++				if (!(srv->state & SRV_MAINTAIN))
+ 					/* Only notify tracking servers if they're not in maintenance. */
+-					set_server_up(check);
++					set_server_up(&srv->check);
+ 	}
+ 
+ 	if (check->health >= check->rise)
+-- 
+1.8.1.5
+

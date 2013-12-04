@@ -1,0 +1,38 @@
+From 8ed9697064cd0fec4881e31d21894e9f2182efce Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 26 Nov 2013 10:21:51 +0100
+Subject: [PATCH 157/179] MINOR: sample: Define new struct sample_storage
+
+This struct is used to store a sample constant. The size of this
+struct is less than the struct sample. This struct only contains
+a constant and doesn't need the "ctx" nor the "flags".
+---
+ include/types/sample.h | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/include/types/sample.h b/include/types/sample.h
+index 2f21197..4c1a244 100644
+--- a/include/types/sample.h
++++ b/include/types/sample.h
+@@ -236,6 +236,18 @@ struct sample {
+ 	union smp_ctx ctx;
+ };
+ 
++/* Used to store sample constant */
++struct sample_storage {
++	int type;                 /* SMP_T_* */
++	union {
++		unsigned int    uint;  /* used for unsigned 32bits integers and booleans */
++		int             sint;  /* used for signed 32bits integers */
++		struct in_addr  ipv4;  /* used for ipv4 addresses */
++		struct in6_addr ipv6;  /* used for ipv6 addresses */
++		struct chunk    str;   /* used for char strings or buffers */
++	} data;                        /* sample data */
++};
++
+ /* Descriptor for a sample conversion */
+ struct sample_conv {
+ 	const char *kw;                           /* configuration keyword  */
+-- 
+1.8.1.5
+

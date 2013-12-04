@@ -1,0 +1,496 @@
+From 0cba607400ea8892265cd5f1700f39ec160fe0bb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 28 Nov 2013 22:21:02 +0100
+Subject: [PATCH 162/179] MINOR: acl/pattern: use types different from int to
+ clarify who does what.
+
+We now have the following enums and all related functions return them and
+consume them :
+
+   enum pat_match_res {
+	PAT_NOMATCH = 0,         /* sample didn't match any pattern */
+	PAT_MATCH = 3,           /* sample matched at least one pattern */
+   };
+
+   enum acl_test_res {
+	ACL_TEST_FAIL = 0,           /* test failed */
+	ACL_TEST_MISS = 1,           /* test may pass with more info */
+	ACL_TEST_PASS = 3,           /* test passed */
+   };
+
+   enum acl_cond_pol {
+	ACL_COND_NONE,		/* no polarity set yet */
+	ACL_COND_IF,		/* positive condition (after 'if') */
+	ACL_COND_UNLESS,	/* negative condition (after 'unless') */
+   };
+
+It's just in order to avoid doubts when reading some code.
+---
+ include/proto/acl.h     |  9 +++++----
+ include/proto/auth.h    |  2 +-
+ include/proto/pattern.h | 30 +++++++++++++++++-------------
+ include/types/acl.h     |  4 ++--
+ include/types/pattern.h |  6 +++---
+ src/acl.c               | 18 ++++++++++++------
+ src/auth.c              |  2 +-
+ src/pattern.c           | 32 ++++++++++++++++----------------
+ src/proto_http.c        |  2 +-
+ src/proto_tcp.c         |  6 +++---
+ 10 files changed, 61 insertions(+), 50 deletions(-)
+
+diff --git a/include/proto/acl.h b/include/proto/acl.h
+index 2d2a34a..82782d4 100644
+--- a/include/proto/acl.h
++++ b/include/proto/acl.h
+@@ -33,13 +33,13 @@
+ /* Negate an acl result. This turns (ACL_MATCH_FAIL, ACL_MATCH_MISS,
+  * ACL_MATCH_PASS) into (ACL_MATCH_PASS, ACL_MATCH_MISS, ACL_MATCH_FAIL).
+  */
+-static inline int acl_neg(int res)
++static inline enum acl_test_res acl_neg(enum acl_test_res res)
+ {
+ 	return (3 >> res);
+ }
+ 
+ /* Convert an acl result to a boolean. Only ACL_MATCH_PASS returns 1. */
+-static inline int acl_pass(int res)
++static inline int acl_pass(enum acl_test_res res)
+ {
+ 	return (res >> 1);
+ }
+@@ -79,7 +79,8 @@ struct acl_cond *prune_acl_cond(struct acl_cond *cond);
+  * known ACLs passed in <known_acl>. The new condition is returned (or NULL in
+  * case of low memory). Supports multiple conditions separated by "or".
+  */
+-struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl, int pol, char **err, struct arg_list *al);
++struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
++                                enum acl_cond_pol pol, char **err, struct arg_list *al);
+ 
+ /* Builds an ACL condition starting at the if/unless keyword. The complete
+  * condition is returned. NULL is returned in case of error or if the first
+@@ -97,7 +98,7 @@ struct acl_cond *build_acl_cond(const char *file, int line, struct proxy *px, co
+  * function only computes the condition, it does not apply the polarity required
+  * by IF/UNLESS, it's up to the caller to do this.
+  */
+-int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, void *l7, unsigned int opt);
++enum acl_test_res acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, void *l7, unsigned int opt);
+ 
+ /* Returns a pointer to the first ACL conflicting with usage at place <where>
+  * which is one of the SMP_VAL_* bits indicating a check place, or NULL if
+diff --git a/include/proto/auth.h b/include/proto/auth.h
+index ddaf9c1..711b2f8 100644
+--- a/include/proto/auth.h
++++ b/include/proto/auth.h
+@@ -21,7 +21,7 @@ extern struct userlist *userlist;
+ struct userlist *auth_find_userlist(char *name);
+ unsigned int auth_resolve_groups(struct userlist *l, char *groups);
+ void userlist_free(struct userlist *ul);
+-int pat_match_auth(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_auth(struct sample *smp, struct pattern *pattern);
+ int check_user(struct userlist *ul, unsigned int group_mask, const char *user, const char *pass);
+ 
+ #endif /* _PROTO_AUTH_H */
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index 6d683f8..ee7518c 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -22,6 +22,10 @@
+ #ifndef _PROTO_PATTERN_H
+ #define _PROTO_PATTERN_H
+ 
++#include <common/config.h>
++#include <common/standard.h>
++#include <types/pattern.h>
++
+ /* parse the <text> with <expr> compliant parser. <pattern> is a context for
+  * the current parsed acl. It must initialized at NULL:
+  *
+@@ -42,7 +46,7 @@ int pattern_register(struct pattern_expr *expr, char *text, struct sample_storag
+  * associated to the matching patterned will be put there. The function returns
+  * PAT_MATCH or PAT_NOMATCH.
+  */
+-inline int pattern_exec_match(struct pattern_expr *expr, struct sample *smp, struct sample_storage **sample);
++enum pat_match_res pattern_exec_match(struct pattern_expr *expr, struct sample *smp, struct sample_storage **sample);
+ 
+ /*
+  *
+@@ -55,16 +59,16 @@ inline int pattern_exec_match(struct pattern_expr *expr, struct sample *smp, str
+ int pat_parse_nothing(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+ 
+ /* NB: For two strings to be identical, it is required that their lengths match */
+-int pat_match_str(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_str(struct sample *smp, struct pattern *pattern);
+ 
+ /* NB: For two binary buffers to be identical, it is required that their lengths match */
+-int pat_match_bin(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_bin(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the length of the pattern in <test> is included between min and max */
+-int pat_match_len(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_len(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the integer in <test> is included between min and max */
+-int pat_match_int(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_int(struct sample *smp, struct pattern *pattern);
+ 
+ /* Parse an integer. It is put both in min and max. */
+ int pat_parse_int(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+@@ -97,36 +101,36 @@ int pat_parse_reg(const char **text, struct pattern *pattern, struct sample_stor
+ int pat_parse_ip(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+ 
+ /* always return false */
+-int pat_match_nothing(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_nothing(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the pattern matches the end of the tested string. */
+-int pat_match_end(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_end(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the pattern matches the beginning of the tested string. */
+-int pat_match_beg(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_beg(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the pattern is included inside the tested string. */
+-int pat_match_sub(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_sub(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the pattern is included inside the tested string, but enclosed
+  * between slashes or at the beginning or end of the string. Slashes at the
+  * beginning or end of the pattern are ignored.
+  */
+-int pat_match_dir(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_dir(struct sample *smp, struct pattern *pattern);
+ 
+ /* Checks that the pattern is included inside the tested string, but enclosed
+  * between dots or at the beginning or end of the string. Dots at the beginning
+  * or end of the pattern are ignored.
+  */
+-int pat_match_dom(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_dom(struct sample *smp, struct pattern *pattern);
+ 
+ /* Check that the IPv4 address in <test> matches the IP/mask in pattern */
+-int pat_match_ip(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_ip(struct sample *smp, struct pattern *pattern);
+ 
+ /* Executes a regex. It temporarily changes the data to add a trailing zero,
+  * and restores the previous character when leaving.
+  */
+-int pat_match_reg(struct sample *smp, struct pattern *pattern);
++enum pat_match_res pat_match_reg(struct sample *smp, struct pattern *pattern);
+ 
+ int pattern_read_from_file(struct pattern_expr *expr, const char *filename, int patflags, char **err);
+ void pattern_free(struct pattern *pat);
+diff --git a/include/types/acl.h b/include/types/acl.h
+index 5358878..e8c3e08 100644
+--- a/include/types/acl.h
++++ b/include/types/acl.h
+@@ -93,7 +93,7 @@ struct acl_keyword {
+ 	const char *kw;
+ 	char *fetch_kw;
+ 	int (*parse)(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+-	int (*match)(struct sample *smp, struct pattern *pattern);
++	enum pat_match_res (*match)(struct sample *smp, struct pattern *pattern);
+ 	/* must be after the config params */
+ 	struct sample_fetch *smp; /* the sample fetch we depend on */
+ };
+@@ -148,7 +148,7 @@ struct acl_term_suite {
+ struct acl_cond {
+ 	struct list list;           /* Some specific tests may use multiple conditions */
+ 	struct list suites;         /* list of acl_term_suites */
+-	int pol;                    /* polarity: ACL_COND_IF / ACL_COND_UNLESS */
++	enum acl_cond_pol pol;      /* polarity: ACL_COND_IF / ACL_COND_UNLESS */
+ 	unsigned int use;           /* or'ed bit mask of all suites's SMP_USE_* */
+ 	unsigned int val;           /* or'ed bit mask of all suites's SMP_VAL_* */
+ 	const char *file;           /* config file where the condition is declared */
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 02bdff0..3f0a085 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -56,7 +56,7 @@
+  *      MATCH   = 0
+  *      NOMATCH = 3
+  */
+-enum {
++enum pat_match_res {
+ 	PAT_NOMATCH = 0,         /* sample didn't match any pattern */
+ 	PAT_MATCH = 3,           /* sample matched at least one pattern */
+ };
+@@ -152,13 +152,13 @@ struct pattern {
+  */
+ struct pattern_expr {
+ 	int (*parse)(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+-	int (*match)(struct sample *smp, struct pattern *pattern);
++	enum pat_match_res (*match)(struct sample *smp, struct pattern *pattern);
+ 	struct list patterns;         /* list of acl_patterns */
+ 	struct eb_root pattern_tree;  /* may be used for lookup in large datasets */
+ };
+ 
+ extern char *pat_match_names[PAT_MATCH_NUM];
+ extern int (*pat_parse_fcts[PAT_MATCH_NUM])(const char **, struct pattern *, struct sample_storage *, int *, char **);
+-extern int (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern *);
++extern enum pat_match_res (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern *);
+ 
+ #endif /* _TYPES_PATTERN_H */
+diff --git a/src/acl.c b/src/acl.c
+index f210119..86a8597 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -49,6 +49,12 @@ static int acl_find_match_name(const char *name)
+ 	return -1;
+ }
+ 
++/* input values are 0 or 3, output is the same */
++static inline enum acl_test_res pat2acl(enum pat_match_res res)
++{
++	return (enum acl_test_res)res;
++}
++
+ /*
+  * Registers the ACL keyword list <kwl> as a list of valid keywords for next
+  * parsing sessions.
+@@ -758,7 +764,7 @@ struct acl_cond *prune_acl_cond(struct acl_cond *cond)
+  * for unresolved dependencies.
+  */
+ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+-                                int pol, char **err, struct arg_list *al)
++                                enum acl_cond_pol pol, char **err, struct arg_list *al)
+ {
+ 	__label__ out_return, out_free_suite, out_free_term;
+ 	int arg, neg;
+@@ -914,7 +920,7 @@ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+  */
+ struct acl_cond *build_acl_cond(const char *file, int line, struct proxy *px, const char **args, char **err)
+ {
+-	int pol = ACL_COND_NONE;
++	enum acl_cond_pol pol = ACL_COND_NONE;
+ 	struct acl_cond *cond = NULL;
+ 
+ 	if (err)
+@@ -958,7 +964,7 @@ struct acl_cond *build_acl_cond(const char *file, int line, struct proxy *px, co
+  *     if (cond->pol == ACL_COND_UNLESS)
+  *         res = !res;
+  */
+-int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, void *l7, unsigned int opt)
++enum acl_test_res acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, void *l7, unsigned int opt)
+ {
+ 	__label__ fetch_next;
+ 	struct acl_term_suite *suite;
+@@ -966,7 +972,7 @@ int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, v
+ 	struct acl_expr *expr;
+ 	struct acl *acl;
+ 	struct sample smp;
+-	int acl_res, suite_res, cond_res;
++	enum acl_test_res acl_res, suite_res, cond_res;
+ 
+ 	/* ACLs are iterated over all values, so let's always set the flag to
+ 	 * indicate this to the fetch functions.
+@@ -979,7 +985,7 @@ int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, v
+ 	cond_res = ACL_TEST_FAIL;
+ 	list_for_each_entry(suite, &cond->suites, list) {
+ 		/* Evaluate condition suite <suite>. We stop at the first term
+-		 * which returns PAT_FAIL. The MISS status is still propagated
++		 * which returns ACL_TEST_FAIL. The MISS status is still propagated
+ 		 * in case of uncertainty in the result.
+ 		 */
+ 
+@@ -1009,7 +1015,7 @@ int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, v
+ 					continue;
+ 				}
+ 
+-				acl_res |= pattern_exec_match(&expr->pat, &smp, NULL);
++				acl_res |= pat2acl(pattern_exec_match(&expr->pat, &smp, NULL));
+ 				/*
+ 				 * OK now acl_res holds the result of this expression
+ 				 * as one of ACL_TEST_FAIL, ACL_TEST_MISS or ACL_TEST_PASS.
+diff --git a/src/auth.c b/src/auth.c
+index d03621a..203b5aa 100644
+--- a/src/auth.c
++++ b/src/auth.c
+@@ -167,7 +167,7 @@ check_user(struct userlist *ul, unsigned int group_mask, const char *user, const
+ 		return 0;
+ }
+ 
+-int
++enum pat_match_res
+ pat_match_auth(struct sample *smp, struct pattern *pattern)
+ {
+ 
+diff --git a/src/pattern.c b/src/pattern.c
+index e3cb464..b6f7502 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -55,7 +55,7 @@ int (*pat_parse_fcts[PAT_MATCH_NUM])(const char **, struct pattern *, struct sam
+ 	[PAT_MATCH_REG]   = pat_parse_reg,
+ };
+ 
+-int (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern *) = {
++enum pat_match_res (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern *) = {
+ 	[PAT_MATCH_FOUND] = NULL,
+ 	[PAT_MATCH_BOOL]  = pat_match_nothing,
+ 	[PAT_MATCH_INT]   = pat_match_int,
+@@ -82,14 +82,14 @@ int pat_parse_nothing(const char **text, struct pattern *pattern, struct sample_
+ }
+ 
+ /* always return false */
+-int pat_match_nothing(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_nothing(struct sample *smp, struct pattern *pattern)
+ {
+ 	return PAT_NOMATCH;
+ }
+ 
+ 
+ /* NB: For two strings to be identical, it is required that their lengths match */
+-int pat_match_str(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_str(struct sample *smp, struct pattern *pattern)
+ {
+ 	int icase;
+ 
+@@ -104,7 +104,7 @@ int pat_match_str(struct sample *smp, struct pattern *pattern)
+ }
+ 
+ /* NB: For two binaries buf to be identical, it is required that their lengths match */
+-int pat_match_bin(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_bin(struct sample *smp, struct pattern *pattern)
+ {
+ 	if (pattern->len != smp->data.str.len)
+ 		return PAT_NOMATCH;
+@@ -136,7 +136,7 @@ static void *pat_lookup_str(struct sample *smp, struct pattern_expr *expr)
+ /* Executes a regex. It temporarily changes the data to add a trailing zero,
+  * and restores the previous character when leaving.
+  */
+-int pat_match_reg(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_reg(struct sample *smp, struct pattern *pattern)
+ {
+ 	if (regex_exec(pattern->ptr.reg, smp->data.str.str, smp->data.str.len) == 0)
+ 		return PAT_MATCH;
+@@ -144,7 +144,7 @@ int pat_match_reg(struct sample *smp, struct pattern *pattern)
+ }
+ 
+ /* Checks that the pattern matches the beginning of the tested string. */
+-int pat_match_beg(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_beg(struct sample *smp, struct pattern *pattern)
+ {
+ 	int icase;
+ 
+@@ -159,7 +159,7 @@ int pat_match_beg(struct sample *smp, struct pattern *pattern)
+ }
+ 
+ /* Checks that the pattern matches the end of the tested string. */
+-int pat_match_end(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_end(struct sample *smp, struct pattern *pattern)
+ {
+ 	int icase;
+ 
+@@ -175,7 +175,7 @@ int pat_match_end(struct sample *smp, struct pattern *pattern)
+ /* Checks that the pattern is included inside the tested string.
+  * NB: Suboptimal, should be rewritten using a Boyer-Moore method.
+  */
+-int pat_match_sub(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_sub(struct sample *smp, struct pattern *pattern)
+ {
+ 	int icase;
+ 	char *end;
+@@ -285,7 +285,7 @@ static int match_word(struct sample *smp, struct pattern *pattern, unsigned int
+  * between the delimiters '?' or '/' or at the beginning or end of the string.
+  * Delimiters at the beginning or end of the pattern are ignored.
+  */
+-int pat_match_dir(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_dir(struct sample *smp, struct pattern *pattern)
+ {
+ 	return match_word(smp, pattern, make_4delim('/', '?', '?', '?'));
+ }
+@@ -294,13 +294,13 @@ int pat_match_dir(struct sample *smp, struct pattern *pattern)
+  * between the delmiters '/', '?', '.' or ":" or at the beginning or end of
+  * the string. Delimiters at the beginning or end of the pattern are ignored.
+  */
+-int pat_match_dom(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_dom(struct sample *smp, struct pattern *pattern)
+ {
+ 	return match_word(smp, pattern, make_4delim('/', '?', '.', ':'));
+ }
+ 
+ /* Checks that the integer in <test> is included between min and max */
+-int pat_match_int(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_int(struct sample *smp, struct pattern *pattern)
+ {
+ 	if ((!pattern->val.range.min_set || pattern->val.range.min <= smp->data.uint) &&
+ 	    (!pattern->val.range.max_set || smp->data.uint <= pattern->val.range.max))
+@@ -309,7 +309,7 @@ int pat_match_int(struct sample *smp, struct pattern *pattern)
+ }
+ 
+ /* Checks that the length of the pattern in <test> is included between min and max */
+-int pat_match_len(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_len(struct sample *smp, struct pattern *pattern)
+ {
+ 	if ((!pattern->val.range.min_set || pattern->val.range.min <= smp->data.str.len) &&
+ 	    (!pattern->val.range.max_set || smp->data.str.len <= pattern->val.range.max))
+@@ -317,7 +317,7 @@ int pat_match_len(struct sample *smp, struct pattern *pattern)
+ 	return PAT_NOMATCH;
+ }
+ 
+-int pat_match_ip(struct sample *smp, struct pattern *pattern)
++enum pat_match_res pat_match_ip(struct sample *smp, struct pattern *pattern)
+ {
+ 	unsigned int v4; /* in network byte order */
+ 	struct in6_addr *v6;
+@@ -939,10 +939,10 @@ int pattern_read_from_file(struct pattern_expr *expr,
+  * with the pointer associated with the matching pattern. This function returns
+  * PAT_NOMATCH or PAT_MATCH.
+  */
+-inline int pattern_exec_match(struct pattern_expr *expr, struct sample *smp,
+-                          struct sample_storage **sample)
++enum pat_match_res pattern_exec_match(struct pattern_expr *expr, struct sample *smp,
++                                      struct sample_storage **sample)
+ {
+-	int pat_res = PAT_NOMATCH;
++	enum pat_match_res pat_res = PAT_NOMATCH;
+ 	struct pattern *pattern;
+ 	struct ebmb_node *node = NULL;
+ 	struct pat_idx_elt *elt;
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 57102c8..3a4c535 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8974,7 +8974,7 @@ smp_fetch_meth(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+ }
+ 
+ /* See above how the method is stored in the global pattern */
+-static int pat_match_meth(struct sample *smp, struct pattern *pattern)
++static enum pat_match_res pat_match_meth(struct sample *smp, struct pattern *pattern)
+ {
+ 	int icase;
+ 
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 92f1b68..17a100a 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -904,7 +904,7 @@ int tcp_inspect_request(struct session *s, struct channel *req, int an_bit)
+ 		partial = 0;
+ 
+ 	list_for_each_entry(rule, &s->be->tcp_req.inspect_rules, list) {
+-		int ret = ACL_TEST_PASS;
++		enum acl_test_res ret = ACL_TEST_PASS;
+ 
+ 		if (rule->cond) {
+ 			ret = acl_exec_cond(rule->cond, s->be, s, &s->txn, SMP_OPT_DIR_REQ | partial);
+@@ -1008,7 +1008,7 @@ int tcp_inspect_response(struct session *s, struct channel *rep, int an_bit)
+ 		partial = 0;
+ 
+ 	list_for_each_entry(rule, &s->be->tcp_rep.inspect_rules, list) {
+-		int ret = ACL_TEST_PASS;
++		enum acl_test_res ret = ACL_TEST_PASS;
+ 
+ 		if (rule->cond) {
+ 			ret = acl_exec_cond(rule->cond, s->be, s, &s->txn, SMP_OPT_DIR_RES | partial);
+@@ -1075,7 +1075,7 @@ int tcp_exec_req_rules(struct session *s)
+ 	struct stksess *ts;
+ 	struct stktable *t = NULL;
+ 	int result = 1;
+-	int ret;
++	enum acl_test_res ret;
+ 
+ 	list_for_each_entry(rule, &s->fe->tcp_req.l4_rules, list) {
+ 		ret = ACL_TEST_PASS;
+-- 
+1.8.1.5
+

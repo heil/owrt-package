@@ -1,0 +1,27 @@
+From 830bf618154e6dcf946d53d6806ad191ab5f9c44 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 1 Dec 2013 20:29:58 +0100
+Subject: [PATCH 143/179] BUG/MINOR: connection: fix typo in error message
+ report
+
+"unknownn" -> "unknown"
+---
+ include/proto/connection.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 0c07f8c..aa88769 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -503,7 +503,7 @@ static inline const char *conn_err_code_str(struct connection *c)
+ 	case CO_ER_SSL_CA_FAIL:   return "SSL client CA chain cannot be verified";
+ 	case CO_ER_SSL_CRT_FAIL:  return "SSL client certificate not trusted";
+ 	case CO_ER_SSL_HANDSHAKE: return "SSL handshake failure";
+-	case CO_ER_SSL_NO_TARGET: return "Attempt to use SSL on an unknownn target (internal error)";
++	case CO_ER_SSL_NO_TARGET: return "Attempt to use SSL on an unknown target (internal error)";
+ 	}
+ 	return NULL;
+ }
+-- 
+1.8.1.5
+

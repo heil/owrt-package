@@ -1,0 +1,78 @@
+From 6f8fe310cffd6174bcf2f0c9ed1da8e7071f63e1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 28 Nov 2013 22:24:25 +0100
+Subject: [PATCH 163/179] MINOR: pattern: import acl_find_match_name() into
+ pattern.h
+
+It's only dedicated to pattern match lookups, so it was renamed
+pat_find_match_name().
+---
+ include/proto/pattern.h | 13 +++++++++++++
+ src/acl.c               | 13 +------------
+ 2 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index ee7518c..29773f8 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -22,6 +22,8 @@
+ #ifndef _PROTO_PATTERN_H
+ #define _PROTO_PATTERN_H
+ 
++#include <string.h>
++
+ #include <common/config.h>
+ #include <common/standard.h>
+ #include <types/pattern.h>
+@@ -41,6 +43,17 @@
+  */
+ int pattern_register(struct pattern_expr *expr, char *text, struct sample_storage *smp, struct pattern **pattern, int patflags, char **err);
+ 
++/* return the PAT_MATCH_* index for match name "name", or < 0 if not found */
++static inline int pat_find_match_name(const char *name)
++{
++	int i;
++
++	for (i = 0; i < PAT_MATCH_NUM; i++)
++		if (strcmp(name, pat_match_names[i]) == 0)
++			return i;
++	return -1;
++}
++
+ /* This function executes a pattern match on a sample. It applies pattern <expr>
+  * to sample <smp>. If <sample> is not NULL, a pointer to an optional sample
+  * associated to the matching patterned will be put there. The function returns
+diff --git a/src/acl.c b/src/acl.c
+index 86a8597..e8d4dc3 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -38,17 +38,6 @@ static struct acl_kw_list acl_keywords = {
+ 	.list = LIST_HEAD_INIT(acl_keywords.list)
+ };
+ 
+-/* return the PAT_MATCH_* index for match name "name", or < 0 if not found */
+-static int acl_find_match_name(const char *name)
+-{
+-	int i;
+-
+-	for (i = 0; i < PAT_MATCH_NUM; i++)
+-		if (strcmp(name, pat_match_names[i]) == 0)
+-			return i;
+-	return -1;
+-}
+-
+ /* input values are 0 or 3, output is the same */
+ static inline enum acl_test_res pat2acl(enum pat_match_res res)
+ {
+@@ -474,7 +463,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 				goto out_free_expr;
+ 			}
+ 
+-			idx = acl_find_match_name(args[1]);
++			idx = pat_find_match_name(args[1]);
+ 			if (idx < 0) {
+ 				memprintf(err, "unknown matching method '%s' when parsing ACL expression", args[1]);
+ 				goto out_free_expr;
+-- 
+1.8.1.5
+

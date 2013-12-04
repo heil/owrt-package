@@ -1,0 +1,88 @@
+From 02b0f58c43db8bf55370d0cd5049546efc451365 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 3 Dec 2013 15:42:33 +0100
+Subject: [PATCH 174/179] BUG/MEDIUM: checks: fix a long-standing issue with
+ reporting connection errors
+
+In 1.5-dev14 we fixed a bug induced by the new connection system which caused
+handshake failures not to be reported in health checks. It was done with
+commit 6c560da (BUG/MEDIUM: checks: report handshake failures). This fix
+caused another issue which is that every check getting a TCP RST after a
+valid response was flagged as error. This was fixed using commit c5c61fc
+(BUG/MEDIUM: checks: ignore late resets after valid responses).
+
+But because of this, we completely miss the status report. These two fixes
+only set the check result as failed and did not call set_server_check_status()
+to pass the information to upper layers.
+
+The impact is that some failed checks are reported as INI or are simply not
+updated if they happen fast enough (eg: TCP RST in response to connect()
+without data in a pure TCP check). So the server appears down but the check
+status says "L4OK".
+
+After commit 6c560da, the handshake failures have been correctly dealt with
+and every error causes process_chk() to be called with the appropriate
+information still present on the socket. So let's get the error code in
+process_chk() instead and stop mangling it in wake_srv_chk().
+
+Now both L4 and L6 checks are correctly reported.
+
+This bug was first introduced in 1.5-dev12 so no backport is needed.
+---
+ src/checks.c | 24 +++++++++++++++++++-----
+ 1 file changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index d430c9b..564eab4 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1272,9 +1272,11 @@ static int wake_srv_chk(struct connection *conn)
+ 	struct check *check = conn->owner;
+ 
+ 	if (unlikely(conn->flags & CO_FL_ERROR)) {
+-		/* Note that we might as well have been woken up by a handshake handler */
+-		if (check->result == SRV_CHK_UNKNOWN)
+-			check->result |= SRV_CHK_FAILED;
++		/* We may get error reports bypassing the I/O handlers, typically
++		 * the case when sending a pure TCP check which fails, then the I/O
++		 * handlers above are not called. This is completely handled by the
++		 * main processing task so let's simply wake it up.
++		 */
+ 		__conn_data_stop_both(conn);
+ 		task_wakeup(check->task, TASK_WOKEN_IO);
+ 	}
+@@ -1465,17 +1467,29 @@ static struct task *process_chk(struct task *t)
+ 		 * which can happen on connect timeout or error.
+ 		 */
+ 		if (s->check.result == SRV_CHK_UNKNOWN) {
++			int skerr, err = errno;
++			socklen_t lskerr = sizeof(skerr);
++
++			if (conn->ctrl) {
++				if (getsockopt(conn->t.sock.fd, SOL_SOCKET, SO_ERROR, &skerr, &lskerr) == 0 && skerr)
++					err = skerr;
++			}
++
++			/* eagain is normal on a timeout */
++			if (err == EAGAIN)
++				err = 0;
++
+ 			if ((conn->flags & (CO_FL_CONNECTED|CO_FL_WAIT_L4_CONN)) == CO_FL_WAIT_L4_CONN) {
+ 				/* L4 not established (yet) */
+ 				if (conn->flags & CO_FL_ERROR)
+-					set_server_check_status(check, HCHK_STATUS_L4CON, NULL);
++					set_server_check_status(check, HCHK_STATUS_L4CON, err ? strerror(err) : NULL);
+ 				else if (expired)
+ 					set_server_check_status(check, HCHK_STATUS_L4TOUT, NULL);
+ 			}
+ 			else if ((conn->flags & (CO_FL_CONNECTED|CO_FL_WAIT_L6_CONN)) == CO_FL_WAIT_L6_CONN) {
+ 				/* L6 not established (yet) */
+ 				if (conn->flags & CO_FL_ERROR)
+-					set_server_check_status(check, HCHK_STATUS_L6RSP, NULL);
++					set_server_check_status(check, HCHK_STATUS_L6RSP, err ? strerror(err) : NULL);
+ 				else if (expired)
+ 					set_server_check_status(check, HCHK_STATUS_L6TOUT, NULL);
+ 			}
+-- 
+1.8.1.5
+

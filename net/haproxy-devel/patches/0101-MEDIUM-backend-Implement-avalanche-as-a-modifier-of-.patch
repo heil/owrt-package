@@ -1,0 +1,281 @@
+From b6c0ac94a444be5f965f14492bf447ba0910daf1 Mon Sep 17 00:00:00 2001
+From: Bhaskar Maddala <bhaskar@tumblr.com>
+Date: Tue, 5 Nov 2013 11:54:02 -0500
+Subject: [PATCH 101/179] MEDIUM: backend: Implement avalanche as a modifier of
+ the hashing functions.
+
+Summary:
+Avalanche is supported not as a native hashing choice, but a modifier
+on the hashing function. Note that this means that possible configs
+written after 1.5-dev4 using "hash-type avalanche" will get an informative
+error instead. But as discussed on the mailing list it seems nobody ever
+used it anyway, so let's fix it before the final 1.5 release.
+
+The default values were selected for backward compatibility with previous
+releases, as discussed on the mailing list, which means that the consistent
+hashing will still apply the avalanche hash by default when no explicit
+algorithm is specified.
+
+Examples
+  (default) hash-type map-based
+	Map based hashing using sdbm without avalanche
+
+  (default) hash-type consistent
+	Consistent hashing using sdbm with avalanche
+
+Additional Examples:
+
+  (a) hash-type map-based sdbm
+	Same as default for map-based above
+  (b) hash-type map-based sdbm avalanche
+	Map based hashing using sdbm with avalanche
+  (c) hash-type map-based djb2
+	Map based hashing using djb2 without avalanche
+  (d) hash-type map-based djb2 avalanche
+	Map based hashing using djb2 with avalanche
+  (e) hash-type consistent sdbm avalanche
+	Same as default for consistent above
+  (f) hash-type consistent sdbm
+	Consistent hashing using sdbm without avalanche
+  (g) hash-type consistent djb2
+	Consistent hashing using djb2 without avalanche
+  (h) hash-type consistent djb2 avalanche
+	Consistent hashing using djb2 with avalanche
+---
+ doc/configuration.txt   | 39 ++++++++++++++++++++++++--------------
+ include/types/backend.h |  7 +++++--
+ src/backend.c           | 12 ++++++------
+ src/cfgparse.c          | 50 ++++++++++++++++++++++++++++++++++++++-----------
+ 4 files changed, 75 insertions(+), 33 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 643afd9..c430ec3 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2496,7 +2496,7 @@ grace <time>
+   simplify it.
+ 
+ 
+-hash-type <method> <function>
++hash-type <method> <function> <modifier>
+   Specify a method to use for mapping hashes to servers
+   May be used in sections :   defaults | frontend | listen | backend
+                                  yes   |    no    |   yes  |   yes
+@@ -2515,15 +2515,6 @@ hash-type <method> <function>
+                   different servers. This can be inconvenient with caches for
+                   instance.
+ 
+-      avalanche   this mechanism uses the default map-based hashing described
+-                  above but applies a full avalanche hash before performing the
+-                  mapping. The result is a slightly less smooth hash for most
+-                  situations, but the hash becomes better than pure map-based
+-                  hashes when the number of servers is a multiple of the size of
+-                  the input set. When using URI hash with a number of servers
+-                  multiple of 64, it's desirable to change the hash type to
+-                  this value.
+-
+       consistent  the hash table is a tree filled with many occurrences of each
+                   server. The hash key is looked up in the tree and the closest
+                   server is chosen. This hash is dynamic, it supports changing
+@@ -2537,8 +2528,8 @@ hash-type <method> <function>
+                   server's weight or its ID to get a more balanced distribution.
+                   In order to get the same distribution on multiple load
+                   balancers, it is important that all servers have the exact
+-                  same IDs. Note: by default, a full avalanche hash is always
+-                  performed before applying the consistent hash.
++                  same IDs. Note: consistent hash uses sdbm and avalanche if no
++                  hash function is specified.
+ 
+     <function> is the hash function to be used :
+ 
+@@ -2546,11 +2537,31 @@ hash-type <method> <function>
+               reimplementation of ndbm) database library. It was found to do
+               well in scrambling bits, causing better distribution of the keys
+               and fewer splits. It also happens to be a good general hashing
+-              function with good distribution.
++              function with good distribution, unless the total server weight
++              is a multiple of 64, in which case applying the avalanche
++              modifier may help.
+ 
+        djb2   this function was first proposed by Dan Bernstein many years ago
+               on comp.lang.c. Studies have shown that for certain workload this
+-              function provides a better distribution than sdbm.
++              function provides a better distribution than sdbm. It generally
++              works well with text-based inputs though it can perform extremely
++              poorly with numeric-only input or when the total server weight is
++              a multiple of 33, unless the avalanche modifier is also used.
++
++    <modifier> indicates an optional method applied after hashing the key :
++
++       avalanche   This directive indicates that the result from the hash
++                   function above should not be used in its raw form but that
++                   a 4-byte full avalanche hash must be applied first. The
++                   purpose of this step is to mix the resulting bits from the
++                   previous hash in order to avoid any undesired effect when
++                   the input contains some limited values or when the number of
++                   servers is a multiple of one of the hash's components (64
++                   for SDBM, 33 for DJB2). Enabling avalanche tends to make the
++                   result less predictable, but it's also not as smooth as when
++                   using the original function. Some testing might be needed
++                   with some workloads. This hash is one of the many proposed
++                   by Bob Jenkins.
+ 
+   The default hash type is "map-based" and is recommended for most usages. The
+   default function is "sdbm", the selection of a function should be based on
+diff --git a/include/types/backend.h b/include/types/backend.h
+index 1a433cf..57d17bd 100644
+--- a/include/types/backend.h
++++ b/include/types/backend.h
+@@ -105,8 +105,11 @@
+ /* hash types */
+ #define BE_LB_HASH_MAP    0x000000 /* map-based hash (default) */
+ #define BE_LB_HASH_CONS   0x100000 /* consistent hashbit to indicate a dynamic algorithm */
+-#define BE_LB_HASH_AVAL   0x200000 /* run an avalanche hash before a map */
+-#define BE_LB_HASH_TYPE   0x300000 /* get/clear hash types */
++#define BE_LB_HASH_TYPE   0x100000 /* get/clear hash types */
++
++/* additional modifier on top of the hash function (only avalanche right now) */
++#define BE_LB_HMOD_AVAL   0x200000  /* avalanche modifier */
++#define BE_LB_HASH_MOD    0x200000  /* get/clear hash modifier */
+ 
+ /* BE_LB_HFCN_* is the hash function, to be used with BE_LB_HASH_FUNC */
+ #define BE_LB_HFCN_SDBM   0x000000 /* sdbm hash */
+diff --git a/src/backend.c b/src/backend.c
+index bf4a81d..e044430 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -147,7 +147,7 @@ struct server *get_server_sh(struct proxy *px, const char *addr, int len)
+ 		h ^= ntohl(*(unsigned int *)(&addr[l]));
+ 		l += sizeof (int);
+ 	}
+-	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++	if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 		h = full_hash(h);
+  hash_done:
+ 	if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+@@ -199,7 +199,7 @@ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len)
+ 
+ 	hash = gen_hash(px, start, (end - start));
+ 
+-	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++	if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 		hash = full_hash(hash);
+  hash_done:
+ 	if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+@@ -256,7 +256,7 @@ struct server *get_server_ph(struct proxy *px, const char *uri, int uri_len)
+ 				}
+ 				hash = gen_hash(px, start, (end - start));
+ 
+-				if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++				if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 					hash = full_hash(hash);
+ 
+ 				if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+@@ -330,7 +330,7 @@ struct server *get_server_ph_post(struct session *s)
+ 				}
+ 				hash = gen_hash(px, start, (end - start));
+ 
+-				if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++				if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 					hash = full_hash(hash);
+ 
+ 				if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+@@ -422,7 +422,7 @@ struct server *get_server_hh(struct session *s)
+ 		}
+ 		hash = gen_hash(px, start, (end - start));
+ 	}
+-	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++	if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 		hash = full_hash(hash);
+  hash_done:
+ 	if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+@@ -466,7 +466,7 @@ struct server *get_server_rch(struct session *s)
+ 	 */
+ 	hash = gen_hash(px, smp.data.str.str, len);
+ 
+-	if ((px->lbprm.algo & BE_LB_HASH_TYPE) != BE_LB_HASH_MAP)
++	if ((px->lbprm.algo & BE_LB_HASH_MOD) == BE_LB_HMOD_AVAL)
+ 		hash = full_hash(hash);
+  hash_done:
+ 	if (px->lbprm.algo & BE_LB_LKUP_CHTREE)
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 051f600..bb79a34 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -4085,7 +4085,13 @@ stats_error_parsing:
+ 		}
+ 	}
+ 	else if (!strcmp(args[0], "hash-type")) { /* set hashing method */
+-		curproxy->lbprm.algo &= ~(BE_LB_HASH_TYPE | BE_LB_HASH_FUNC);
++		/**
++		 * The syntax for hash-type config element is
++		 * hash-type {map-based|consistent} [[<algo>] avalanche]
++		 *
++		 * The default hash function is sdbm for map-based and sdbm+avalanche for consistent.
++		 */
++		curproxy->lbprm.algo &= ~(BE_LB_HASH_TYPE | BE_LB_HASH_FUNC | BE_LB_HASH_MOD);
+ 
+ 		if (warnifnotcap(curproxy, PR_CAP_BE, file, linenum, args[0], NULL))
+ 			err_code |= ERR_WARN;
+@@ -4096,26 +4102,48 @@ stats_error_parsing:
+ 		else if (strcmp(args[1], "map-based") == 0) {	/* use map-based hashing */
+ 			curproxy->lbprm.algo |= BE_LB_HASH_MAP;
+ 		}
+-		else if (strcmp(args[1], "avalanche") == 0) {	/* use full hash before map-based hashing */
+-			curproxy->lbprm.algo |= BE_LB_HASH_AVAL;
++		else if (strcmp(args[1], "avalanche") == 0) {
++			Alert("parsing [%s:%d] : experimental feature '%s %s' is not supported anymore, please use '%s map-based sdbm avalanche' instead.\n", file, linenum, args[0], args[1], args[0]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
+ 		}
+ 		else {
+-			Alert("parsing [%s:%d] : '%s' only supports 'avalanche', 'consistent' and 'map-based'.\n", file, linenum, args[0]);
++			Alert("parsing [%s:%d] : '%s' only supports 'consistent' and 'map-based'.\n", file, linenum, args[0]);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+ 			goto out;
+ 		}
+ 
+ 		/* set the hash function to use */
+ 		if (!*args[2]) {
++			/* the default algo is sdbm */
+ 			curproxy->lbprm.algo |= BE_LB_HFCN_SDBM;
+-		} else if (!strcmp(args[2], "sdbm")) {
+-			curproxy->lbprm.algo |= BE_LB_HFCN_SDBM;
+-		} else if (!strcmp(args[2], "djb2")) {
+-			curproxy->lbprm.algo |= BE_LB_HFCN_DJB2;
++
++			/* if consistent with no argument, then avalanche modifier is also applied */
++			if ((curproxy->lbprm.algo & BE_LB_HASH_TYPE) == BE_LB_HASH_CONS)
++				curproxy->lbprm.algo |= BE_LB_HMOD_AVAL;
+ 		} else {
+-			Alert("parsing [%s:%d] : '%s' only supports 'sdbm' and 'djb2' hash functions.\n", file, linenum, args[0]);
+-			err_code |= ERR_ALERT | ERR_FATAL;
+-			goto out;
++			/* set the hash function */
++			if (!strcmp(args[2], "sdbm")) {
++				curproxy->lbprm.algo |= BE_LB_HFCN_SDBM;
++			}
++			else if (!strcmp(args[2], "djb2")) {
++				curproxy->lbprm.algo |= BE_LB_HFCN_DJB2;
++			}
++			else {
++				Alert("parsing [%s:%d] : '%s' only supports 'sdbm' and 'djb2' hash functions.\n", file, linenum, args[0]);
++				err_code |= ERR_ALERT | ERR_FATAL;
++				goto out;
++			}
++
++			/* set the hash modifier */
++			if (!strcmp(args[3], "avalanche")) {
++				curproxy->lbprm.algo |= BE_LB_HMOD_AVAL;
++			}
++			else if (*args[3]) {
++				Alert("parsing [%s:%d] : '%s' only supports 'avalanche' as a modifier for hash functions.\n", file, linenum, args[0]);
++				err_code |= ERR_ALERT | ERR_FATAL;
++				goto out;
++			}
+ 		}
+ 	}
+ 	else if (!strcmp(args[0], "server") || !strcmp(args[0], "default-server")) {  /* server address */
+-- 
+1.8.1.5
+
