@@ -1,0 +1,316 @@
+From d163e1ce306e59a1505df2f6b5f8e69db54850fa Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 28 Nov 2013 11:41:23 +0100
+Subject: [PATCH 160/179] MEDIUM: pattern: create pattern expression
+
+This new structure contains the data needed for pattern matching. It's
+the first step to the complete independance of the pattern matching.
+---
+ include/proto/pattern.h | 10 +++++-----
+ include/types/acl.h     | 12 ++++--------
+ include/types/pattern.h | 12 ++++++++++++
+ src/acl.c               | 50 ++++++++++++++++++++++++-------------------------
+ src/pattern.c           | 23 ++++++++++++++++++-----
+ 5 files changed, 63 insertions(+), 44 deletions(-)
+
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index 9898eb3..d085196 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -35,14 +35,14 @@
+  * fails, with <err> message filled. It returns -2 in "out of memory"
+  * error case.
+  */
+-int acl_register_pattern(struct acl_expr *expr, char *text, struct sample_storage *smp, struct acl_pattern **pattern, int patflags, char **err);
++int acl_register_pattern(struct pattern_expr *expr, char *text, struct sample_storage *smp, struct acl_pattern **pattern, int patflags, char **err);
+ 
+ /* This function executes a pattern match on a sample. It applies pattern <expr>
+  * to sample <smp>. If <sample> is not NULL, a pointer to an optional sample
+  * associated to the matching patterned will be put there. The function returns
+  * ACL_PAT_FAIL, ACL_PAT_MISS or ACL_PAT_PASS.
+  */
+-inline int acl_exec_match(struct acl_expr *expr, struct sample *smp, struct sample_storage **sample);
++inline int acl_exec_match(struct pattern_expr *expr, struct sample *smp, struct sample_storage **sample);
+ 
+ /*
+  *
+@@ -128,9 +128,9 @@ int acl_match_ip(struct sample *smp, struct acl_pattern *pattern);
+  */
+ int acl_match_reg(struct sample *smp, struct acl_pattern *pattern);
+ 
+-int acl_read_patterns_from_file(struct acl_expr *expr, const char *filename, int patflags, char **err);
++int acl_read_patterns_from_file(struct pattern_expr *expr, const char *filename, int patflags, char **err);
+ void free_pattern(struct acl_pattern *pat);
+-void free_pattern_list(struct list *head);
+-void free_pattern_tree(struct eb_root *root);
++void prune_pattern_expr(struct pattern_expr *expr);
++void init_pattern_expr(struct pattern_expr *expr);
+ 
+ #endif
+diff --git a/include/types/acl.h b/include/types/acl.h
+index e479f9b..50a89f3 100644
+--- a/include/types/acl.h
++++ b/include/types/acl.h
+@@ -105,17 +105,13 @@ struct acl_kw_list {
+ /*
+  * Description of an ACL expression.
+  * The expression is part of a list. It contains pointers to the keyword, the
+- * parse and match functions which default to the keyword's, the sample fetch
+- * descriptor which also defaults to the keyword's, and a list or tree of
+- * patterns to test against. The structure is organized so that the hot parts
+- * are grouped together in order to optimize caching.
++ * sample fetch descriptor which defaults to the keyword's, and the associated
++ * pattern matching. The structure is organized so that the hot parts are
++ * grouped together in order to optimize caching.
+  */
+ struct acl_expr {
+-	int (*parse)(const char **text, struct acl_pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
+-	int (*match)(struct sample *smp, struct acl_pattern *pattern);
+ 	struct sample_expr *smp;      /* the sample expression we depend on */
+-	struct list patterns;         /* list of acl_patterns */
+-	struct eb_root pattern_tree;  /* may be used for lookup in large datasets */
++	struct pattern_expr pat;      /* the pattern matching expression */
+ 	struct list list;             /* chaining */
+ 	const char *kw;               /* points to the ACL kw's name or fetch's name (must not free) */
+ };
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 68ed462..2023b1a 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -121,6 +121,18 @@ struct acl_pattern {
+ 
+ };
+ 
++/* Description of a pattern expression.
++ * It contains pointers to the parse and match functions, and a list or tree of
++ * patterns to test against. The structure is organized so that the hot parts
++ * are grouped together in order to optimize caching.
++ */
++struct pattern_expr {
++	int (*parse)(const char **text, struct acl_pattern *pattern, struct sample_storage *smp, int *opaque, char **err);
++	int (*match)(struct sample *smp, struct acl_pattern *pattern);
++	struct list patterns;         /* list of acl_patterns */
++	struct eb_root pattern_tree;  /* may be used for lookup in large datasets */
++};
++
+ extern char *acl_match_names[ACL_MATCH_NUM];
+ extern int (*acl_parse_fcts[ACL_MATCH_NUM])(const char **, struct acl_pattern *, struct sample_storage *, int *, char **);
+ extern int (*acl_match_fcts[ACL_MATCH_NUM])(struct sample *, struct acl_pattern *);
+diff --git a/src/acl.c b/src/acl.c
+index 1bb3e9f..1e0daa3 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -107,9 +107,7 @@ static struct acl_expr *prune_acl_expr(struct acl_expr *expr)
+ {
+ 	struct arg *arg;
+ 
+-	free_pattern_list(&expr->patterns);
+-	free_pattern_tree(&expr->pattern_tree);
+-	LIST_INIT(&expr->patterns);
++	prune_pattern_expr(&expr->pat);
+ 
+ 	for (arg = expr->smp->arg_p; arg; arg++) {
+ 		if (arg->type == ARGT_STOP)
+@@ -171,30 +169,30 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		goto out_return;
+ 	}
+ 
++	init_pattern_expr(&expr->pat);
++
+ 	expr->kw = aclkw ? aclkw->kw : smp->fetch->kw;
+-	LIST_INIT(&expr->patterns);
+-	expr->pattern_tree = EB_ROOT_UNIQUE;
+-	expr->parse = aclkw ? aclkw->parse : NULL;
+-	expr->match = aclkw ? aclkw->match : NULL;
++	expr->pat.parse = aclkw ? aclkw->parse : NULL;
++	expr->pat.match = aclkw ? aclkw->match : NULL;
+ 	expr->smp = aclkw ? NULL : smp;
+ 
+-	if (!expr->parse) {
++	if (!expr->pat.parse) {
+ 		/* some types can be automatically converted */
+ 
+ 		switch (expr->smp ? expr->smp->fetch->out_type : aclkw->smp->out_type) {
+ 		case SMP_T_BOOL:
+-			expr->parse = acl_parse_fcts[ACL_MATCH_BOOL];
+-			expr->match = acl_match_fcts[ACL_MATCH_BOOL];
++			expr->pat.parse = acl_parse_fcts[ACL_MATCH_BOOL];
++			expr->pat.match = acl_match_fcts[ACL_MATCH_BOOL];
+ 			break;
+ 		case SMP_T_SINT:
+ 		case SMP_T_UINT:
+-			expr->parse = acl_parse_fcts[ACL_MATCH_INT];
+-			expr->match = acl_match_fcts[ACL_MATCH_INT];
++			expr->pat.parse = acl_parse_fcts[ACL_MATCH_INT];
++			expr->pat.match = acl_match_fcts[ACL_MATCH_INT];
+ 			break;
+ 		case SMP_T_IPV4:
+ 		case SMP_T_IPV6:
+-			expr->parse = acl_parse_fcts[ACL_MATCH_IP];
+-			expr->match = acl_match_fcts[ACL_MATCH_IP];
++			expr->pat.parse = acl_parse_fcts[ACL_MATCH_IP];
++			expr->pat.match = acl_match_fcts[ACL_MATCH_IP];
+ 			break;
+ 		}
+ 	}
+@@ -430,7 +428,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 
+ 	/* Additional check to protect against common mistakes */
+ 	cur_type = smp_expr_output_type(expr->smp);
+-	if (expr->parse && cur_type != SMP_T_BOOL && !*args[1]) {
++	if (expr->pat.parse && cur_type != SMP_T_BOOL && !*args[1]) {
+ 		Warning("parsing acl keyword '%s' :\n"
+ 		        "  no pattern to match against were provided, so this ACL will never match.\n"
+ 		        "  If this is what you intended, please add '--' to get rid of this warning.\n"
+@@ -453,19 +451,19 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		if ((*args)[1] == 'i')
+ 			patflags |= ACL_PAT_F_IGNORE_CASE;
+ 		else if ((*args)[1] == 'f') {
+-			if (!expr->parse) {
++			if (!expr->pat.parse) {
+ 				memprintf(err, "matching method must be specified first (using '-m') when using a sample fetch of this type ('%s')", expr->kw);
+ 				goto out_free_expr;
+ 			}
+ 
+-			if (!acl_read_patterns_from_file(expr, args[1], patflags | ACL_PAT_F_FROM_FILE, err))
++			if (!acl_read_patterns_from_file(&expr->pat, args[1], patflags | ACL_PAT_F_FROM_FILE, err))
+ 				goto out_free_expr;
+ 			args++;
+ 		}
+ 		else if ((*args)[1] == 'm') {
+ 			int idx;
+ 
+-			if (!LIST_ISEMPTY(&expr->patterns) || !eb_is_empty(&expr->pattern_tree)) {
++			if (!LIST_ISEMPTY(&expr->pat.patterns) || !eb_is_empty(&expr->pat.pattern_tree)) {
+ 				memprintf(err, "'-m' must only be specified before patterns and files in parsing ACL expression");
+ 				goto out_free_expr;
+ 			}
+@@ -492,8 +490,8 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			      cur_type == SMP_T_BIN ||
+ 			      cur_type == SMP_T_CSTR ||
+ 			      cur_type == SMP_T_CBIN))) {
+-				expr->parse = acl_parse_fcts[idx];
+-				expr->match = acl_match_fcts[idx];
++				expr->pat.parse = acl_parse_fcts[idx];
++				expr->pat.match = acl_match_fcts[idx];
+ 			}
+ 			else {
+ 				memprintf(err, "matching method '%s' cannot be used with fetch keyword '%s'", args[1], expr->kw);
+@@ -510,7 +508,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		args++;
+ 	}
+ 
+-	if (!expr->parse) {
++	if (!expr->pat.parse) {
+ 		memprintf(err, "matching method must be specified first (using '-m') when using a sample fetch of this type ('%s')", expr->kw);
+ 		goto out_free_expr;
+ 	}
+@@ -527,11 +525,11 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		pattern->flags = patflags;
+ 
+ 		pattern->type = SMP_TYPES; /* unspecified type */
+-		ret = expr->parse(args, pattern, NULL, &opaque, err);
++		ret = expr->pat.parse(args, pattern, NULL, &opaque, err);
+ 		if (!ret)
+ 			goto out_free_pattern;
+ 
+-		LIST_ADDQ(&expr->patterns, &pattern->list);
++		LIST_ADDQ(&expr->pat.patterns, &pattern->list);
+ 		args += ret;
+ 	}
+ 
+@@ -1012,7 +1010,7 @@ int acl_exec_cond(struct acl_cond *cond, struct proxy *px, struct session *l4, v
+ 					continue;
+ 				}
+ 
+-				acl_res |= acl_exec_match(expr, &smp, NULL);
++				acl_res |= acl_exec_match(&expr->pat, &smp, NULL);
+ 				/*
+ 				 * OK now acl_res holds the result of this expression
+ 				 * as one of ACL_PAT_FAIL, ACL_PAT_MISS or ACL_PAT_PASS.
+@@ -1136,14 +1134,14 @@ int acl_find_targets(struct proxy *p)
+ 					continue;
+ 				}
+ 
+-				if (LIST_ISEMPTY(&expr->patterns)) {
++				if (LIST_ISEMPTY(&expr->pat.patterns)) {
+ 					Alert("proxy %s: acl %s %s(): no groups specified.\n",
+ 						p->id, acl->name, expr->kw);
+ 					cfgerr++;
+ 					continue;
+ 				}
+ 
+-				list_for_each_entry(pattern, &expr->patterns, list) {
++				list_for_each_entry(pattern, &expr->pat.patterns, list) {
+ 					/* this keyword only has one argument */
+ 					pattern->val.group_mask = auth_resolve_groups(expr->smp->arg_p->data.usr, pattern->ptr.str);
+ 
+diff --git a/src/pattern.c b/src/pattern.c
+index 6bf7d1d..7e9c69e 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -117,7 +117,7 @@ int acl_match_bin(struct sample *smp, struct acl_pattern *pattern)
+ /* Lookup a string in the expression's pattern tree. The node is returned if it
+  * exists, otherwise NULL.
+  */
+-static void *acl_lookup_str(struct sample *smp, struct acl_expr *expr)
++static void *acl_lookup_str(struct sample *smp, struct pattern_expr *expr)
+ {
+ 	/* data are stored in a tree */
+ 	struct ebmb_node *node;
+@@ -389,7 +389,7 @@ int acl_match_ip(struct sample *smp, struct acl_pattern *pattern)
+ /* Lookup an IPv4 address in the expression's pattern tree using the longest
+  * match method. The node is returned if it exists, otherwise NULL.
+  */
+-static void *acl_lookup_ip(struct sample *smp, struct acl_expr *expr)
++static void *acl_lookup_ip(struct sample *smp, struct pattern_expr *expr)
+ {
+ 	struct in_addr *s;
+ 
+@@ -807,11 +807,24 @@ void free_pattern_tree(struct eb_root *root)
+ 	}
+ }
+ 
++void prune_pattern_expr(struct pattern_expr *expr)
++{
++	free_pattern_list(&expr->patterns);
++	free_pattern_tree(&expr->pattern_tree);
++	LIST_INIT(&expr->patterns);
++}
++
++void init_pattern_expr(struct pattern_expr *expr)
++{
++	LIST_INIT(&expr->patterns);
++	expr->pattern_tree = EB_ROOT_UNIQUE;
++}
++
+ /* return 1 if the process is ok
+  * return -1 if the parser fail. The err message is filled.
+  * return -2 if out of memory
+  */
+-int acl_register_pattern(struct acl_expr *expr, char *text,
++int acl_register_pattern(struct pattern_expr *expr, char *text,
+                          struct sample_storage *smp,
+                          struct acl_pattern **pattern,
+                          int patflags, char **err)
+@@ -856,7 +869,7 @@ int acl_register_pattern(struct acl_expr *expr, char *text,
+ /* Reads patterns from a file. If <err_msg> is non-NULL, an error message will
+  * be returned there on errors and the caller will have to free it.
+  */
+-int acl_read_patterns_from_file(struct acl_expr *expr,
++int acl_read_patterns_from_file(struct pattern_expr *expr,
+                                 const char *filename, int patflags,
+                                 char **err)
+ {
+@@ -926,7 +939,7 @@ int acl_read_patterns_from_file(struct acl_expr *expr,
+  * is not NULL. The function return ACL_PAT_FAIL, ACL_PAT_MISS or
+  * ACL_PAT_PASS
+  */
+-inline int acl_exec_match(struct acl_expr *expr, struct sample *smp,
++inline int acl_exec_match(struct pattern_expr *expr, struct sample *smp,
+                           struct sample_storage **sample)
+ {
+ 	int acl_res = ACL_PAT_FAIL;
+-- 
+1.8.1.5
+

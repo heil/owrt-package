@@ -1,0 +1,35 @@
+From 60e0838f60bb941b61b1ed596027a8d70d9de8ba Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 3 Dec 2013 00:48:45 +0100
+Subject: [PATCH 171/179] BUG/MINOR: http: usual deinit stuff in last commit
+
+We need to initialize the rdr_fmt list inconditionally. Using only
+a redirect rule without an http-redirect may cause a crash during
+deinit because of the list iterating from null.
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index b0eba5e..c91b109 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8804,6 +8804,7 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+ 
+ 	rule = (struct redirect_rule *)calloc(1, sizeof(*rule));
+ 	rule->cond = cond;
++	LIST_INIT(&rule->rdr_fmt);
+ 
+ 	if (!use_fmt) {
+ 		/* old-style static redirect rule */
+@@ -8812,7 +8813,6 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+ 	}
+ 	else {
+ 		/* log-format based redirect rule */
+-		LIST_INIT(&rule->rdr_fmt);
+ 
+ 		/* Parse destination. Note that in the REDIRECT_TYPE_PREFIX case,
+ 		 * if prefix == "/", we don't want to add anything, otherwise it
+-- 
+1.8.1.5
+

@@ -1,0 +1,34 @@
+From 9eba36b7267ed6a890af37f4e70934d62ec220a7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 3 Dec 2013 00:51:09 +0100
+Subject: [PATCH 172/179] BUILD: log: silent a warning about isblank() with
+ latest patches
+
+Recent commit 06d97f9 (MEDIUM: log-format: relax parsing of '%' followed
+by unsupported characters) caused the following warning on some compilers
+since isblank is not always present :
+
+  src/log.c: In function 'parse_logformat_string':
+  src/log.c:453: warning: implicit declaration of function 'isblank'
+
+As usual, replace it with the two values (space and tab).
+---
+ src/log.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/log.c b/src/log.c
+index 31fb930..69e495b 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -450,7 +450,7 @@ void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list
+ 			}
+ 			else if (*str == '%')
+ 				cformat = LF_TEXT;     // convert this character to a litteral (useful for '%')
+-			else if (isdigit(*str) || isblank(*str)) {
++			else if (isdigit(*str) || *str == ' ' || *str == '\t') {
+ 				/* single '%' followed by blank or digit, send them both */
+ 				cformat = LF_TEXT;
+ 				pformat = LF_TEXT; /* finally we include the previous char as well */
+-- 
+1.8.1.5
+

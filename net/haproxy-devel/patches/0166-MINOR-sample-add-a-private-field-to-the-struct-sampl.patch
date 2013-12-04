@@ -1,0 +1,27 @@
+From fdbf4842b6d371773e8868165625ee617ae3ff18 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 26 Nov 2013 09:54:50 +0100
+Subject: [PATCH 166/179] MINOR: sample: add a private field to the struct
+ sample_conv
+
+These flags will be used for maps, and possibly later to pass some
+extra information to other converters if needed.
+---
+ include/types/sample.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/types/sample.h b/include/types/sample.h
+index a2d2296..46bc75b 100644
+--- a/include/types/sample.h
++++ b/include/types/sample.h
+@@ -260,6 +260,7 @@ struct sample_conv {
+ 			char **err_msg);          /* argument validation function */
+ 	unsigned int in_type;                     /* expected input sample type */
+ 	unsigned int out_type;                    /* output sample type */
++	unsigned int private;                     /* private values. only used by maps */
+ };
+ 
+ /* sample conversion expression */
+-- 
+1.8.1.5
+

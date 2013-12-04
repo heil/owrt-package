@@ -1,0 +1,27 @@
+From 20f49967381ca8e0037ae36e797b2e573ee152f3 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 21 Nov 2013 10:51:50 +0100
+Subject: [PATCH 147/179] MINOR: sample: export the generic sample conversion
+ parser
+
+just export function "find_sample_conv()" to prepare the
+generic sample conversion parser.
+---
+ include/proto/sample.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/proto/sample.h b/include/proto/sample.h
+index 3043662..db10537 100644
+--- a/include/proto/sample.h
++++ b/include/proto/sample.h
+@@ -27,6 +27,7 @@
+ #include <types/stick_table.h>
+ 
+ struct sample_expr *sample_parse_expr(char **str, int *idx, char *err, int err_size, struct arg_list *al);
++struct sample_conv *find_sample_conv(const char *kw, int len);
+ struct sample *sample_process(struct proxy *px, struct session *l4,
+                                void *l7, unsigned int dir, struct sample_expr *expr,
+                                struct sample *p);
+-- 
+1.8.1.5
+

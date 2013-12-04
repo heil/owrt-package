@@ -1,0 +1,371 @@
+From d18cd0f1106c923916036d69ebc0dc553b1fcff8 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 29 Nov 2013 12:15:45 +0100
+Subject: [PATCH 170/179] MEDIUM: http: The redirect strings follows the log
+ format rules.
+
+We handle "http-request redirect" with a log-format string now, but we
+leave "redirect" unaffected.
+
+Note that the control of the special "/" case is move from the runtime
+execution to the configuration parsing. If the format rule list is
+empty, the build_logline() function does nothing.
+---
+ doc/configuration.txt      |  20 +++++++--
+ include/proto/proto_http.h |   4 +-
+ include/types/arg.h        |   1 +
+ include/types/proxy.h      |   1 +
+ src/cfgparse.c             |   2 +-
+ src/haproxy.c              |   4 ++
+ src/log.c                  |   2 +
+ src/proto_http.c           | 108 +++++++++++++++++++++++++++++++++------------
+ src/sample.c               |   1 +
+ 9 files changed, 108 insertions(+), 35 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index b2ef7e3..803d42e 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2768,7 +2768,8 @@ http-request { allow | deny | tarpit | auth [realm <realm>] | redirect <rule> |
+     - "redirect" : this performs an HTTP redirection based on a redirect rule.
+       This is exactly the same as the "redirect" statement except that it
+       inserts a redirect rule which can be processed in the middle of other
+-      "http-request" rules. See the "redirect" keyword for the rule's syntax.
++      "http-request" rules and that these rules use the "log-format" strings.
++      See the "redirect" keyword for the rule's syntax.
+ 
+     - "add-header" appends an HTTP header field whose name is specified in
+       <name> and whose value is defined by <fmt> which follows the log-format
+@@ -4709,14 +4710,19 @@ redirect scheme   <sch> [code <code>] <option> [{if | unless} <condition>]
+ 
+   Arguments :
+     <loc>     With "redirect location", the exact value in <loc> is placed into
+-              the HTTP "Location" header.
++              the HTTP "Location" header. When used in an "http-request" rule,
++              <loc> value follows the log-format rules and can include some
++              dynamic values (see Custom Log Format in section 8.2.4).
+ 
+     <pfx>     With "redirect prefix", the "Location" header is built from the
+               concatenation of <pfx> and the complete URI path, including the
+               query string, unless the "drop-query" option is specified (see
+               below). As a special case, if <pfx> equals exactly "/", then
+               nothing is inserted before the original URI. It allows one to
+-              redirect to the same URL (for instance, to insert a cookie).
++              redirect to the same URL (for instance, to insert a cookie). When
++              used in an "http-request" rule, <pfx> value follows the log-format
++              rules and can include some dynamic values (see Custom Log Format
++              in section 8.2.4).
+ 
+     <sch>     With "redirect scheme", then the "Location" header is built by
+               concatenating <sch> with "://" then the first occurrence of the
+@@ -4726,7 +4732,9 @@ redirect scheme   <sch> [code <code>] <option> [{if | unless} <condition>]
+               no "Host" header is found, then an empty host component will be
+               returned, which most recent browsers interprete as redirecting to
+               the same host. This directive is mostly used to redirect HTTP to
+-              HTTPS.
++              HTTPS. When used in an "http-request" rule, <sch> value follows
++              the log-format rules and can include some dynamic values (see
++              Custom Log Format in section 8.2.4).
+ 
+     <code>    The code is optional. It indicates which type of HTTP redirection
+               is desired. Only codes 301, 302, 303, 307 and 308 are supported,
+@@ -4790,6 +4798,10 @@ redirect scheme   <sch> [code <code>] <option> [{if | unless} <condition>]
+   Example: redirect all HTTP traffic to HTTPS when SSL is handled by haproxy.
+         redirect scheme https if !{ ssl_fc }
+ 
++  Example: append 'www.' prefix in front of all hosts not having it
++        http-request redirect code 301 location www.%[hdr(host)]%[req.uri] \
++          unless { hdr_beg(host) -i www }
++
+   See section 7 about ACL usage.
+ 
+ 
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 7f58d7a..97e4652 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -117,8 +117,8 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, int linenum, struct proxy *proxy);
+ void free_http_req_rules(struct list *r);
+ struct chunk *http_error_message(struct session *s, int msgnum);
+-struct redirect_rule *http_parse_redirect_rule(const char *file, int line, struct proxy *curproxy,
+-                                               const char **args, char **errmsg);
++struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, struct proxy *curproxy,
++                                               const char **args, char **errmsg, int use_fmt);
+ 
+ /* to be used when contents change in an HTTP message */
+ #define http_msg_move_end(msg, bytes) do { \
+diff --git a/include/types/arg.h b/include/types/arg.h
+index b42a0a7..566f174 100644
+--- a/include/types/arg.h
++++ b/include/types/arg.h
+@@ -57,6 +57,7 @@ enum {
+ 	ARGC_HRQ,      /* http-request */
+ 	ARGC_HRS,      /* http-response */
+ 	ARGC_UIF,      /* unique-id-format */
++	ARGC_RDR,      /* redirect */
+ };
+ 
+ /* some types that are externally defined */
+diff --git a/include/types/proxy.h b/include/types/proxy.h
+index e6bc755..8b9f2fb 100644
+--- a/include/types/proxy.h
++++ b/include/types/proxy.h
+@@ -403,6 +403,7 @@ struct redirect_rule {
+ 	int type;
+ 	int rdr_len;
+ 	char *rdr_str;
++	struct list rdr_fmt;
+ 	int code;
+ 	unsigned int flags;
+ 	int cookie_len;
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 7f521b1..7087c65 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2770,7 +2770,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			goto out;
+ 		}
+ 
+-		if ((rule = http_parse_redirect_rule(file, linenum, curproxy, (const char **)args + 1, &errmsg)) == NULL) {
++		if ((rule = http_parse_redirect_rule(file, linenum, curproxy, (const char **)args + 1, &errmsg, 0)) == NULL) {
+ 			Alert("parsing [%s:%d] : error detected in %s '%s' while parsing redirect rule : %s.\n",
+ 			      file, linenum, proxy_type_str(curproxy), curproxy->id, errmsg);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+diff --git a/src/haproxy.c b/src/haproxy.c
+index e03219a..86d1899 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -1073,6 +1073,10 @@ void deinit(void)
+ 				free(rdr->cond);
+ 			}
+ 			free(rdr->rdr_str);
++			list_for_each_entry_safe(lf, lfb, &rdr->rdr_fmt, list) {
++				LIST_DEL(&lf->list);
++				free(lf);
++			}
+ 			free(rdr);
+ 		}
+ 
+diff --git a/src/log.c b/src/log.c
+index 3c461a3..31fb930 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -177,6 +177,8 @@ static inline const char *fmt_directive(const struct proxy *curproxy)
+ 		return "stick";
+ 	case ARGC_TRK:
+ 		return "track-sc"; break;
++	case ARGC_RDR:
++		return "redirect"; break;
+ 	case ARGC_ACL:
+ 		return "acl"; break;
+ 	default:
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 3a4c535..b0eba5e 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3340,6 +3340,7 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ {
+ 	struct http_msg *msg = &txn->req;
+ 	const char *msg_fmt;
++	const char *location;
+ 
+ 	/* build redirect message */
+ 	switch(rule->code) {
+@@ -3364,6 +3365,8 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 	if (unlikely(!chunk_strcpy(&trash, msg_fmt)))
+ 		return 0;
+ 
++	location = trash.str + trash.len;
++
+ 	switch(rule->type) {
+ 	case REDIRECT_TYPE_SCHEME: {
+ 		const char *path;
+@@ -3399,14 +3402,23 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 			pathlen = 1;
+ 		}
+ 
+-		/* check if we can add scheme + "://" + host + path */
+-		if (trash.len + rule->rdr_len + 3 + hostlen + pathlen > trash.size - 4)
+-			return 0;
++		if (rule->rdr_str) { /* this is an old "redirect" rule */
++			/* check if we can add scheme + "://" + host + path */
++			if (trash.len + rule->rdr_len + 3 + hostlen + pathlen > trash.size - 4)
++				return 0;
+ 
+-		/* add scheme */
+-		memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
+-		trash.len += rule->rdr_len;
++			/* add scheme */
++			memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
++			trash.len += rule->rdr_len;
++		}
++		else {
++			/* add scheme with executing log format */
++			trash.len += build_logline(s, trash.str + trash.len, trash.size - trash.len, &rule->rdr_fmt);
+ 
++			/* check if we can add scheme + "://" + host + path */
++			if (trash.len + 3 + hostlen + pathlen > trash.size - 4)
++				return 0;
++		}
+ 		/* add "://" */
+ 		memcpy(trash.str + trash.len, "://", 3);
+ 		trash.len += 3;
+@@ -3419,7 +3431,7 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 		memcpy(trash.str + trash.len, path, pathlen);
+ 		trash.len += pathlen;
+ 
+-		/* append a slash at the end of the location is needed and missing */
++		/* append a slash at the end of the location if needed and missing */
+ 		if (trash.len && trash.str[trash.len - 1] != '/' &&
+ 		    (rule->flags & REDIRECT_FLAG_APPEND_SLASH)) {
+ 			if (trash.len > trash.size - 5)
+@@ -3453,23 +3465,33 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 			pathlen = 1;
+ 		}
+ 
+-		if (trash.len + rule->rdr_len + pathlen > trash.size - 4)
+-			return 0;
++		if (rule->rdr_str) { /* this is an old "redirect" rule */
++			if (trash.len + rule->rdr_len + pathlen > trash.size - 4)
++				return 0;
+ 
+-		/* add prefix. Note that if prefix == "/", we don't want to
+-		 * add anything, otherwise it makes it hard for the user to
+-		 * configure a self-redirection.
+-		 */
+-		if (rule->rdr_len != 1 || *rule->rdr_str != '/') {
+-			memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
+-			trash.len += rule->rdr_len;
++			/* add prefix. Note that if prefix == "/", we don't want to
++			 * add anything, otherwise it makes it hard for the user to
++			 * configure a self-redirection.
++			 */
++			if (rule->rdr_len != 1 || *rule->rdr_str != '/') {
++				memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
++				trash.len += rule->rdr_len;
++			}
++		}
++		else {
++			/* add prefix with executing log format */
++			trash.len += build_logline(s, trash.str + trash.len, trash.size - trash.len, &rule->rdr_fmt);
++
++			/* Check length */
++			if (trash.len + pathlen > trash.size - 4)
++				return 0;
+ 		}
+ 
+ 		/* add path */
+ 		memcpy(trash.str + trash.len, path, pathlen);
+ 		trash.len += pathlen;
+ 
+-		/* append a slash at the end of the location is needed and missing */
++		/* append a slash at the end of the location if needed and missing */
+ 		if (trash.len && trash.str[trash.len - 1] != '/' &&
+ 		    (rule->flags & REDIRECT_FLAG_APPEND_SLASH)) {
+ 			if (trash.len > trash.size - 5)
+@@ -3482,12 +3504,22 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 	}
+ 	case REDIRECT_TYPE_LOCATION:
+ 	default:
+-		if (trash.len + rule->rdr_len > trash.size - 4)
+-			return 0;
++		if (rule->rdr_str) { /* this is an old "redirect" rule */
++			if (trash.len + rule->rdr_len > trash.size - 4)
++				return 0;
+ 
+-		/* add location */
+-		memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
+-		trash.len += rule->rdr_len;
++			/* add location */
++			memcpy(trash.str + trash.len, rule->rdr_str, rule->rdr_len);
++			trash.len += rule->rdr_len;
++		}
++		else {
++			/* add location with executing log format */
++			trash.len += build_logline(s, trash.str + trash.len, trash.size - trash.len, &rule->rdr_fmt);
++
++			/* Check left length */
++			if (trash.len > trash.size - 4)
++				return 0;
++		}
+ 		break;
+ 	}
+ 
+@@ -3509,7 +3541,7 @@ static int http_apply_redirect_rule(struct redirect_rule *rule, struct session *
+ 	/* let's log the request time */
+ 	s->logs.tv_request = now;
+ 
+-	if (rule->rdr_len >= 1 && *rule->rdr_str == '/' &&
++	if (*location == '/' &&
+ 	    (msg->flags & HTTP_MSGF_XFER_LEN) &&
+ 	    !(msg->flags & HTTP_MSGF_TE_CHNK) && !txn->req.body_len &&
+ 	    ((txn->flags & TX_CON_WANT_MSK) == TX_CON_WANT_SCL ||
+@@ -8474,7 +8506,7 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 		struct redirect_rule *redir;
+ 		char *errmsg = NULL;
+ 
+-		if ((redir = http_parse_redirect_rule(file, linenum, proxy, (const char **)args + 1, &errmsg)) == NULL) {
++		if ((redir = http_parse_redirect_rule(file, linenum, proxy, (const char **)args + 1, &errmsg, 1)) == NULL) {
+ 			Alert("parsing [%s:%d] : error detected in %s '%s' while parsing 'http-request %s' rule : %s.\n",
+ 			      file, linenum, proxy_type_str(proxy), proxy->id, args[0], errmsg);
+ 			goto out_err;
+@@ -8670,10 +8702,11 @@ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, i
+ }
+ 
+ /* Parses a redirect rule. Returns the redirect rule on success or NULL on error,
+- * with <err> filled with the error message.
++ * with <err> filled with the error message. If <use_fmt> is not null, builds a
++ * dynamic log-format rule instead of a static string.
+  */
+ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, struct proxy *curproxy,
+-                                               const char **args, char **errmsg)
++                                               const char **args, char **errmsg, int use_fmt)
+ {
+ 	struct redirect_rule *rule;
+ 	int cur_arg;
+@@ -8771,8 +8804,27 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+ 
+ 	rule = (struct redirect_rule *)calloc(1, sizeof(*rule));
+ 	rule->cond = cond;
+-	rule->rdr_str = strdup(destination);
+-	rule->rdr_len = strlen(destination);
++
++	if (!use_fmt) {
++		/* old-style static redirect rule */
++		rule->rdr_str = strdup(destination);
++		rule->rdr_len = strlen(destination);
++	}
++	else {
++		/* log-format based redirect rule */
++		LIST_INIT(&rule->rdr_fmt);
++
++		/* Parse destination. Note that in the REDIRECT_TYPE_PREFIX case,
++		 * if prefix == "/", we don't want to add anything, otherwise it
++		 * makes it hard for the user to configure a self-redirection.
++		 */
++		proxy->conf.args.ctx = ARGC_RDR;
++		if (!(type == REDIRECT_TYPE_PREFIX && destination[0] == '/' && destination[1] == '\0')) {
++			parse_logformat_string(destination, curproxy, &rule->rdr_fmt, 0,
++			                       (curproxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++		}
++	}
++
+ 	if (cookie) {
+ 		/* depending on cookie_set, either we want to set the cookie, or to clear it.
+ 		 * a clear consists in appending "; path=/; Max-Age=0;" at the end.
+diff --git a/src/sample.c b/src/sample.c
+index a4a2773..10749c0 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -901,6 +901,7 @@ int smp_resolve_args(struct proxy *p)
+ 		case ARGC_HRQ: where = "in http-request header format string in"; break;
+ 		case ARGC_HRS: where = "in http-response header format string in"; break;
+ 		case ARGC_UIF: where = "in unique-id-format string in"; break;
++		case ARGC_RDR: where = "in redirect format string in"; break;
+ 		case ARGC_ACL: ctx = "ACL keyword"; break;
+ 		}
+ 
+-- 
+1.8.1.5
+
