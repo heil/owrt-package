@@ -1,0 +1,57 @@
+From 06559ac1fbc3f1dbc778cba60fdc615bc277c5b1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 5 Dec 2013 01:53:08 +0100
+Subject: [PATCH 187/188] OPTIM: checks: don't poll on recv when using plain
+ TCP connects
+
+When pure TCP checks are used, we see a useless call to recvfrom()
+in strace resulting from an inconditional poll on recv after the
+connect() succeeds. Let's remove this one and properly report
+connection success in the write events.
+---
+ src/checks.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index efe6979..15e667e 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -927,7 +927,12 @@ static void event_srv_chk_w(struct connection *conn)
+ 		goto out_wakeup;
+ 	}
+ 
+-	/* here, we know that the connection is established */
++	/* here, we know that the connection is established. That's enough for
++	 * a pure TCP check.
++	 */
++	if (!check->type)
++		goto out_wakeup;
++
+ 	if (check->bo->o) {
+ 		conn->xprt->snd_buf(conn, check->bo, MSG_DONTWAIT | MSG_NOSIGNAL);
+ 		if (conn->flags & CO_FL_ERROR) {
+@@ -1336,8 +1341,7 @@ static void event_srv_chk_r(struct connection *conn)
+ 		break;
+ 
+ 	default:
+-		/* other checks are valid if the connection succeeded anyway */
+-		set_server_check_status(check, HCHK_STATUS_L4OK, NULL);
++		/* for other checks (eg: pure TCP), delegate to the main task */
+ 		break;
+ 	} /* switch */
+ 
+@@ -1554,7 +1558,10 @@ static struct task *process_chk(struct task *t)
+ 				int t_con = tick_add(now_ms, s->proxy->timeout.connect);
+ 				t->expire = tick_first(t->expire, t_con);
+ 			}
+-			conn_data_poll_recv(conn);   /* prepare for reading a possible reply */
++
++			if (check->type)
++				conn_data_want_recv(conn);   /* prepare for reading a possible reply */
++
+ 			goto reschedule;
+ 
+ 		case SN_ERR_SRVTO: /* ETIMEDOUT */
+-- 
+1.8.1.5
+

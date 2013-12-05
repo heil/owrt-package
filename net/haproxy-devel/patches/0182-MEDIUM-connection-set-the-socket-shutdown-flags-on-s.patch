@@ -1,0 +1,119 @@
+From 26f4a047445583666a73a4a6d621e814bc4375da Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 4 Dec 2013 23:44:10 +0100
+Subject: [PATCH 182/188] MEDIUM: connection: set the socket shutdown flags on
+ socket errors
+
+When we get a hard error from a syscall indicating the socket is dead,
+it makes sense to set the CO_FL_SOCK_WR_SH and CO_FL_SOCK_RD_SH flags
+to indicate that the socket may not be used anymore. It will ease the
+error processing in health checks where the state of socket is very
+important. We'll also be able to avoid some setsockopt(nolinger) after
+an error.
+
+For now, the rest of the code is not impacted because CO_FL_ERROR is
+always tested prior to these flags.
+---
+ src/connection.c       |  2 ++
+ src/proto_tcp.c        |  2 +-
+ src/raw_sock.c         | 10 +++++-----
+ src/stream_interface.c |  1 +
+ 4 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/connection.c b/src/connection.c
+index 78d28ed..456d1bd 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -438,6 +438,7 @@ int conn_recv_proxy(struct connection *conn, int flag)
+ 
+  recv_abort:
+ 	conn->err_code = CO_ER_PRX_ABORT;
++	conn->flags |= CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 	goto fail;
+ 
+  fail:
+@@ -574,6 +575,7 @@ int conn_local_send_proxy(struct connection *conn, unsigned int flag)
+ 				goto out_wait;
+ 			if (errno == EINTR)
+ 				continue;
++			conn->flags |= CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			goto out_error;
+ 		}
+ 	} while (0);
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 21b1771..a1c69a2 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -625,7 +625,7 @@ int tcp_connect_probe(struct connection *conn)
+ 	 * and disable polling on this FD.
+ 	 */
+ 
+-	conn->flags |= CO_FL_ERROR;
++	conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 	__conn_sock_stop_both(conn);
+ 	return 0;
+ }
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index b9bb8dc..ec76604 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -85,7 +85,7 @@ int raw_sock_to_pipe(struct connection *conn, struct pipe *pipe, unsigned int co
+ 
+ 		/* report error on POLL_ERR before connection establishment */
+ 		if ((fdtab[conn->t.sock.fd].ev & FD_POLL_ERR) && (conn->flags & CO_FL_WAIT_L4_CONN)) {
+-			conn->flags |= CO_FL_ERROR;
++			conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			return retval;
+ 		}
+ 	}
+@@ -236,7 +236,7 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 
+ 		/* report error on POLL_ERR before connection establishment */
+ 		if ((fdtab[conn->t.sock.fd].ev & FD_POLL_ERR) && (conn->flags & CO_FL_WAIT_L4_CONN)) {
+-			conn->flags |= CO_FL_ERROR;
++			conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			return done;
+ 		}
+ 	}
+@@ -284,7 +284,7 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 			break;
+ 		}
+ 		else if (errno != EINTR) {
+-			conn->flags |= CO_FL_ERROR;
++			conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			break;
+ 		}
+ 	}
+@@ -305,7 +305,7 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 	 * an error without checking.
+ 	 */
+ 	if (unlikely(fdtab[conn->t.sock.fd].ev & FD_POLL_ERR))
+-		conn->flags |= CO_FL_ERROR;
++		conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 	return done;
+ }
+ 
+@@ -359,7 +359,7 @@ static int raw_sock_from_buf(struct connection *conn, struct buffer *buf, int fl
+ 			break;
+ 		}
+ 		else if (errno != EINTR) {
+-			conn->flags |= CO_FL_ERROR;
++			conn->flags |= CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			break;
+ 		}
+ 	}
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 702e7b3..4600994 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -472,6 +472,7 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 				goto out_wait;
+ 			if (errno == EINTR)
+ 				continue;
++			conn->flags |= CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+ 			goto out_error;
+ 		}
+ 
+-- 
+1.8.1.5
+

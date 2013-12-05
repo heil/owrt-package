@@ -1,0 +1,82 @@
+From 7fe45698f58a53dda9182a5970a2ea4bda9f92fe Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 4 Dec 2013 23:37:56 +0100
+Subject: [PATCH 181/188] BUG/MINOR: connection: check EINTR when sending a
+ PROXY header
+
+PROXY protocol header was not tolerant to signals, so it might cause a
+connection to report an error if a signal comes in at the exact same
+moment the send is done.
+
+This is 1.5-specific and does not need any backport.
+---
+ src/connection.c       | 20 ++++++++++++--------
+ src/stream_interface.c |  5 ++++-
+ 2 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/src/connection.c b/src/connection.c
+index b477b46..78d28ed 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -563,16 +563,20 @@ int conn_local_send_proxy(struct connection *conn, unsigned int flag)
+ 	/* we have to send the whole trash. If the data layer has a
+ 	 * pending write, we'll also set MSG_MORE.
+ 	 */
+-	ret = send(conn->t.sock.fd, trash.str, trash.len, (conn->flags & CO_FL_DATA_WR_ENA) ? MSG_MORE : 0);
+-
+-	if (ret == 0)
+-		goto out_wait;
++	do {
++		ret = send(conn->t.sock.fd, trash.str, trash.len, (conn->flags & CO_FL_DATA_WR_ENA) ? MSG_MORE : 0);
+ 
+-	if (ret < 0) {
+-		if (errno == EAGAIN || errno == ENOTCONN)
++		if (ret == 0)
+ 			goto out_wait;
+-		goto out_error;
+-	}
++
++		if (ret < 0) {
++			if (errno == EAGAIN || errno == ENOTCONN)
++				goto out_wait;
++			if (errno == EINTR)
++				continue;
++			goto out_error;
++		}
++	} while (0);
+ 
+ 	if (ret != trash.len)
+ 		goto out_error;
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 6fdaff3..702e7b3 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -442,7 +442,7 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 	 * connection, in which case the connection is validated only once
+ 	 * we've sent the whole proxy line. Otherwise we use connect().
+ 	 */
+-	if (si->send_proxy_ofs) {
++	while (si->send_proxy_ofs) {
+ 		int ret;
+ 
+ 		/* The target server expects a PROXY line to be sent first.
+@@ -470,6 +470,8 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 		if (ret < 0) {
+ 			if (errno == EAGAIN || errno == ENOTCONN)
+ 				goto out_wait;
++			if (errno == EINTR)
++				continue;
+ 			goto out_error;
+ 		}
+ 
+@@ -478,6 +480,7 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 			goto out_wait;
+ 
+ 		/* OK we've sent the whole line, we're connected */
++		break;
+ 	}
+ 
+ 	/* The connection is ready now, simply return and let the connection
+-- 
+1.8.1.5
+
