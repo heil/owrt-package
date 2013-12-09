@@ -1,0 +1,94 @@
+From 37e340ce4bdcaa73d10d8f9d538ae02e29b40605 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 6 Dec 2013 23:05:21 +0100
+Subject: [PATCH 202/203] BUG/MEDIUM: stick: completely remove the unused flag
+ from the store entries
+
+The store[] array in the session holds a flag which probably aimed to
+differenciate store entries learned from the request from those learned
+from the response, and allowing responses to overwrite only the request
+ones (eg: have a server set a response cookie which overwrites the request
+one).
+
+But this flag is set when a response data is stored, and is never cleared.
+So in practice, haproxy always runs with this flag set, meaning that
+responses prevent themselves from overriding the request data.
+
+It is desirable anyway to keep the ability not to override data, because
+the override is performed only based on the table and not on the key, so
+that would mean that it would be impossible to retrieve two different
+keys to store into a same table. For example, if a client sets a cookie
+and a server another one, both need to be updated in the table in the
+proper order. This is especially true when multiple keys may be tracked
+on each side into the same table (eg: list of IP addresses in a header).
+
+So the correct fix which also maintains the current behaviour consists in
+simply removing this flag and never try to optimize for the overwrite case.
+
+This fix also has the benefit of significantly reducing the session size,
+by 64 bytes due to alignment issues caused by this flag!
+
+The bug has been there forever (since 1.4-dev7), so a backport to 1.4
+would be appropriate.
+---
+ include/types/session.h |  1 -
+ src/session.c           | 19 +------------------
+ 2 files changed, 1 insertion(+), 19 deletions(-)
+
+diff --git a/include/types/session.h b/include/types/session.h
+index 8f731dd..ba12636 100644
+--- a/include/types/session.h
++++ b/include/types/session.h
+@@ -144,7 +144,6 @@ struct session {
+ 	struct {
+ 		struct stksess *ts;
+ 		struct stktable *table;
+-		int flags;
+ 	} store[8];				/* tracked stickiness values to store */
+ 	int store_count;
+ 
+diff --git a/src/session.c b/src/session.c
+index 9ed68b1..c23891f 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -1459,18 +1459,6 @@ static int process_store_rules(struct session *s, struct channel *rep, int an_bi
+ 
+ 	list_for_each_entry(rule, &px->storersp_rules, list) {
+ 		int ret = 1 ;
+-		int storereqidx = -1;
+-
+-		for (i = 0; i < s->store_count; i++) {
+-			if (rule->table.t == s->store[i].table) {
+-				if (!(s->store[i].flags))
+-					storereqidx = i;
+-				break;
+-			}
+-		}
+-
+-		if ((i !=  s->store_count) && (storereqidx == -1))
+-			continue;
+ 
+ 		if (rule->cond) {
+ 	                ret = acl_exec_cond(rule->cond, px, s, &s->txn, SMP_OPT_DIR_RES|SMP_OPT_FINAL);
+@@ -1486,17 +1474,12 @@ static int process_store_rules(struct session *s, struct channel *rep, int an_bi
+ 			if (!key)
+ 				continue;
+ 
+-			if (storereqidx != -1) {
+-				stksess_setkey(s->store[storereqidx].table, s->store[storereqidx].ts, key);
+-				s->store[storereqidx].flags = 1;
+-			}
+-			else if (s->store_count < (sizeof(s->store) / sizeof(s->store[0]))) {
++			if (s->store_count < (sizeof(s->store) / sizeof(s->store[0]))) {
+ 				struct stksess *ts;
+ 
+ 				ts = stksess_new(rule->table.t, key);
+ 				if (ts) {
+ 					s->store[s->store_count].table = rule->table.t;
+-					s->store[s->store_count].flags = 1;
+ 					s->store[s->store_count++].ts = ts;
+ 				}
+ 			}
+-- 
+1.8.1.5
+

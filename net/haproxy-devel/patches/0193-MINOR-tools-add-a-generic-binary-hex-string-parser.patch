@@ -1,0 +1,134 @@
+From 126d40691a09e1bb77e2a0ce7278962b26849a6c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 3 Dec 2013 17:50:47 +0100
+Subject: [PATCH 193/203] MINOR: tools: add a generic binary hex string parser
+
+We currently use such an hex parser in pat_parse_bin() to parse hex
+string patterns. We'll need another generic one so let's move it to
+standard.c and have pat_parse_bin() make use of it.
+---
+ include/common/standard.h |  8 ++++++++
+ src/pattern.c             | 31 +------------------------------
+ src/standard.c            | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 51 insertions(+), 30 deletions(-)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index 8c5871f..fe3e13c 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -508,6 +508,14 @@ static inline unsigned int popcount(unsigned int a)
+ 	return cnt;
+ }
+ 
++/*
++ * Parse binary string written in hexadecimal (source) and store the decoded
++ * result into binstr and set binstrlen to the lengh of binstr. Memory for
++ * binstr is allocated by the function. In case of error, returns 0 with an
++ * error message in err.
++ */
++int parse_binary(const char *source, char **binstr, int *binstrlen, char **err);
++
+ /* copies at most <n> characters from <src> and always terminates with '\0' */
+ char *my_strndup(const char *src, int n);
+ 
+diff --git a/src/pattern.c b/src/pattern.c
+index b6f7502..4f049f7 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -440,39 +440,10 @@ int pat_parse_str(const char **text, struct pattern *pattern, struct sample_stor
+ /* Parse a binary written in hexa. It is allocated. */
+ int pat_parse_bin(const char **text, struct pattern *pattern, struct sample_storage *smp, int *opaque, char **err)
+ {
+-	int len;
+-	const char *p = *text;
+-	int i,j;
+-
+-	len  = strlen(p);
+-	if (len%2) {
+-		memprintf(err, "an even number of hex digit is expected");
+-		return 0;
+-	}
+-
+ 	pattern->type = SMP_T_CBIN;
+-	pattern->len = len >> 1;
+-	pattern->ptr.str = malloc(pattern->len);
+ 	pattern->smp = smp;
+-	if (!pattern->ptr.str) {
+-		memprintf(err, "out of memory while loading string pattern");
+-		return 0;
+-	}
+-
+-	i = j = 0;
+-	while (j < pattern->len) {
+-		if (!ishex(p[i++]))
+-			goto bad_input;
+-		if (!ishex(p[i++]))
+-			goto bad_input;
+-		pattern->ptr.str[j++] =  (hex2i(p[i-2]) << 4) + hex2i(p[i-1]);
+-	}
+-	return 1;
+ 
+-bad_input:
+-	memprintf(err, "an hex digit is expected (found '%c')", p[i-1]);
+-	free(pattern->ptr.str);
+-	return 0;
++	return parse_binary(*text, &pattern->ptr.str, &pattern->len, err);
+ }
+ 
+ /* Parse and concatenate all further strings into one. */
+diff --git a/src/standard.c b/src/standard.c
+index 41359c9..c319139 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1356,6 +1356,48 @@ const char *parse_size_err(const char *text, unsigned *ret) {
+ 	return NULL;
+ }
+ 
++/*
++ * Parse binary string written in hexadecimal (source) and store the decoded
++ * result into binstr and set binstrlen to the lengh of binstr. Memory for
++ * binstr is allocated by the function. In case of error, returns 0 with an
++ * error message in err.
++ */
++int parse_binary(const char *source, char **binstr, int *binstrlen, char **err)
++{
++	int len;
++	const char *p = source;
++	int i,j;
++
++	len = strlen(source);
++	if (len % 2) {
++		memprintf(err, "an even number of hex digit is expected");
++		return 0;
++	}
++
++	len = len >> 1;
++	*binstrlen = len;
++	*binstr = calloc(len, sizeof(char));
++	if (!*binstr) {
++		memprintf(err, "out of memory while loading string pattern");
++		return 0;
++	}
++
++	i = j = 0;
++	while (j < len) {
++		if (!ishex(p[i++]))
++			goto bad_input;
++		if (!ishex(p[i++]))
++			goto bad_input;
++		(*binstr)[j++] =  (hex2i(p[i-2]) << 4) + hex2i(p[i-1]);
++	}
++	return len;
++
++bad_input:
++	memprintf(err, "an hex digit is expected (found '%c')", p[i-1]);
++	free(binstr);
++	return 0;
++}
++
+ /* copies at most <n> characters from <src> and always terminates with '\0' */
+ char *my_strndup(const char *src, int n)
+ {
+-- 
+1.8.1.5
+

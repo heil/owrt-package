@@ -1,0 +1,76 @@
+From 98aec9ff47ad33748cf5c76cd071511cbcf509c6 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 6 Dec 2013 16:16:41 +0100
+Subject: [PATCH 200/203] BUG/MINOR: checks: tcp-check actions are enums, not
+ flags
+
+In recent commit 5ecb77f (MEDIUM: checks: add send/expect tcp based check),
+bitfields were mistakenly used at some places for the actions. Fortunately,
+the only two actions right now are 1 and 2 so they don't share any bit in
+common and the bug has no impact.
+
+No backport is needed.
+---
+ include/types/checks.h | 4 ++--
+ src/checks.c           | 8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/include/types/checks.h b/include/types/checks.h
+index d7d9725..956df3a 100644
+--- a/include/types/checks.h
++++ b/include/types/checks.h
+@@ -106,9 +106,9 @@ struct analyze_status {
+ 	unsigned char lr[HANA_OBS_SIZE];	/* result for l4/l7: 0 = ignore, 1 - error, 2 - OK */
+ };
+ 
+-/* bits for tcpcheck_rule->action */
++/* possible actions for tcpcheck_rule->action */
+ enum {
+-	TCPCHK_ACT_SEND        = 1,             /* send action, regular string format */
++	TCPCHK_ACT_SEND        = 0,             /* send action, regular string format */
+ 	TCPCHK_ACT_EXPECT,                      /* expect action, either regular or binary string */
+ };
+ 
+diff --git a/src/checks.c b/src/checks.c
+index 6373783..9282e89 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1998,7 +1998,7 @@ static void tcpcheck_main(struct connection *conn)
+ 		if (&cur->list == head)
+ 			break;
+ 
+-		if (check->current_step->action & TCPCHK_ACT_SEND) {
++		if (check->current_step->action == TCPCHK_ACT_SEND) {
+ 			/* reset the read buffer */
+ 			if (*check->bi->data != '\0') {
+ 				*check->bi->data = '\0';
+@@ -2029,7 +2029,7 @@ static void tcpcheck_main(struct connection *conn)
+ 			cur = (struct tcpcheck_rule *)cur->list.n;
+ 			check->current_step = cur;
+ 		} /* end 'send' */
+-		else if (check->current_step->action & TCPCHK_ACT_EXPECT) {
++		else if (check->current_step->action == TCPCHK_ACT_EXPECT) {
+ 			if (unlikely(check->result & SRV_CHK_FAILED))
+ 				goto out_end_tcpcheck;
+ 
+@@ -2111,7 +2111,7 @@ static void tcpcheck_main(struct connection *conn)
+ 				else {
+ 					cur = (struct tcpcheck_rule*)cur->list.n;
+ 					check->current_step = cur;
+-					if (check->current_step->action & TCPCHK_ACT_EXPECT)
++					if (check->current_step->action == TCPCHK_ACT_EXPECT)
+ 						goto tcpcheck_expect;
+ 					__conn_data_stop_recv(conn);
+ 				}
+@@ -2122,7 +2122,7 @@ static void tcpcheck_main(struct connection *conn)
+ 				if (cur->inverse) {
+ 					cur = (struct tcpcheck_rule*)cur->list.n;
+ 					check->current_step = cur;
+-					if (check->current_step->action & TCPCHK_ACT_EXPECT)
++					if (check->current_step->action == TCPCHK_ACT_EXPECT)
+ 						goto tcpcheck_expect;
+ 					__conn_data_stop_recv(conn);
+ 				}
+-- 
+1.8.1.5
+

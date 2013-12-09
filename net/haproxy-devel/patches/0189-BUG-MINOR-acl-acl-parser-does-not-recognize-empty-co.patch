@@ -1,0 +1,42 @@
+From ab92cf3a095ab7cd17f02a378eb57fda578a87f9 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 6 Dec 2013 10:34:35 +0100
+Subject: [PATCH 189/203] BUG/MINOR: acl: acl parser does not recognize empty
+ converter list
+
+Commit 348971e (MEDIUM: acl: use the fetch syntax 'fetch(args),conv(),conv()'
+into the ACL keyword) introduced a regression in the ACL parser. The second
+argument of an ACL keyword is now mistakenly confused with a converter.
+
+This bug is post-dev19 and does not require any backport.
+---
+ src/acl.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/acl.c b/src/acl.c
+index e8d4dc3..95b559c 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -251,6 +251,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 					memprintf(err, "in argument to '%s', %s", expr->kw, *err);
+ 					goto out_free_expr;
+ 				}
++				arg = end;
+ 			}
+ 			else if (ARGM(expr->smp->fetch->arg_mask) == 1) {
+ 				int type = (expr->smp->fetch->arg_mask >> 4) & 15;
+@@ -308,7 +309,10 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		 */
+ 
+ 		/* look for the begining of the converters list */
+-		arg = strchr(args[0], ',');
++		if (arg)
++			arg = strchr(arg, ',');
++		else
++			arg = strchr(args[0], ',');
+ 		if (arg) {
+ 			prev_type = expr->smp->fetch->out_type;
+ 			while (1) {
+-- 
+1.8.1.5
+

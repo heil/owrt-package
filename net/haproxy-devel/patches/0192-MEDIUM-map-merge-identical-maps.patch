@@ -1,0 +1,166 @@
+From 0ffe78cfe37b3fa3901f3b4f765a8a085c71c92f Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 5 Dec 2013 14:40:25 +0100
+Subject: [PATCH 192/203] MEDIUM: map: merge identical maps
+
+This patch permits to use the same struct pattern for two indentical maps.
+This permits to preserve memory, and permits to update only one
+"struct pattern" when the dynamic map update is supported.
+---
+ include/types/map.h |  3 +-
+ src/map.c           | 83 +++++++++++++++++++++++++++++++++++++----------------
+ 2 files changed, 61 insertions(+), 25 deletions(-)
+
+diff --git a/include/types/map.h b/include/types/map.h
+index 68f1a36..4463541 100644
+--- a/include/types/map.h
++++ b/include/types/map.h
+@@ -59,7 +59,8 @@ struct map_descriptor {
+ 	struct sample_conv *conv;      /* original converter descriptor */
+ 	int (*parse)(const char *text, /* The function that can parse the output value */
+ 	             struct sample_storage *smp);
+-	struct pattern_expr pat;       /* the pattern matching associated to the map */
++	struct pattern_expr *pat;      /* the pattern matching associated to the map */
++	int do_free;                   /* set if <pat> is the orignal pat and must be freed */
+ 	char *default_value;           /* a copy of default value. This copy is
+ 	                                  useful if the type is str */
+ 	struct sample_storage *def;    /* contain the default value */
+diff --git a/src/map.c b/src/map.c
+index 2ed9f3a..81f892e 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -320,7 +320,7 @@ static int map_parse_and_index(struct map_descriptor *desc,
+ 	}
+ 
+ 	/* read and convert key */
+-	if (!pattern_register(&desc->pat, ent->key, smp, pattern, patflags, err))
++	if (!pattern_register(desc->pat, ent->key, smp, pattern, patflags, err))
+ 		return 0;
+ 
+ 	return 1;
+@@ -338,6 +338,7 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 	struct map_descriptor *desc;
+ 	struct pattern *pattern;
+ 	struct map_entry *ent;
++	struct pattern_expr *pat = NULL;
+ 
+ 	/* look for existing map reference. The reference is the
+ 	 * file encountered in the first argument. arg[0] with string
+@@ -360,6 +361,19 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 			return 0;
+ 	}
+ 
++	/* look for identical existing map. Two maps are identical if
++	 * their in_type and out_type are the same. If is not found, pat
++	 * is NULL.
++	 */
++	else {
++		list_for_each_entry(desc, &ref->maps, list)
++			if (desc->conv->in_type == conv->in_type &&
++			    desc->conv->out_type == conv->out_type)
++				break;
++		if (&desc->list !=  &ref->maps)
++			pat = desc->pat;
++	}
++
+ 	/* create new map descriptor */
+ 	desc = map_create_descriptor(ref, conv);
+ 	if (!desc) {
+@@ -367,22 +381,6 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 		return 0;
+ 	}
+ 
+-	pattern_init_expr(&desc->pat);
+-
+-	/* set the match method */
+-	desc->pat.match = pat_match_fcts[conv->private];
+-
+-	/* set the input parse method */
+-	switch (conv->in_type) {
+-	case SMP_T_STR:  desc->pat.parse = pat_parse_fcts[PAT_MATCH_STR]; break;
+-	case SMP_T_UINT: desc->pat.parse = pat_parse_fcts[PAT_MATCH_INT]; break;
+-	case SMP_T_ADDR: desc->pat.parse = pat_parse_fcts[PAT_MATCH_IP];  break;
+-	default:
+-		memprintf(err, "map: internal haproxy error: no default parse case for the input type <%d>.",
+-		          conv->in_type);
+-		return 0;
+-	}
+-
+ 	/* check the output parse method */
+ 	switch (desc->conv->out_type) {
+ 	case SMP_T_STR:  desc->parse = map_parse_str;  break;
+@@ -395,6 +393,49 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 		return 0;
+ 	}
+ 
++	/* If identical pattern is not found, initialize his own pattern */
++	if (!pat) {
++
++		desc->pat = calloc(1, sizeof(*desc->pat));
++		if (!desc->pat) {
++			memprintf(err, "out of memory");
++			return 0;
++		}
++
++		pattern_init_expr(desc->pat);
++
++		/* This is original pattern, must free */
++		desc->do_free = 1;
++
++		/* set the match method */
++		desc->pat->match = pat_match_fcts[conv->private];
++
++		/* set the input parse method */
++		switch (desc->conv->in_type) {
++		case SMP_T_STR:  desc->pat->parse = pat_parse_fcts[PAT_MATCH_STR]; break;
++		case SMP_T_UINT: desc->pat->parse = pat_parse_fcts[PAT_MATCH_INT]; break;
++		case SMP_T_ADDR: desc->pat->parse = pat_parse_fcts[PAT_MATCH_IP];  break;
++		default:
++			memprintf(err, "map: internal haproxy error: no default parse case for the input type <%d>.",
++			          conv->in_type);
++			return 0;
++		}
++
++		/* parse each line of the file */
++		pattern = NULL;
++		list_for_each_entry(ent, &ref->entries, list)
++			if (!map_parse_and_index(desc, &pattern, ent, 0, err))
++				return 0;
++	}
++
++	/* identical pattern found. Use reference to this pattern, and mark
++	 * the map_descriptor pattern as non freeable
++	 */
++	else {
++		desc->pat = pat;
++		desc->do_free = 0;
++	}
++
+ 	/* The second argument is the default value */
+ 	if (arg[1].type == ARGT_STR) {
+ 		desc->default_value = strdup(arg[1].data.str.str);
+@@ -415,12 +456,6 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 	else
+ 		desc->def = NULL;
+ 
+-	/* parse each line of the file */
+-	pattern = NULL;
+-	list_for_each_entry(ent, &ref->entries, list)
+-		if (!map_parse_and_index(desc, &pattern, ent, 0, err))
+-			return 0;
+-
+ 	/* replace the first argument by this definition */
+ 	arg[0].type = ARGT_MAP;
+ 	arg[0].data.map = desc;
+@@ -438,7 +473,7 @@ static int sample_conv_map(const struct arg *arg_p, struct sample *smp)
+ 	desc = arg_p[0].data.map;
+ 
+ 	/* Execute the match function. */
+-	ret = pattern_exec_match(&desc->pat, smp, &sample);
++	ret = pattern_exec_match(desc->pat, smp, &sample);
+ 	if (ret != PAT_MATCH) {
+ 		if (!desc->def)
+ 			return 0;
+-- 
+1.8.1.5
+

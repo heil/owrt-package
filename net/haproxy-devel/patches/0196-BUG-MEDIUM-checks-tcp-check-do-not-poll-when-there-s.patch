@@ -1,0 +1,72 @@
+From a970c283cc9f7fac25c6c10763730a0a6e59c677 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 6 Dec 2013 12:47:19 +0100
+Subject: [PATCH 196/203] BUG/MEDIUM: checks: tcp-check: do not poll when
+ there's nothing to send
+
+A config with just a "tcp-check expect string XXX" loops at 100% CPU
+because the connect() wakes the function and there's nothing to send,
+but it does not disable the polling.
+
+Rearrange the polling setup to fix this. This was just caused by latest
+commit, no backport is needed.
+---
+ src/checks.c | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 10aa41a..1af6725 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1953,6 +1953,9 @@ static void tcpcheck_main(struct connection *conn)
+ 		return;
+ 	}
+ 
++	/* It's only the rules which will enable send/recv */
++	__conn_data_stop_both(conn);
++
+ 	/* here, we know that the connection is established */
+ 	if (check->result & (SRV_CHK_FAILED | SRV_CHK_PASSED)) {
+ 		goto out_end_tcpcheck;
+@@ -1996,7 +1999,6 @@ static void tcpcheck_main(struct connection *conn)
+ 				return;
+ 
+ 			/* disable reading for now */
+-			//if (conn->flags & (CO_FL_WAIT_RD | CO_FL_DATA_RD_ENA))
+ 			__conn_data_stop_recv(conn);
+ 
+ 			bo_putblk(check->bo, check->current_step->string, check->current_step->string_len);
+@@ -2068,16 +2070,16 @@ static void tcpcheck_main(struct connection *conn)
+ 			}
+ 
+ 			if (!done && (cur->string != NULL) && (check->bi->i < cur->string_len) )
+-				goto wait_more_data;
++				continue; /* try to read more */
+ 
+-tcpcheck_expect:
++		tcpcheck_expect:
+ 			if (cur->string != NULL)
+ 				ret = my_memmem(contentptr, contentlen, cur->string, cur->string_len) != NULL;
+ 			else if (cur->expect_regex != NULL)
+ 				ret = regexec(cur->expect_regex, contentptr, MAX_MATCH, pmatch, 0) == 0;
+ 
+ 			if (!ret && !done)
+-				goto wait_more_data;
++				continue; /* try to read more */
+ 
+ 			/* matched */
+ 			if (ret) {
+@@ -2137,10 +2139,6 @@ tcpcheck_expect:
+ 	set_server_check_status(check, HCHK_STATUS_L7OKD, "(tcp-check)");
+ 	goto out_end_tcpcheck;
+ 
+- wait_more_data:
+-	__conn_data_poll_recv(conn);
+-	return;
+-
+  out_incomplete:
+ 	return;
+ 
+-- 
+1.8.1.5
+
