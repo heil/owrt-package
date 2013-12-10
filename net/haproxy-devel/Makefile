@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
 PKG_VERSION:=1.5-dev19
-PKG_RELEASE:=277
+PKG_RELEASE:=279
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.5/src/devel
 PKG_MD5SUM:=7140a43637233bcb9cc51f789c0d3e0f
@@ -51,6 +51,7 @@ define Build/Compile
 		USE_LINUX_TPROXY=1 USE_LINUX_SPLICE=1 USE_REGPARM=1 USE_OPENSSL=1 \
 		USE_ZLIB=yes USE_PCRE=1 \
 		VERSION="$(PKG_VERSION)-patch$(PKG_RELEASE)" \
+		VERDATE="10-12-2013" SUBVERS="dev19-$(PKG_RELEASE)"
 		install
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/contrib/halog \

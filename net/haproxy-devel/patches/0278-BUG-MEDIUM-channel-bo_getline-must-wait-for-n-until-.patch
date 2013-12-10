@@ -1,0 +1,30 @@
+From 82de2b644e7973d93f472d12e4f2f619a7f0706e Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 10 Dec 2013 18:58:23 +0100
+Subject: [PATCH 278/279] BUG/MEDIUM: channel:  bo_getline() must wait for \n
+ until buffer is full
+
+We must not report incomplete data if the buffer is not full, otherwise
+we can abort some processing on the stats socket when dealing with massive
+amounts of commands.
+---
+ src/channel.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/channel.c b/src/channel.c
+index 3e2a3f3..2942d92 100644
+--- a/src/channel.c
++++ b/src/channel.c
+@@ -230,7 +230,8 @@ int bo_getline(struct channel *chn, char *str, int len)
+ 			break;
+ 		p = buffer_wrap_add(chn->buf, p + 1);
+ 	}
+-	if (ret > 0 && ret < len && ret < chn->buf->o &&
++	if (ret > 0 && ret < len &&
++	    (ret < chn->buf->o || !channel_full(chn)) &&
+ 	    *(str-1) != '\n' &&
+ 	    !(chn->flags & (CF_SHUTW|CF_SHUTW_NOW)))
+ 		ret = 0;
+-- 
+1.8.1.5
+
