@@ -1,0 +1,48 @@
+From 5735d7e2a23b8a25c5584fe1ec0d025450841b8f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 7 Dec 2013 00:18:34 +0100
+Subject: [PATCH 270/277] MINOR: http: use an enum for the auth method in
+ http_auth_data
+
+This method now takes a single byte, with 7 bytes left to be used
+after it. No savings were gained but at least now we have an enum.
+---
+ include/types/proto_http.h | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index 70c2631..9d65d6f 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -225,12 +225,12 @@ enum http_meth_t {
+ 	HTTP_METH_OTHER,
+ } __attribute__((packed));
+ 
+-enum {
++enum ht_auth_m {
+ 	HTTP_AUTH_WRONG		= -1,		/* missing or unknown */
+ 	HTTP_AUTH_UNKNOWN	= 0,
+ 	HTTP_AUTH_BASIC,
+ 	HTTP_AUTH_DIGEST,
+-};
++} __attribute__((packed));
+ 
+ /* actions for "http-request" */
+ enum {
+@@ -354,9 +354,10 @@ struct http_msg {
+ };
+ 
+ struct http_auth_data {
+-	int method;			/* one of HTTP_AUTH_* */
+-	struct chunk method_data;	/* points to the creditial part from 'Authorization:' header */
+-	char *user, *pass;		/* extracted username & password */
++	enum ht_auth_m method;                /* one of HTTP_AUTH_* */
++	/* 7 bytes unused here */
++	struct chunk method_data;             /* points to the creditial part from 'Authorization:' header */
++	char *user, *pass;                    /* extracted username & password */
+ };
+ 
+ struct http_req_rule {
+-- 
+1.8.1.5
+

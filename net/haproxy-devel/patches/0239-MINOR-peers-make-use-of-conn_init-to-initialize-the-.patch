@@ -1,0 +1,45 @@
+From 8caf6753a9c888a534d91f3ff162ea5d2d4eab1c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 14 Oct 2013 23:40:49 +0200
+Subject: [PATCH 239/277] MINOR: peers: make use of conn_init() to initialize
+ the connection
+
+Use this instead of open-coding to initialize the outgoing connection.
+It saves us from forgetting some fields.
+---
+ src/peers.c | 9 ++-------
+ 1 file changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/src/peers.c b/src/peers.c
+index 6a1a8a4..f3754cb 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1177,12 +1177,6 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	s->si[0].appctx.st0 = PEER_SESSION_CONNECT;
+ 	s->si[0].appctx.ctx.peers.ptr = (void *)ps;
+ 
+-	s->si[1].conn->obj_type = OBJ_TYPE_CONN;
+-	s->si[1].conn->t.sock.fd = -1; /* just to help with debugging */
+-	s->si[1].conn->flags = CO_FL_NONE;
+-	s->si[1].conn->err_code = CO_ER_NONE;
+-	s->si[1].conn->target = &s->be->obj_type;
+-
+ 	s->si[1].owner = t;
+ 	s->si[1].state = s->si[1].prev_state = SI_ST_ASS;
+ 	s->si[1].conn_retries = p->conn_retries;
+@@ -1196,10 +1190,11 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	/* will automatically prepare the stream interface to connect to the
+ 	 * pre-initialized connection in si->conn.
+ 	 */
++	conn_init(s->si[1].conn);
+ 	si_prepare_conn(&s->si[1], peer->proto, peer->xprt);
+ 
+ 	session_init_srv_conn(s);
+-	s->target = &s->be->obj_type;
++	s->si[1].conn->target = s->target = &s->be->obj_type;
+ 	s->pend_pos = NULL;
+ 
+ 	/* init store persistence */
+-- 
+1.8.1.5
+

@@ -1,0 +1,33 @@
+From ddee3ed9b7c7f769306307127c249850c92f9e44 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 10 Dec 2013 11:16:09 +0100
+Subject: [PATCH 276/277] BUILD: prepare the makefile to skip format lines in
+ SUBVERS and VERDATE
+
+We're going to put format lines in these files for use by git archive,
+so let's ensure that the current default format still works. For this
+we'll use two lines and only take the first one without a format tag.
+---
+ Makefile | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e1a7424..4a51985 100644
+--- a/Makefile
++++ b/Makefile
+@@ -356,10 +356,10 @@ ifeq ($(VERSION),)
+ VERSION := $(shell cat VERSION 2>/dev/null || touch VERSION)
+ endif
+ ifeq ($(SUBVERS),)
+-SUBVERS := $(shell cat SUBVERS 2>/dev/null || touch SUBVERS)
++SUBVERS := $(shell (grep -v '^\$$' SUBVERS 2>/dev/null || touch SUBVERS) | head -n 1)
+ endif
+ ifeq ($(VERDATE),)
+-VERDATE := $(shell cat VERDATE 2>/dev/null || touch VERDATE)
++VERDATE := $(shell (grep -v '^\$$' VERDATE 2>/dev/null || touch VERDATE) | head -n 1)
+ endif
+ 
+ #### Build options
+-- 
+1.8.1.5
+

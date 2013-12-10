@@ -1,0 +1,81 @@
+From 1e6902fd6a4935b36a1dc4ab36ce50757b407a20 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 29 Sep 2013 10:47:38 +0200
+Subject: [PATCH 223/277] MINOR: connection: always initialize conn->objt_type
+ to OBJ_TYPE_CONN
+
+We do this everywhere we prepare a connection so that we can safely
+switch to objt_conn() next.
+---
+ src/peers.c      | 2 ++
+ src/proto_http.c | 1 +
+ src/session.c    | 7 +++++++
+ 3 files changed, 10 insertions(+)
+
+diff --git a/src/peers.c b/src/peers.c
+index 04385ac..8a474ad 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1162,6 +1162,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 
+ 	s->req = s->rep = NULL; /* will be allocated later */
+ 
++	s->si[0].conn->obj_type = OBJ_TYPE_CONN;
+ 	s->si[0].conn->t.sock.fd = -1;
+ 	s->si[0].conn->flags = CO_FL_NONE;
+ 	s->si[0].conn->err_code = CO_ER_NONE;
+@@ -1180,6 +1181,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	s->si[0].applet.st0 = PEER_SESSION_CONNECT;
+ 	s->si[0].applet.ptr = (void *)ps;
+ 
++	s->si[1].conn->obj_type = OBJ_TYPE_CONN;
+ 	s->si[1].conn->t.sock.fd = -1; /* just to help with debugging */
+ 	s->si[1].conn->flags = CO_FL_NONE;
+ 	s->si[1].conn->err_code = CO_ER_NONE;
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 2234b91..dc3c9a9 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -4283,6 +4283,7 @@ void http_end_txn_clean_session(struct session *s)
+ 	s->target = NULL;
+ 
+ 	s->req->cons->state     = s->req->cons->prev_state = SI_ST_INI;
++	s->req->cons->conn->obj_type = OBJ_TYPE_CONN;
+ 	s->req->cons->conn->t.sock.fd = -1; /* just to help with debugging */
+ 	s->req->cons->conn->flags = CO_FL_NONE;
+ 	s->req->cons->conn->err_code = CO_ER_NONE;
+diff --git a/src/session.c b/src/session.c
+index b7f68bc..90bf3de 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -105,6 +105,7 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	s->fe  = p;
+ 
+ 	/* OK, we're keeping the session, so let's properly initialize the session */
++	s->si[0].conn->obj_type = OBJ_TYPE_CONN;
+ 	s->si[0].conn->t.sock.fd = cfd;
+ 	s->si[0].conn->ctrl = l->proto;
+ 	s->si[0].conn->flags = CO_FL_NONE | CO_FL_ADDR_FROM_SET;
+@@ -112,6 +113,11 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	s->si[0].conn->addr.from = *addr;
+ 	s->si[0].conn->target = &l->obj_type;
+ 
++	/* FIXME: this should be replaced with OBJ_TYPE_NONE once all users check the
++	 * object type before dereferencing the connection pointer.
++	 */
++	s->si[1].conn->obj_type = OBJ_TYPE_CONN;
++
+ 	s->logs.accept_date = date; /* user-visible date for logging */
+ 	s->logs.tv_accept = now;  /* corrected date for internal use */
+ 	s->uniq_id = totalconn;
+@@ -453,6 +459,7 @@ int session_complete(struct session *s)
+ 	/* pre-initialize the other side's stream interface to an INIT state. The
+ 	 * callbacks will be initialized before attempting to connect.
+ 	 */
++	s->si[1].conn->obj_type = OBJ_TYPE_CONN;
+ 	s->si[1].conn->t.sock.fd = -1; /* just to help with debugging */
+ 	s->si[1].conn->flags = CO_FL_NONE;
+ 	s->si[1].conn->err_code = CO_ER_NONE;
+-- 
+1.8.1.5
+

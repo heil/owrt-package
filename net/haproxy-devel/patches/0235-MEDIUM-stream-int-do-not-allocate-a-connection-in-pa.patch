@@ -1,0 +1,92 @@
+From ce9dbcd9ea2dd94bbc21f34fbb9ba7cebfa20e19 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 1 Oct 2013 17:12:05 +0200
+Subject: [PATCH 235/277] MEDIUM: stream-int: do not allocate a connection in
+ parallel to applets
+
+When we know we're not going to use a connection on a stream interface
+because we're using an applet instead, do not allocate a connection, or
+release the preallocated one. We do that for peers and CLI only at the
+moment, and not for HTTP stats which in the future might be adapted to
+support keep-alive.
+
+The connection pointer is simply set to NULL, which pool_free2() already
+supports.
+---
+ src/dumpstats.c |  7 ++++++-
+ src/peers.c     | 20 +++++++-------------
+ 2 files changed, 13 insertions(+), 14 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 6703b9b..0df2882 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -156,7 +156,12 @@ extern const char *stat_status_codes[];
+  */
+ static int stats_accept(struct session *s)
+ {
+-	/* we have a dedicated I/O handler for the stats */
++	/* we have a dedicated I/O handler for the CLI/stats, so we can safely
++	 * release the pre-allocated connection that we will never use.
++	 */
++	pool_free2(pool2_connection, s->si[1].conn);
++	s->si[1].conn = NULL;
++
+ 	stream_int_register_handler(&s->si[1], &cli_applet);
+ 	s->target = &cli_applet.obj_type; // for logging only
+ 	s->si[1].appctx.st1 = 0;
+diff --git a/src/peers.c b/src/peers.c
+index 40936e4..6a1a8a4 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1083,7 +1083,12 @@ static void peer_session_forceshutdown(struct session * session)
+  */
+ int peer_accept(struct session *s)
+ {
+-	 /* we have a dedicated I/O handler for the stats */
++	/* we have a dedicated I/O handler for the peers, so we can safely
++	 * release the pre-allocated connection that we will never use.
++	 */
++	pool_free2(pool2_connection, s->si[1].conn);
++	s->si[1].conn = NULL;
++
+ 	stream_int_register_handler(&s->si[1], &peer_applet);
+ 	s->target = &peer_applet.obj_type; // for logging only
+ 	s->si[1].appctx.ctx.peers.ptr = s;
+@@ -1123,9 +1128,6 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 		goto out_close;
+ 	}
+ 
+-	if (unlikely((s->si[0].conn = pool_alloc2(pool2_connection)) == NULL))
+-		goto out_fail_conn0;
+-
+ 	if (unlikely((s->si[1].conn = pool_alloc2(pool2_connection)) == NULL))
+ 		goto out_fail_conn1;
+ 
+@@ -1161,13 +1163,7 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 
+ 	s->req = s->rep = NULL; /* will be allocated later */
+ 
+-	/* si[0] is the applet, we should not need s->si[0].conn anymore soon */
+-	s->si[0].conn->obj_type = OBJ_TYPE_CONN;
+-	s->si[0].conn->t.sock.fd = -1;
+-	s->si[0].conn->flags = CO_FL_NONE;
+-	s->si[0].conn->err_code = CO_ER_NONE;
+-	s->si[0].conn->target = &l->obj_type;
+-
++	s->si[0].conn = NULL;
+ 	s->si[0].owner = t;
+ 	s->si[0].state = s->si[0].prev_state = SI_ST_EST;
+ 	s->si[0].err_type = SI_ET_NONE;
+@@ -1319,8 +1315,6 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	LIST_DEL(&s->list);
+ 	pool_free2(pool2_connection, s->si[1].conn);
+  out_fail_conn1:
+-	pool_free2(pool2_connection, s->si[0].conn);
+- out_fail_conn0:
+ 	pool_free2(pool2_session, s);
+  out_close:
+ 	return s;
+-- 
+1.8.1.5
+

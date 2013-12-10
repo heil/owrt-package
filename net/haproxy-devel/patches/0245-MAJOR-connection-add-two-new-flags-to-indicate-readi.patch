@@ -1,0 +1,651 @@
+From f79c8171b243296f612cc05998b8775152bba201 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 21 Oct 2013 16:30:56 +0200
+Subject: [PATCH 245/277] MAJOR: connection: add two new flags to indicate
+ readiness of control/transport
+
+Currently the control and transport layers of a connection are supposed
+to be initialized when their respective pointers are not NULL. This will
+not work anymore when we plan to reuse connections, because there is an
+asymmetry between the accept() side and the connect() side :
+
+  - on accept() side, the fd is set first, then the ctrl layer then the
+    transport layer ; upon error, they must be undone in the reverse order,
+    then the FD must be closed. The FD must not be deleted if the control
+    layer was not yet initialized ;
+
+  - on the connect() side, the fd is set last and there is no reliable way
+    to know if it has been initialized or not. In practice it's initialized
+    to -1 first but this is hackish and supposes that local FDs only will
+    be used forever. Also, there are even less solutions for keeping trace
+    of the transport layer's state.
+
+Also it is possible to support delayed close() when something (eg: logs)
+tracks some information requiring the transport and/or control layers,
+making it even more difficult to clean them.
+
+So the proposed solution is to add two flags to the connection :
+
+  - CO_FL_CTRL_READY is set when the control layer is initialized (fd_insert)
+    and cleared after it's released (fd_delete).
+
+  - CO_FL_XPRT_READY is set when the control layer is initialized (xprt->init)
+    and cleared after it's released (xprt->close).
+
+The functions have been adapted to rely on this and not on the pointers
+anymore. conn_xprt_close() was unused and dangerous : it did not close
+the control layer (eg: the socket itself) but still marks the transport
+layer as closed, preventing any future call to conn_full_close() from
+finishing the job.
+
+The problem comes from conn_full_close() in fact. It needs to close the
+xprt and ctrl layers independantly. After that we're still having an issue :
+we don't know based on ->ctrl alone whether the fd was registered or not.
+For this we use the two new flags CO_FL_XPRT_READY and CO_FL_CTRL_READY. We
+now rely on this and not on conn->xprt nor conn->ctrl anymore to decide what
+remains to be done on the connection.
+
+In order not to miss some flag assignments, we introduce conn_ctrl_init()
+to initialize the control layer, register the fd using fd_insert() and set
+the flag, and conn_ctrl_close() which unregisters the fd and removes the
+flag, but only if the transport layer was closed.
+
+Similarly, at the transport layer, conn_xprt_init() calls ->init and sets
+the flag, while conn_xprt_close() checks the flag, calls ->close and clears
+the flag, regardless xprt_ctx or xprt_st. This also ensures that the ->init
+and the ->close functions are called only once each and in the correct order.
+Note that conn_xprt_close() does nothing if the transport layer is still
+tracked.
+
+conn_full_close() now simply calls conn_xprt_close() then conn_full_close()
+in turn, which do nothing if CO_FL_XPRT_TRACKED is set.
+
+In order to handle the error path, we also provide conn_force_close() which
+ignores CO_FL_XPRT_TRACKED and closes the transport and the control layers
+in turns. All relevant instances of fd_delete() have been replaced with
+conn_force_close(). Now we always know what state the connection is in and
+we can expect to split its initialization.
+---
+ include/proto/connection.h | 85 ++++++++++++++++++++++++++++++++++------------
+ include/types/connection.h |  8 ++++-
+ src/checks.c               | 10 +++---
+ src/connection.c           | 12 +++++++
+ src/dumpstats.c            |  4 +--
+ src/proto_http.c           | 12 +++----
+ src/proto_tcp.c            |  9 ++---
+ src/raw_sock.c             | 13 +++++++
+ src/session.c              | 18 +++++-----
+ src/ssl_sock.c             | 10 ++++--
+ src/stream_interface.c     | 16 +++++----
+ 11 files changed, 140 insertions(+), 57 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 21d57c9..e3b6e89 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -43,27 +43,61 @@ int conn_fd_handler(int fd);
+ int conn_recv_proxy(struct connection *conn, int flag);
+ int make_proxy_line(char *buf, int buf_len, struct sockaddr_storage *src, struct sockaddr_storage *dst);
+ 
+-/* calls the init() function of the transport layer if any.
++/* Calls the init() function of the transport layer if any and if not done yet,
++ * and sets the CO_FL_XPRT_READY flag to indicate it was properly initialized.
+  * Returns <0 in case of error.
+  */
+ static inline int conn_xprt_init(struct connection *conn)
+ {
+-	if (conn->xprt && conn->xprt->init)
+-		return conn->xprt->init(conn);
+-	return 0;
++	int ret = 0;
++
++	if (!(conn->flags & CO_FL_XPRT_READY) && conn->xprt && conn->xprt->init)
++		ret = conn->xprt->init(conn);
++
++	if (ret >= 0)
++		conn->flags |= CO_FL_XPRT_READY;
++
++	return ret;
+ }
+ 
+-/* Calls the close() function of the transport layer if any, and always unsets
+- * the transport layer. However this is not done if the CO_FL_XPRT_TRACKED flag
+- * is set, which allows logs to take data from the transport layer very late if
+- * needed.
++/* Calls the close() function of the transport layer if any and if not done
++ * yet, and clears the CO_FL_XPRT_READY flag. However this is not done if the
++ * CO_FL_XPRT_TRACKED flag is set, which allows logs to take data from the
++ * transport layer very late if needed.
+  */
+ static inline void conn_xprt_close(struct connection *conn)
+ {
+-	if (conn->xprt && !(conn->flags & CO_FL_XPRT_TRACKED)) {
+-		if (conn->xprt->close)
++	if ((conn->flags & (CO_FL_XPRT_READY|CO_FL_XPRT_TRACKED)) == CO_FL_XPRT_READY) {
++		if (conn->xprt && conn->xprt->close)
+ 			conn->xprt->close(conn);
+-		conn->xprt = NULL;
++		conn->flags &= ~CO_FL_XPRT_READY;
++	}
++}
++
++/* Initializes the connection's control layer which essentially consists in
++ * registering the file descriptor for polling and setting the CO_FL_CTRL_READY
++ * flag.
++ */
++static inline void conn_ctrl_init(struct connection *conn)
++{
++	if (!(conn->flags & CO_FL_CTRL_READY)) {
++		int fd = conn->t.sock.fd;
++
++		fd_insert(fd);
++		fdtab[fd].owner = conn;
++		fdtab[fd].iocb = conn_fd_handler;
++		conn->flags |= CO_FL_CTRL_READY;
++	}
++}
++
++/* Deletes the FD if the transport layer is already gone. Once done,
++ * it then removes the CO_FL_CTRL_READY flag.
++ */
++static inline void conn_ctrl_close(struct connection *conn)
++{
++	if ((conn->flags & (CO_FL_XPRT_READY|CO_FL_CTRL_READY)) == CO_FL_CTRL_READY) {
++		fd_delete(conn->t.sock.fd);
++		conn->flags &= ~CO_FL_CTRL_READY;
+ 	}
+ }
+ 
+@@ -75,13 +109,22 @@ static inline void conn_xprt_close(struct connection *conn)
+  */
+ static inline void conn_full_close(struct connection *conn)
+ {
+-	if (conn->xprt && !(conn->flags & CO_FL_XPRT_TRACKED)) {
+-		if (conn->xprt->close)
+-			conn->xprt->close(conn);
+-		if (conn->ctrl)
+-			fd_delete(conn->t.sock.fd);
+-		conn->xprt = NULL;
+-	}
++	conn_xprt_close(conn);
++	conn_ctrl_close(conn);
++}
++
++/* Force to close the connection whatever the tracking state. This is mainly
++ * used on the error path where the tracking does not make sense.
++ */
++static inline void conn_force_close(struct connection *conn)
++{
++	if ((conn->flags & CO_FL_XPRT_READY) && conn->xprt && conn->xprt->close)
++		conn->xprt->close(conn);
++
++	if (conn->flags & CO_FL_CTRL_READY)
++		fd_delete(conn->t.sock.fd);
++
++	conn->flags &= ~(CO_FL_XPRT_READY|CO_FL_CTRL_READY);
+ }
+ 
+ /* Update polling on connection <c>'s file descriptor depending on its current
+@@ -121,7 +164,7 @@ static inline void conn_refresh_polling_flags(struct connection *conn)
+ {
+ 	conn->flags &= ~(CO_FL_WAIT_ROOM | CO_FL_WAIT_RD | CO_FL_WAIT_DATA | CO_FL_WAIT_WR);
+ 
+-	if (conn->ctrl) {
++	if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl) {
+ 		unsigned int flags = conn->flags & ~(CO_FL_CURR_RD_ENA | CO_FL_CURR_WR_ENA);
+ 
+ 		if (fd_ev_is_set(conn->t.sock.fd, DIR_RD))
+@@ -470,7 +513,7 @@ static inline void conn_get_from_addr(struct connection *conn)
+ 	if (conn->flags & CO_FL_ADDR_FROM_SET)
+ 		return;
+ 
+-	if (!conn->ctrl || !conn->ctrl->get_src)
++	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl || !conn->ctrl->get_src)
+ 		return;
+ 
+ 	if (conn->ctrl->get_src(conn->t.sock.fd, (struct sockaddr *)&conn->addr.from,
+@@ -486,7 +529,7 @@ static inline void conn_get_to_addr(struct connection *conn)
+ 	if (conn->flags & CO_FL_ADDR_TO_SET)
+ 		return;
+ 
+-	if (!conn->ctrl || !conn->ctrl->get_dst)
++	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl || !conn->ctrl->get_dst)
+ 		return;
+ 
+ 	if (conn->ctrl->get_dst(conn->t.sock.fd, (struct sockaddr *)&conn->addr.to,
+diff --git a/include/types/connection.h b/include/types/connection.h
+index 3dfd73e..3975743 100644
+--- a/include/types/connection.h
++++ b/include/types/connection.h
+@@ -82,6 +82,10 @@ enum {
+ 	CO_FL_CURR_WR_ENA   = 0x00000040,  /* sending is currently desired */
+ 	CO_FL_WAIT_WR       = 0x00000080,  /* sending needs to poll first */
+ 
++	/* These flags indicate whether the Control and Transport layers are initialized */
++	CO_FL_CTRL_READY    = 0x00000100, /* FD was registered, fd_delete() needed */
++	CO_FL_XPRT_READY    = 0x00000200, /* xprt_init() done, xprt_close() needed */
++
+ 	/* These flags are used by data layers to indicate they had to stop
+ 	 * sending data because a buffer was empty (WAIT_DATA) or stop receiving
+ 	 * data because a buffer was full (WAIT_ROOM). The connection handler
+@@ -132,6 +136,8 @@ enum {
+ 	 */
+ 	CO_FL_POLL_SOCK     = CO_FL_HANDSHAKE | CO_FL_WAIT_L4_CONN | CO_FL_WAIT_L6_CONN,
+ 
++	/* unused : 0x10000000, 0x20000000, 0x40000000 */
++
+ 	/* This last flag indicates that the transport layer is used (for instance
+ 	 * by logs) and must not be cleared yet. The last call to conn_xprt_close()
+ 	 * must be done after clearing this flag.
+@@ -238,7 +244,7 @@ struct connection {
+ 	enum obj_type obj_type;       /* differentiates connection from applet context */
+ 	const struct protocol *ctrl;  /* operations at the socket layer */
+ 	const struct xprt_ops *xprt;  /* operations at the transport layer */
+-	const struct data_cb  *data;  /* data layer callbacks */
++	const struct data_cb  *data;  /* data layer callbacks. Must be set before xprt->init() */
+ 	unsigned int flags;           /* CO_FL_* */
+ 	int xprt_st;                  /* transport layer state, initialized to zero */
+ 	void *xprt_ctx;               /* general purpose pointer, initialized to NULL */
+diff --git a/src/checks.c b/src/checks.c
+index c38a1c9..2213782 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -796,7 +796,7 @@ static int retrieve_errno_from_socket(struct connection *conn)
+ 	if (conn->flags & CO_FL_ERROR && ((errno && errno != EAGAIN) || !conn->ctrl))
+ 		return 1;
+ 
+-	if (!conn->ctrl)
++	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl)
+ 		return 0;
+ 
+ 	if (getsockopt(conn->t.sock.fd, SOL_SOCKET, SO_ERROR, &skerr, &lskerr) == 0)
+@@ -1430,12 +1430,12 @@ static int wake_srv_chk(struct connection *conn)
+ 		/* We're here because nobody wants to handle the error, so we
+ 		 * sure want to abort the hard way.
+ 		 */
+-		if (conn->ctrl && !(conn->flags & CO_FL_SOCK_RD_SH)) {
++		if ((conn->flags & CO_FL_CTRL_READY) && !(conn->flags & CO_FL_SOCK_RD_SH)) {
+ 			if (conn->flags & CO_FL_WAIT_RD || !conn->ctrl->drain || !conn->ctrl->drain(conn->t.sock.fd))
+ 				setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
+ 				           (struct linger *) &nolinger, sizeof(struct linger));
+ 		}
+-		conn_full_close(conn);
++		conn_force_close(conn);
+ 	}
+ 	return 0;
+ }
+@@ -1650,12 +1650,12 @@ static struct task *process_chk(struct task *t)
+ 			 * as a failed response coupled with "observe layer7" caused the
+ 			 * server state to be suddenly changed.
+ 			 */
+-			if (conn->ctrl && !(conn->flags & CO_FL_SOCK_RD_SH)) {
++			if ((conn->flags & CO_FL_CTRL_READY) && !(conn->flags & CO_FL_SOCK_RD_SH)) {
+ 				if (conn->flags & CO_FL_WAIT_RD || !conn->ctrl->drain || !conn->ctrl->drain(conn->t.sock.fd))
+ 					setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
+ 					           (struct linger *) &nolinger, sizeof(struct linger));
+ 			}
+-			conn_full_close(conn);
++			conn_force_close(conn);
+ 		}
+ 
+ 		if (check->result & SRV_CHK_FAILED)  /* a failure or timeout detected */
+diff --git a/src/connection.c b/src/connection.c
+index 6200283..05cad01 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -163,6 +163,9 @@ void conn_update_data_polling(struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 
++	if (!(c->flags & CO_FL_CTRL_READY))
++		return;
++
+ 	/* update read status if needed */
+ 	if (unlikely((f & (CO_FL_DATA_RD_ENA|CO_FL_WAIT_RD)) == (CO_FL_DATA_RD_ENA|CO_FL_WAIT_RD))) {
+ 		fd_poll_recv(c->t.sock.fd);
+@@ -203,6 +206,9 @@ void conn_update_sock_polling(struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 
++	if (!(c->flags & CO_FL_CTRL_READY))
++		return;
++
+ 	/* update read status if needed */
+ 	if (unlikely((f & (CO_FL_SOCK_RD_ENA|CO_FL_WAIT_RD)) == (CO_FL_SOCK_RD_ENA|CO_FL_WAIT_RD))) {
+ 		fd_poll_recv(c->t.sock.fd);
+@@ -264,6 +270,9 @@ int conn_recv_proxy(struct connection *conn, int flag)
+ 	if (conn->flags & CO_FL_SOCK_RD_SH)
+ 		goto fail;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		goto fail;
++
+ 	do {
+ 		trash.len = recv(conn->t.sock.fd, trash.str, trash.size, MSG_PEEK);
+ 		if (trash.len < 0) {
+@@ -547,6 +556,9 @@ int conn_local_send_proxy(struct connection *conn, unsigned int flag)
+ 	if (conn->flags & CO_FL_SOCK_WR_SH)
+ 		goto out_error;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		goto out_error;
++
+ 	/* The target server expects a PROXY line to be sent first. Retrieving
+ 	 * local or remote addresses may fail until the connection is established.
+ 	 */
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 0df2882..b3d49bf 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -3833,7 +3833,7 @@ static void http_stats_io_handler(struct stream_interface *si)
+ 
+ static inline const char *get_conn_ctrl_name(const struct connection *conn)
+ {
+-	if (!conn->ctrl)
++	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl)
+ 		return "NONE";
+ 	return conn->ctrl->name;
+ }
+@@ -3842,7 +3842,7 @@ static inline const char *get_conn_xprt_name(const struct connection *conn)
+ {
+ 	static char ptr[17];
+ 
+-	if (!conn->xprt)
++	if (!(conn->flags & CO_FL_XPRT_READY) || !conn->xprt)
+ 		return "NONE";
+ 
+ 	if (conn->xprt == &raw_sock)
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 61ce7ba..70b3a13 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2488,7 +2488,7 @@ int http_wait_for_request(struct session *s, struct channel *req, int an_bit)
+ 		req->flags |= CF_READ_DONTWAIT; /* try to get back here ASAP */
+ 		s->rep->flags &= ~CF_EXPECT_MORE; /* speed up sending a previous response */
+ #ifdef TCP_QUICKACK
+-		if (s->listener->options & LI_O_NOQUICKACK && req->buf->i && objt_conn(s->req->prod->end)) {
++		if (s->listener->options & LI_O_NOQUICKACK && req->buf->i && objt_conn(s->req->prod->end) && (__objt_conn(s->req->prod->end)->flags & CO_FL_CTRL_READY)) {
+ 			/* We need more data, we have to re-enable quick-ack in case we
+ 			 * previously disabled it, otherwise we might cause the client
+ 			 * to delay next data.
+@@ -3015,13 +3015,13 @@ http_req_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_TOS:
+-			if ((cli_conn = objt_conn(s->req->prod->end)))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
+ 				inet_set_tos(cli_conn->t.sock.fd, cli_conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_MARK:
+ #ifdef SO_MARK
+-			if ((cli_conn = objt_conn(s->req->prod->end)))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
+ 				setsockopt(cli_conn->t.sock.fd, SOL_SOCKET, SO_MARK, &rule->arg.mark, sizeof(rule->arg.mark));
+ #endif
+ 			break;
+@@ -3101,13 +3101,13 @@ http_res_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_TOS:
+-			if ((cli_conn = objt_conn(s->req->prod->end)))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
+ 				inet_set_tos(cli_conn->t.sock.fd, cli_conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_MARK:
+ #ifdef SO_MARK
+-			if ((cli_conn = objt_conn(s->req->prod->end)))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
+ 				setsockopt(cli_conn->t.sock.fd, SOL_SOCKET, SO_MARK, &rule->arg.mark, sizeof(rule->arg.mark));
+ #endif
+ 			break;
+@@ -3930,7 +3930,7 @@ int http_process_request(struct session *s, struct channel *req, int an_bit)
+ 		 * the client to delay further data.
+ 		 */
+ 		if ((s->listener->options & LI_O_NOQUICKACK) &&
+-		    cli_conn &&
++		    cli_conn && (cli_conn->flags & CO_FL_CTRL_READY) &&
+ 		    ((msg->flags & HTTP_MSGF_TE_CHNK) ||
+ 		     (msg->body_len > req->buf->i - txn->req.eoh - 2)))
+ 			setsockopt(cli_conn->t.sock.fd, IPPROTO_TCP, TCP_QUICKACK, &one, sizeof(one));
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index de1e4ae..1c55b6a 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -462,16 +462,14 @@ int tcp_connect_server(struct connection *conn, int data, int delack)
+ 		}
+ 	}
+ 
+-	fdtab[fd].owner = conn;
+ 	conn->flags  = CO_FL_WAIT_L4_CONN; /* connection in progress */
+ 	conn->flags |= CO_FL_ADDR_TO_SET;
+ 
+-	fdtab[fd].iocb = conn_fd_handler;
+-	fd_insert(fd);
++	conn_ctrl_init(conn);       /* registers the FD */
+ 	conn_sock_want_send(conn);  /* for connect status */
+ 
+ 	if (conn_xprt_init(conn) < 0) {
+-		fd_delete(fd);
++		conn_force_close(conn);
+ 		return SN_ERR_RESOURCE;
+ 	}
+ 
+@@ -575,6 +573,9 @@ int tcp_connect_probe(struct connection *conn)
+ 	if (conn->flags & CO_FL_ERROR)
+ 		return 0;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	if (!(conn->flags & CO_FL_WAIT_L4_CONN))
+ 		return 1; /* strange we were called while ready */
+ 
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index 43cd70a..4dc1c7a 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -74,6 +74,10 @@ int raw_sock_to_pipe(struct connection *conn, struct pipe *pipe, unsigned int co
+ 	int ret;
+ 	int retval = 0;
+ 
++
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	errno = 0;
+ 
+ 	/* Under Linux, if FD_POLL_HUP is set, we have reached the end.
+@@ -189,6 +193,9 @@ int raw_sock_from_pipe(struct connection *conn, struct pipe *pipe)
+ {
+ 	int ret, done;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	done = 0;
+ 	while (pipe->data) {
+ 		ret = splice(pipe->cons, NULL, conn->t.sock.fd, NULL, pipe->data,
+@@ -234,6 +241,9 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 	int ret, done = 0;
+ 	int try = count;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	errno = 0;
+ 
+ 	if (unlikely(!(fdtab[conn->t.sock.fd].ev & FD_POLL_IN))) {
+@@ -331,6 +341,9 @@ static int raw_sock_from_buf(struct connection *conn, struct buffer *buf, int fl
+ {
+ 	int ret, try, done, send_flag;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	done = 0;
+ 	/* send the largest possible block. For this we perform only one call
+ 	 * to send() unless the buffer wraps and we exactly fill the first hunk,
+diff --git a/src/session.c b/src/session.c
+index e509662..88ed5ab 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -206,9 +206,8 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	conn_assign(cli_conn, &sess_conn_cb, l->proto, l->xprt, s);
+ 
+ 	/* finish initialization of the accepted file descriptor */
+-	fd_insert(cfd);
+-	fdtab[cfd].owner = cli_conn;
+-	fdtab[cfd].iocb = conn_fd_handler;
++	conn_ctrl_init(cli_conn);
++
+ 	conn_data_want_recv(cli_conn);
+ 	if (conn_xprt_init(cli_conn) < 0)
+ 		goto out_free_task;
+@@ -242,6 +241,8 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 		session_store_counters(s);
+ 	pool_free2(pool2_connection, s->si[1].conn);
+  out_fail_conn1:
++	s->si[0].conn->flags &= ~CO_FL_XPRT_TRACKED;
++	conn_xprt_close(s->si[0].conn);
+ 	pool_free2(pool2_connection, s->si[0].conn);
+  out_fail_conn0:
+ 	pool_free2(pool2_session, s);
+@@ -330,7 +331,7 @@ static void kill_mini_session(struct session *s)
+ 	}
+ 
+ 	/* kill the connection now */
+-	conn_full_close(conn);
++	conn_force_close(conn);
+ 
+ 	s->fe->feconn--;
+ 	session_store_counters(s);
+@@ -654,10 +655,8 @@ static void session_free(struct session *s)
+ 	http_end_txn(s);
+ 
+ 	/* ensure the client-side transport layer is destroyed */
+-	if (cli_conn) {
+-		cli_conn->flags &= ~CO_FL_XPRT_TRACKED;
+-		conn_full_close(cli_conn);
+-	}
++	if (cli_conn)
++		conn_force_close(cli_conn);
+ 
+ 	for (i = 0; i < s->store_count; i++) {
+ 		if (!s->store[i].ts)
+@@ -819,8 +818,7 @@ static int sess_update_st_con_tcp(struct session *s, struct stream_interface *si
+ 		si->exp   = TICK_ETERNITY;
+ 		si->state = SI_ST_CER;
+ 
+-		srv_conn->flags &= ~CO_FL_XPRT_TRACKED;
+-		conn_full_close(srv_conn);
++		conn_force_close(srv_conn);
+ 
+ 		if (si->err_type)
+ 			return 0;
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 5b8fdb9..e84e191 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1097,6 +1097,9 @@ static int ssl_sock_init(struct connection *conn)
+ 	if (conn->xprt_ctx)
+ 		return 0;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	if (global.maxsslconn && sslconns >= global.maxsslconn) {
+ 		conn->err_code = CO_ER_SSL_TOO_MANY;
+ 		return -1;
+@@ -1166,6 +1169,9 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ {
+ 	int ret;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		return 0;
++
+ 	if (!conn->xprt_ctx)
+ 		goto out_error;
+ 
+@@ -1225,7 +1231,7 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ 				 * TCP sockets. We first try to drain possibly pending
+ 				 * data to avoid this as much as possible.
+ 				 */
+-				if (conn->ctrl && conn->ctrl->drain)
++				if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl && conn->ctrl->drain)
+ 					conn->ctrl->drain(conn->t.sock.fd);
+ 				if (!conn->err_code)
+ 					conn->err_code = CO_ER_SSL_HANDSHAKE;
+@@ -1276,7 +1282,7 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ 			 * TCP sockets. We first try to drain possibly pending
+ 			 * data to avoid this as much as possible.
+ 			 */
+-			if (conn->ctrl && conn->ctrl->drain)
++			if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl && conn->ctrl->drain)
+ 				conn->ctrl->drain(conn->t.sock.fd);
+ 			if (!conn->err_code)
+ 				conn->err_code = CO_ER_SSL_HANDSHAKE;
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 6932e15..95f5d44 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -382,6 +382,9 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 	if (conn->flags & CO_FL_SOCK_WR_SH)
+ 		goto out_error;
+ 
++	if (!(conn->flags & CO_FL_CTRL_READY))
++		goto out_error;
++
+ 	/* If we have a PROXY line to send, we'll use this to validate the
+ 	 * connection, in which case the connection is validated only once
+ 	 * we've sent the whole proxy line. Otherwise we use connect().
+@@ -781,7 +784,7 @@ static void stream_int_shutw_conn(struct stream_interface *si)
+ 			/* quick close, the socket is alredy shut anyway */
+ 		}
+ 		else if (si->flags & SI_FL_NOLINGER) {
+-			if (conn->ctrl) {
++			if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl) {
+ 				setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
+ 					   (struct linger *) &nolinger, sizeof(struct linger));
+ 			}
+@@ -802,7 +805,7 @@ static void stream_int_shutw_conn(struct stream_interface *si)
+ 			 */
+ 			if (!(si->flags & SI_FL_NOHALF) || !(si->ib->flags & (CF_SHUTR|CF_DONT_READ))) {
+ 				/* We shutdown transport layer */
+-				if (conn->ctrl)
++				if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl)
+ 					shutdown(conn->t.sock.fd, SHUT_WR);
+ 
+ 				if (!(si->ib->flags & (CF_SHUTR|CF_DONT_READ))) {
+@@ -900,13 +903,13 @@ static void stream_int_chk_snd_conn(struct stream_interface *si)
+ 		/* Before calling the data-level operations, we have to prepare
+ 		 * the polling flags to ensure we properly detect changes.
+ 		 */
+-		if (conn->ctrl)
++		if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl)
+ 			fd_want_send(conn->t.sock.fd);
+ 
+ 		conn_refresh_polling_flags(conn);
+ 
+ 		si_conn_send(conn);
+-		if (conn->flags & CO_FL_ERROR) {
++		if ((conn->flags & CO_FL_CTRL_READY) && (conn->flags & CO_FL_ERROR)) {
+ 			/* Write error on the file descriptor */
+ 			fd_stop_both(conn->t.sock.fd);
+ 			__conn_data_stop_both(conn);
+@@ -1256,8 +1259,9 @@ void stream_sock_read0(struct stream_interface *si)
+ 		/* we want to immediately forward this close to the write side */
+ 		if (si->flags & SI_FL_NOLINGER) {
+ 			si->flags &= ~SI_FL_NOLINGER;
+-			setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
+-				   (struct linger *) &nolinger, sizeof(struct linger));
++			if (conn->flags & CO_FL_CTRL_READY)
++				setsockopt(conn->t.sock.fd, SOL_SOCKET, SO_LINGER,
++				           (struct linger *) &nolinger, sizeof(struct linger));
+ 		}
+ 		/* force flag on ssl to keep session in cache */
+ 		if (conn->xprt->shutw)
+-- 
+1.8.1.5
+

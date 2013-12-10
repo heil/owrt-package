@@ -1,0 +1,46 @@
+From 2e1401afb0e1f73c586a0e842afa314f26ff0fed Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 1 Oct 2013 11:41:55 +0200
+Subject: [PATCH 212/277] MINOR: connection: make it easier to emit proxy
+ protocol for unknown addresses
+
+Currently a connection is required on the remote side to emit a proxy
+protocol header line. Let's support NULL addresses to emit an UNKNOWN
+tag as well.
+---
+ src/connection.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/connection.c b/src/connection.c
+index 456d1bd..6200283 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -451,13 +451,14 @@ int conn_recv_proxy(struct connection *conn, int flag)
+  * buffer <buf> for a maximum size of <buf_len> (including the trailing zero).
+  * It returns the number of bytes composing this line (including the trailing
+  * LF), or zero in case of failure (eg: not enough space). It supports TCP4,
+- * TCP6 and "UNKNOWN" formats.
++ * TCP6 and "UNKNOWN" formats. If any of <src> or <dst> is null, UNKNOWN is
++ * emitted as well.
+  */
+ int make_proxy_line(char *buf, int buf_len, struct sockaddr_storage *src, struct sockaddr_storage *dst)
+ {
+ 	int ret = 0;
+ 
+-	if (src->ss_family == dst->ss_family && src->ss_family == AF_INET) {
++	if (src && dst && src->ss_family == dst->ss_family && src->ss_family == AF_INET) {
+ 		ret = snprintf(buf + ret, buf_len - ret, "PROXY TCP4 ");
+ 		if (ret >= buf_len)
+ 			return 0;
+@@ -487,7 +488,7 @@ int make_proxy_line(char *buf, int buf_len, struct sockaddr_storage *src, struct
+ 		if (ret >= buf_len)
+ 			return 0;
+ 	}
+-	else if (src->ss_family == dst->ss_family && src->ss_family == AF_INET6) {
++	else if (src && dst && src->ss_family == dst->ss_family && src->ss_family == AF_INET6) {
+ 		ret = snprintf(buf + ret, buf_len - ret, "PROXY TCP6 ");
+ 		if (ret >= buf_len)
+ 			return 0;
+-- 
+1.8.1.5
+

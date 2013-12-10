@@ -1,0 +1,75 @@
+From 1ec74bf660f48f57e308bef4b5df4c8507dffcb9 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Oct 2013 21:45:00 +0200
+Subject: [PATCH 252/277] MINOR: connection: check for send_proxy during the
+ connect(), not the SI
+
+It's cleaner to check for a pending send_proxy_ofs while establishing
+the connection (which already checks it anyway) and not in the stream
+interface.
+---
+ include/proto/stream_interface.h | 6 +-----
+ src/proto_tcp.c                  | 9 +++++++++
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/include/proto/stream_interface.h b/include/proto/stream_interface.h
+index 46d0c72..1cf9421 100644
+--- a/include/proto/stream_interface.h
++++ b/include/proto/stream_interface.h
+@@ -201,7 +201,7 @@ static inline int si_connect(struct stream_interface *si)
+ 	if (unlikely(!conn || !conn->ctrl || !conn->ctrl->connect))
+ 		return SN_ERR_INTERNAL;
+ 
+-	ret = conn->ctrl->connect(conn, !channel_is_empty(si->ob), !!conn->send_proxy_ofs);
++	ret = conn->ctrl->connect(conn, !channel_is_empty(si->ob), 0);
+ 	if (ret != SN_ERR_NONE)
+ 		return ret;
+ 
+@@ -209,10 +209,6 @@ static inline int si_connect(struct stream_interface *si)
+ 	if (si->flags & SI_FL_SRC_ADDR)
+ 		conn_get_from_addr(conn);
+ 
+-	/* Prepare to send a few handshakes related to the on-wire protocol. */
+-	if (conn->send_proxy_ofs)
+-		conn->flags |= CO_FL_SI_SEND_PROXY;
+-
+ 	/* we need to be notified about connection establishment */
+ 	conn->flags |= CO_FL_WAKE_DATA;
+ 
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 1c55b6a..1f98445 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -257,6 +257,8 @@ int tcp_bind_socket(int fd, int flags, struct sockaddr_storage *local, struct so
+  *   - 1 = delayed ACK if backend has tcp-smart-connect, regardless of data
+  *   - 2 = delayed ACK regardless of backend options
+  *
++ * Note that a pending send_proxy message accounts for data.
++ *
+  * It can return one of :
+  *  - SN_ERR_NONE if everything's OK
+  *  - SN_ERR_SRVTO if there are no more servers
+@@ -415,6 +417,9 @@ int tcp_connect_server(struct connection *conn, int data, int delack)
+ 		}
+ 	}
+ 
++	/* if a send_proxy is there, there are data */
++	data |= conn->send_proxy_ofs;
++
+ #if defined(TCP_QUICKACK)
+ 	/* disabling tcp quick ack now allows the first request to leave the
+ 	 * machine with the first ACK. We only do this if there are pending
+@@ -465,6 +470,10 @@ int tcp_connect_server(struct connection *conn, int data, int delack)
+ 	conn->flags  = CO_FL_WAIT_L4_CONN; /* connection in progress */
+ 	conn->flags |= CO_FL_ADDR_TO_SET;
+ 
++	/* Prepare to send a few handshakes related to the on-wire protocol. */
++	if (conn->send_proxy_ofs)
++		conn->flags |= CO_FL_SI_SEND_PROXY;
++
+ 	conn_ctrl_init(conn);       /* registers the FD */
+ 	conn_sock_want_send(conn);  /* for connect status */
+ 
+-- 
+1.8.1.5
+

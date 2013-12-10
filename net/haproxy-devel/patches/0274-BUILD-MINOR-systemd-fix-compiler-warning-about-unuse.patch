@@ -1,0 +1,40 @@
+From 439cfde55b0e3ecb030de9ea1181fcc6a1f9b9c7 Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Tue, 10 Dec 2013 08:32:56 +0100
+Subject: [PATCH 274/277] BUILD/MINOR: systemd: fix compiler warning about
+ unused result
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+There is a compiler warning after commit 1b6e75fa84 ("MEDIUM: haproxy-
+systemd-wrapper: Use haproxy in same directory"):
+
+src/haproxy-systemd-wrapper.c: In function âlocate_haproxyâ:
+src/haproxy-systemd-wrapper.c:28:10: warning: ignoring return value of âreadlinkâ, declared with attribute warn_unused_result [-Wunused-result]
+
+Fix the compiler warning by checking the return value of readlink().
+---
+ src/haproxy-systemd-wrapper.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/haproxy-systemd-wrapper.c b/src/haproxy-systemd-wrapper.c
+index 4ca86dd..c63f41f 100644
+--- a/src/haproxy-systemd-wrapper.c
++++ b/src/haproxy-systemd-wrapper.c
+@@ -24,9 +24,9 @@ static char **main_argv;
+ 
+ static void locate_haproxy(char *buffer, size_t buffer_size)
+ {
+-	char* end;
+-	readlink("/proc/self/exe", buffer, buffer_size);
+-	end = strrchr(buffer, '/');
++	char* end = NULL;
++	if (readlink("/proc/self/exe", buffer, buffer_size) > 0)
++		end = strrchr(buffer, '/');
+ 	if (end == NULL)
+ 		strncpy(buffer, "/usr/sbin/haproxy", buffer_size);
+ 	end[1] = '\0';
+-- 
+1.8.1.5
+

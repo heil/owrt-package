@@ -1,0 +1,76 @@
+From d84fb5e60f9ab943b2d3b0080ad9b1acf56ef8f0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 30 Nov 2013 09:06:53 +0100
+Subject: [PATCH 217/277] MAJOR: session: check for a connection to an applet
+ in sess_prepare_conn_req()
+
+Instead of having applets bypass the whole connection process, we now
+follow the common path through sess_prepare_conn_req(). It is this
+function which detects an applet an sets the output state so SI_ST_EST
+instead of initiating a connection to a server. It is made possible
+because we now have s->target pointing to the applet.
+---
+ src/session.c | 26 +++++++++++++++++---------
+ 1 file changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/src/session.c b/src/session.c
+index 8dd6d05..5274971 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -1151,9 +1151,10 @@ static void sess_set_term_flags(struct session *s)
+ }
+ 
+ /* This function initiates a server connection request on a stream interface
+- * already in SI_ST_REQ state. Upon success, the state goes to SI_ST_ASS,
+- * indicating that a server has been assigned. It may also return SI_ST_QUE,
+- * or SI_ST_CLO upon error.
++ * already in SI_ST_REQ state. Upon success, the state goes to SI_ST_ASS for
++ * a real connection to a server, indicating that a server has been assigned,
++ * or SI_ST_EST for a successful connection to an applet. It may also return
++ * SI_ST_QUE, or SI_ST_CLO upon error.
+  */
+ static void sess_prepare_conn_req(struct session *s, struct stream_interface *si)
+ {
+@@ -1168,6 +1169,18 @@ static void sess_prepare_conn_req(struct session *s, struct stream_interface *si
+ 	if (si->state != SI_ST_REQ)
+ 		return;
+ 
++	if (unlikely(obj_type(s->target) == OBJ_TYPE_APPLET)) {
++		/* the applet directly goes to the EST state */
++		s->logs.t_queue   = tv_ms_elapsed(&s->logs.tv_accept, &now);
++		s->logs.t_connect = tv_ms_elapsed(&s->logs.tv_accept, &now);
++		si->state         = SI_ST_EST;
++		si->err_type      = SI_ET_NONE;
++		si->exp           = TICK_ETERNITY;
++		s->req->wex       = TICK_ETERNITY;
++		s->rep->flags    |= CF_READ_ATTACHED; /* producer is now attached */
++		return;
++	}
++
+ 	/* Try to assign a server */
+ 	if (srv_redispatch_connect(s) != 0) {
+ 		/* We did not get a server. Either we queued the
+@@ -2175,11 +2188,6 @@ struct task *process_session(struct task *t)
+ 				 */
+ 				s->req->cons->state = SI_ST_REQ; /* new connection requested */
+ 				s->req->cons->conn_retries = s->be->conn_retries;
+-				if (unlikely(obj_type(s->target) == OBJ_TYPE_APPLET)) {
+-					s->req->cons->state = SI_ST_EST; /* connection established */
+-					s->rep->flags |= CF_READ_ATTACHED; /* producer is now attached */
+-					s->req->wex = TICK_ETERNITY;
+-				}
+ 			}
+ 		}
+ 		else {
+@@ -2207,7 +2215,7 @@ struct task *process_session(struct task *t)
+ 				/* check for HTTP mode and proxy server_name_hdr_name != NULL */
+ 				if ((s->flags & SN_BE_ASSIGNED) &&
+ 				    (s->be->mode == PR_MODE_HTTP) &&
+-				    (s->be->server_id_hdr_name != NULL && s->target)) {
++				    (s->be->server_id_hdr_name != NULL && objt_server(s->target))) {
+ 					http_send_name_header(&s->txn, s->be, objt_server(s->target)->id);
+ 				}
+ 			}
+-- 
+1.8.1.5
+

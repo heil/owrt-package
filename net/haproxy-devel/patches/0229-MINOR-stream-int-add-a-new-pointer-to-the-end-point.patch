@@ -1,0 +1,74 @@
+From 7d67d7b9e5228c1d09fdedc5dbd744a2a8fb6773 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 29 Sep 2013 16:05:22 +0200
+Subject: [PATCH 229/277] MINOR: stream-int: add a new pointer to the end point
+
+The end point will correspond to either an applet context or a connection,
+depending on the object type. For now the pointer remains null.
+---
+ include/proto/stream_interface.h | 4 ++++
+ include/types/stream_interface.h | 1 +
+ src/stream_interface.c           | 1 +
+ 3 files changed, 6 insertions(+)
+
+diff --git a/include/proto/stream_interface.h b/include/proto/stream_interface.h
+index 516b11e..6dffcaf 100644
+--- a/include/proto/stream_interface.h
++++ b/include/proto/stream_interface.h
+@@ -54,6 +54,7 @@ static inline const struct protocol *si_ctrl(struct stream_interface *si)
+ static inline void si_prepare_none(struct stream_interface *si)
+ {
+ 	si->ops = &si_embedded_ops;
++	si->end = NULL;
+ 	conn_prepare(si->conn, NULL, NULL, NULL, si);
+ 	si->conn->target = NULL;
+ }
+@@ -61,18 +62,21 @@ static inline void si_prepare_none(struct stream_interface *si)
+ static inline void si_prepare_conn(struct stream_interface *si, const struct protocol *ctrl, const struct xprt_ops *xprt)
+ {
+ 	si->ops = &si_conn_ops;
++	si->end = NULL;
+ 	conn_prepare(si->conn, &si_conn_cb, ctrl, xprt, si);
+ }
+ 
+ static inline void si_takeover_conn(struct stream_interface *si, const struct protocol *ctrl, const struct xprt_ops *xprt)
+ {
+ 	si->ops = &si_conn_ops;
++	si->end = NULL;
+ 	conn_assign(si->conn, &si_conn_cb, ctrl, xprt, si);
+ }
+ 
+ static inline void si_prepare_applet(struct stream_interface *si, struct si_applet *applet)
+ {
+ 	si->ops = &si_embedded_ops;
++	si->end = NULL;
+ 	conn_prepare(si->conn, NULL, NULL, NULL, si);
+ 	si->conn->target = &applet->obj_type;
+ }
+diff --git a/include/types/stream_interface.h b/include/types/stream_interface.h
+index b7f1a5a..fc09aa6 100644
+--- a/include/types/stream_interface.h
++++ b/include/types/stream_interface.h
+@@ -160,6 +160,7 @@ struct stream_interface {
+ 	unsigned int exp;       /* wake up time for connect, queue, turn-around, ... */
+ 	void *owner;            /* generally a (struct task*) */
+ 	unsigned int err_type;  /* first error detected, one of SI_ET_* */
++	enum obj_type *end;     /* points to the end point (connection or appctx) */
+ 
+ 	struct connection *conn; /* descriptor for a connection */
+ 	struct si_ops *ops;     /* general operations at the stream interface layer */
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 7faf85f..55342e7 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -372,6 +372,7 @@ void stream_int_unregister_handler(struct stream_interface *si)
+ 	si->release = NULL;
+ 	si->owner = NULL;
+ 	si->conn->target = NULL;
++	si->end = NULL;
+ }
+ 
+ /* This callback is used to send a valid PROXY protocol line to a socket being
+-- 
+1.8.1.5
+

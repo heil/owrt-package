@@ -1,0 +1,49 @@
+From b97f3b1abf529446dc0dc99caaad20616d26c7fe Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 20 Oct 2013 22:56:45 +0200
+Subject: [PATCH 244/277] MINOR: connection: add conn_new() / conn_free()
+
+conn_new() will be a more convenient way of allocating and initializing
+a connection. It calls pool_alloc2() and conn_init() upon success.
+
+conn_free() is just a pool_free2() but is provided for symmetry with
+conn_new().
+---
+ include/proto/connection.h | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index a552a04..21d57c9 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -443,6 +443,27 @@ static inline void conn_init(struct connection *conn)
+ 	conn->target = NULL;
+ }
+ 
++/* Tries to allocate a new connection and initialized its main fields. The
++ * connection is returned on success, NULL on failure. The connection must
++ * be released using pool_free2() or conn_free().
++ */
++static inline struct connection *conn_new()
++{
++	struct connection *conn;
++
++	conn = pool_alloc2(pool2_connection);
++	if (likely(conn != NULL))
++		conn_init(conn);
++	return conn;
++}
++
++/* Releases a connection previously allocated by conn_new() */
++static inline void conn_free(struct connection *conn)
++{
++	pool_free2(pool2_connection, conn);
++}
++
++
+ /* Retrieves the connection's source address */
+ static inline void conn_get_from_addr(struct connection *conn)
+ {
+-- 
+1.8.1.5
+

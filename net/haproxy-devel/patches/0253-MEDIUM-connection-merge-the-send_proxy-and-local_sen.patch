@@ -1,0 +1,273 @@
+From 57cd3e46b9cc990e8aae538960a72ceabc49db6e Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Oct 2013 22:01:26 +0200
+Subject: [PATCH 253/277] MEDIUM: connection: merge the send_proxy and
+ local_send_proxy calls
+
+We used to have two very similar functions for sending a PROXY protocol
+line header. The reason is that the default one relies on the stream
+interface to retrieve the other end's address, while the "local" one
+performs a local address lookup and sends that instead (used by health
+checks).
+
+Now that the send_proxy_ofs is stored in the connection and not the
+stream interface, we can make the local_send_proxy rely on it and
+support partial sends. This also simplifies the code by removing the
+local_send_proxy function, making health checks use send_proxy_ofs,
+resulting in the removal of the CO_FL_LOCAL_SPROXY flag, and the
+associated test in the connection handler. The other flag,
+CO_FL_SI_SEND_PROXY was renamed without the "SI" part so that it
+is clear that it is not dedicated anymore to a usage with a stream
+interface.
+---
+ include/proto/connection.h | 14 --------
+ include/types/connection.h |  6 ++--
+ src/checks.c               |  9 ++---
+ src/connection.c           | 87 ++--------------------------------------------
+ src/proto_tcp.c            |  2 +-
+ src/stream_interface.c     | 36 +++++++++++++++----
+ 6 files changed, 40 insertions(+), 114 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 576f3fd..a642960 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -143,20 +143,6 @@ void conn_update_sock_polling(struct connection *c);
+  */
+ void conn_update_data_polling(struct connection *c);
+ 
+-/* This callback is used to send a valid PROXY protocol line to a socket being
+- * established from the local machine. It sets the protocol addresses to the
+- * local and remote address. This is typically used with health checks or when
+- * it is not possible to determine the other end's address. It returns 0 if it
+- * fails in a fatal way or needs to poll to go further, otherwise it returns
+- * non-zero and removes itself from the connection's flags (the bit is provided
+- * in <flag> by the caller). It is designed to be called by the connection
+- * handler and relies on it to commit polling changes. Note that this function
+- * expects to be able to send the whole line at once, which should always be
+- * possible since it is supposed to start at the first byte of the outgoing
+- * data segment.
+- */
+-int conn_local_send_proxy(struct connection *conn, unsigned int flag);
+-
+ /* Refresh the connection's polling flags from its file descriptor status.
+  * This should be called at the beginning of a connection handler.
+  */
+diff --git a/include/types/connection.h b/include/types/connection.h
+index d600937..1557924 100644
+--- a/include/types/connection.h
++++ b/include/types/connection.h
+@@ -121,13 +121,13 @@ enum {
+ 	 * handshake should be added after this point, and CO_FL_HANDSHAKE
+ 	 * should be updated.
+ 	 */
+-	CO_FL_SI_SEND_PROXY = 0x01000000,  /* send a valid PROXY protocol header */
++	CO_FL_SEND_PROXY    = 0x01000000,  /* send a valid PROXY protocol header */
+ 	CO_FL_SSL_WAIT_HS   = 0x02000000,  /* wait for an SSL handshake to complete */
+ 	CO_FL_ACCEPT_PROXY  = 0x04000000,  /* receive a valid PROXY protocol header */
+-	CO_FL_LOCAL_SPROXY  = 0x08000000,  /* send a valid local PROXY protocol header */
++	/* unused : 0x08000000 */
+ 
+ 	/* below we have all handshake flags grouped into one */
+-	CO_FL_HANDSHAKE     = CO_FL_SI_SEND_PROXY | CO_FL_SSL_WAIT_HS | CO_FL_ACCEPT_PROXY | CO_FL_LOCAL_SPROXY,
++	CO_FL_HANDSHAKE     = CO_FL_SEND_PROXY | CO_FL_SSL_WAIT_HS | CO_FL_ACCEPT_PROXY,
+ 
+ 	/* when any of these flags is set, polling is defined by socket-layer
+ 	 * operations, as opposed to data-layer. Transport is explicitly not
+diff --git a/src/checks.c b/src/checks.c
+index ed45912..3b4e917 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1570,11 +1570,12 @@ static struct task *process_chk(struct task *t)
+ 		 */
+ 		ret = SN_ERR_INTERNAL;
+ 		if (s->check_common.proto->connect)
+-			ret = s->check_common.proto->connect(conn, check->type,
+-							     s->check.send_proxy ? 1 : (check->type) ? 0 : 2);
++			ret = s->check_common.proto->connect(conn, check->type, (check->type) ? 0 : 2);
+ 		conn->flags |= CO_FL_WAKE_DATA;
+-		if (check->send_proxy)
+-			conn->flags |= CO_FL_LOCAL_SPROXY;
++		if (s->check.send_proxy) {
++			conn->send_proxy_ofs = 1;
++			conn->flags |= CO_FL_SEND_PROXY;
++		}
+ 
+ 		switch (ret) {
+ 		case SN_ERR_NONE:
+diff --git a/src/connection.c b/src/connection.c
+index 05cad01..75f876f 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -66,12 +66,8 @@ int conn_fd_handler(int fd)
+ 			if (!conn_recv_proxy(conn, CO_FL_ACCEPT_PROXY))
+ 				goto leave;
+ 
+-		if (conn->flags & CO_FL_SI_SEND_PROXY)
+-			if (!conn_si_send_proxy(conn, CO_FL_SI_SEND_PROXY))
+-				goto leave;
+-
+-		if (conn->flags & CO_FL_LOCAL_SPROXY)
+-			if (!conn_local_send_proxy(conn, CO_FL_LOCAL_SPROXY))
++		if (conn->flags & CO_FL_SEND_PROXY)
++			if (!conn_si_send_proxy(conn, CO_FL_SEND_PROXY))
+ 				goto leave;
+ #ifdef USE_OPENSSL
+ 		if (conn->flags & CO_FL_SSL_WAIT_HS)
+@@ -535,82 +531,3 @@ int make_proxy_line(char *buf, int buf_len, struct sockaddr_storage *src, struct
+ 	}
+ 	return ret;
+ }
+-
+-/* This callback is used to send a valid PROXY protocol line to a socket being
+- * established from the local machine. It sets the protocol addresses to the
+- * local and remote address. This is typically used with health checks or when
+- * it is not possible to determine the other end's address. It returns 0 if it
+- * fails in a fatal way or needs to poll to go further, otherwise it returns
+- * non-zero and removes itself from the connection's flags (the bit is provided
+- * in <flag> by the caller). It is designed to be called by the connection
+- * handler and relies on it to commit polling changes. Note that this function
+- * expects to be able to send the whole line at once, which should always be
+- * possible since it is supposed to start at the first byte of the outgoing
+- * data segment.
+- */
+-int conn_local_send_proxy(struct connection *conn, unsigned int flag)
+-{
+-	int ret;
+-
+-	/* we might have been called just after an asynchronous shutw */
+-	if (conn->flags & CO_FL_SOCK_WR_SH)
+-		goto out_error;
+-
+-	if (!(conn->flags & CO_FL_CTRL_READY))
+-		goto out_error;
+-
+-	/* The target server expects a PROXY line to be sent first. Retrieving
+-	 * local or remote addresses may fail until the connection is established.
+-	 */
+-	conn_get_from_addr(conn);
+-	if (!(conn->flags & CO_FL_ADDR_FROM_SET))
+-		goto out_wait;
+-
+-	conn_get_to_addr(conn);
+-	if (!(conn->flags & CO_FL_ADDR_TO_SET))
+-		goto out_wait;
+-
+-	trash.len = make_proxy_line(trash.str, trash.size, &conn->addr.from, &conn->addr.to);
+-	if (!trash.len)
+-		goto out_error;
+-
+-	/* we have to send the whole trash. If the data layer has a
+-	 * pending write, we'll also set MSG_MORE.
+-	 */
+-	do {
+-		ret = send(conn->t.sock.fd, trash.str, trash.len, (conn->flags & CO_FL_DATA_WR_ENA) ? MSG_MORE : 0);
+-
+-		if (ret == 0)
+-			goto out_wait;
+-
+-		if (ret < 0) {
+-			if (errno == EAGAIN || errno == ENOTCONN)
+-				goto out_wait;
+-			if (errno == EINTR)
+-				continue;
+-			conn->flags |= CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH;
+-			goto out_error;
+-		}
+-	} while (0);
+-
+-	if (ret != trash.len)
+-		goto out_error;
+-
+-	/* The connection is ready now, simply return and let the connection
+-	 * handler notify upper layers if needed.
+-	 */
+-	if (conn->flags & CO_FL_WAIT_L4_CONN)
+-		conn->flags &= ~CO_FL_WAIT_L4_CONN;
+-	conn->flags &= ~flag;
+-	return 1;
+-
+- out_error:
+-	/* Write error on the file descriptor */
+-	conn->flags |= CO_FL_ERROR;
+-	return 0;
+-
+- out_wait:
+-	__conn_sock_stop_recv(conn);
+-	__conn_sock_poll_send(conn);
+-	return 0;
+-}
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 1f98445..6593ce1 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -472,7 +472,7 @@ int tcp_connect_server(struct connection *conn, int data, int delack)
+ 
+ 	/* Prepare to send a few handshakes related to the on-wire protocol. */
+ 	if (conn->send_proxy_ofs)
+-		conn->flags |= CO_FL_SI_SEND_PROXY;
++		conn->flags |= CO_FL_SEND_PROXY;
+ 
+ 	conn_ctrl_init(conn);       /* registers the FD */
+ 	conn_sock_want_send(conn);  /* for connect status */
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index c502e7f..1c13d42 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -373,11 +373,12 @@ void stream_int_unregister_handler(struct stream_interface *si)
+  * further, otherwise it returns non-zero and removes itself from the connection's
+  * flags (the bit is provided in <flag> by the caller). It is designed to be
+  * called by the connection handler and relies on it to commit polling changes.
++ * Note that it can emit a PROXY line by relying on the other end's address
++ * when the connection is attached to a stream interface, or by resolving the
++ * local address otherwise (also called a LOCAL line).
+  */
+ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ {
+-	struct stream_interface *si = conn->owner;
+-
+ 	/* we might have been called just after an asynchronous shutw */
+ 	if (conn->flags & CO_FL_SOCK_WR_SH)
+ 		goto out_error;
+@@ -397,12 +398,33 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 		 * offset to start sending from then end of the proxy string
+ 		 * (which is recomputed every time since it's constant). If
+ 		 * it is positive, it means we have to send from the start.
++		 * We can only send a "normal" PROXY line when the connection
++		 * is attached to a stream interface. Otherwise we can only
++		 * send a LOCAL line (eg: for use with health checks).
+ 		 */
+-		struct connection *remote = objt_conn(si->ob->prod->end);
+-		if (remote)
+-			ret = make_proxy_line(trash.str, trash.size, &remote->addr.from, &remote->addr.to);
+-		else
+-			ret = make_proxy_line(trash.str, trash.size, NULL, NULL);
++		if (conn->data == &si_conn_cb) {
++			struct stream_interface *si = conn->owner;
++			struct connection *remote = objt_conn(si->ob->prod->end);
++
++			if (remote)
++				ret = make_proxy_line(trash.str, trash.size, &remote->addr.from, &remote->addr.to);
++			else
++				ret = make_proxy_line(trash.str, trash.size, NULL, NULL);
++		}
++		else {
++			/* The target server expects a LOCAL line to be sent first. Retrieving
++			 * local or remote addresses may fail until the connection is established.
++			 */
++			conn_get_from_addr(conn);
++			if (!(conn->flags & CO_FL_ADDR_FROM_SET))
++				goto out_wait;
++
++			conn_get_to_addr(conn);
++			if (!(conn->flags & CO_FL_ADDR_TO_SET))
++				goto out_wait;
++
++			ret = make_proxy_line(trash.str, trash.size, &conn->addr.from, &conn->addr.to);
++		}
+ 
+ 		if (!ret)
+ 			goto out_error;
+-- 
+1.8.1.5
+

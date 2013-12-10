@@ -1,0 +1,46 @@
+From d015577428dee5aabac5aa3517702dc08480d353 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 14 Oct 2013 17:10:08 +0200
+Subject: [PATCH 237/277] MINOR: connection: add conn_init() to (re)initialize
+ a connection
+
+This function will ease the initialization of new connections as well
+as their reuse. It initializes the obj_type and a few fields so that
+the connection is fresh again. It leaves the addresses and target
+untouched so it is suitable for use across connection retries.
+---
+ include/proto/connection.h | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index aa88769..bd3e890 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -425,6 +425,24 @@ static inline int conn_sock_shutw_pending(struct connection *c)
+ 	return (c->flags & (CO_FL_DATA_WR_SH | CO_FL_SOCK_WR_SH)) == CO_FL_DATA_WR_SH;
+ }
+ 
++/* Initializes all required fields for a new connection. Note that it does the
++ * minimum acceptable initialization for a connection that already exists and
++ * is about to be reused. It also leaves the addresses untouched, which makes
++ * it usable across connection retries to reset a connection to a known state.
++ */
++static inline void conn_init(struct connection *conn)
++{
++	conn->obj_type = OBJ_TYPE_CONN;
++	conn->flags = CO_FL_NONE;
++	conn->xprt_st = 0;
++	conn->xprt_ctx = NULL;
++	conn->data = NULL;
++	conn->owner = NULL;
++	conn->t.sock.fd = -1; /* just to help with debugging */
++	conn->err_code = CO_ER_NONE;
++	conn->target = NULL;
++}
++
+ /* Retrieves the connection's source address */
+ static inline void conn_get_from_addr(struct connection *conn)
+ {
+-- 
+1.8.1.5
+

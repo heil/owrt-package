@@ -1,0 +1,86 @@
+From 7abddb5c6714a8d50ea63bbc69d23820844bca1d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Oct 2013 15:31:04 +0200
+Subject: [PATCH 248/277] MINOR: connection: replace conn_assign with
+ conn_attach
+
+We don't want to assign the control nor transport layers anymore
+at the same time as the data layer, because it prevents one from
+keeping existing settings when reattaching a connection to an
+existing stream interface.
+
+Let's have conn_attach() replace conn_assign() for this purpose.
+
+Thus, conn_prepare() + conn_attach() do exactly the same as the
+previous conn_assign().
+---
+ include/proto/connection.h       | 8 ++------
+ include/proto/stream_interface.h | 3 ++-
+ src/checks.c                     | 2 +-
+ src/session.c                    | 2 +-
+ 4 files changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 5c72a95..ce88f6e 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -548,14 +548,10 @@ static inline void conn_get_to_addr(struct connection *conn)
+ 	conn->flags |= CO_FL_ADDR_TO_SET;
+ }
+ 
+-/* Assigns a connection with the appropriate data, ctrl, transport layers, and owner. */
+-static inline void conn_assign(struct connection *conn, const struct data_cb *data,
+-                               const struct protocol *ctrl, const struct xprt_ops *xprt,
+-                               void *owner)
++/* Attaches a connection to an owner and assigns a data layer */
++static inline void conn_attach(struct connection *conn, void *owner, const struct data_cb *data)
+ {
+ 	conn->data = data;
+-	conn->ctrl = ctrl;
+-	conn->xprt = xprt;
+ 	conn->owner = owner;
+ }
+ 
+diff --git a/include/proto/stream_interface.h b/include/proto/stream_interface.h
+index 8fc3281..6bedaff 100644
+--- a/include/proto/stream_interface.h
++++ b/include/proto/stream_interface.h
+@@ -88,7 +88,8 @@ static inline void si_prepare_conn(struct stream_interface *si, const struct pro
+ 
+ 	si->ops = &si_conn_ops;
+ 	si->end = &conn->obj_type;
+-	conn_assign(conn, &si_conn_cb, ctrl, xprt, si);
++	conn_prepare(conn, ctrl, xprt);
++	conn_attach(conn, si, &si_conn_cb);
+ }
+ 
+ static inline void si_prepare_applet(struct stream_interface *si, struct si_applet *applet)
+diff --git a/src/checks.c b/src/checks.c
+index b96f13d..ed45912 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1542,7 +1542,7 @@ static struct task *process_chk(struct task *t)
+ 		/* prepare a new connection */
+ 		conn_init(conn);
+ 		conn_prepare(conn, s->check_common.proto, s->check_common.xprt);
+-		conn_assign(conn, &check_conn_cb, s->check_common.proto, s->check_common.xprt, check);
++		conn_attach(conn, check, &check_conn_cb);
+ 		conn->target = &s->obj_type;
+ 
+ 		/* no client address */
+diff --git a/src/session.c b/src/session.c
+index 9acfa7a..f8b29d5 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -203,7 +203,7 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	 * but not initialized. Also note we need to be careful as the stream
+ 	 * int is not initialized yet.
+ 	 */
+-	conn_assign(cli_conn, &sess_conn_cb, l->proto, l->xprt, s);
++	conn_attach(cli_conn, s, &sess_conn_cb);
+ 
+ 	/* finish initialization of the accepted file descriptor */
+ 	conn_ctrl_init(cli_conn);
+-- 
+1.8.1.5
+

@@ -1,0 +1,136 @@
+From 1fbe1c9ec83e7cdcbcd6e0f902277039900adfb5 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 1 Dec 2013 09:35:41 +0100
+Subject: [PATCH 255/277] MEDIUM: stream-int: return the allocated appctx in
+ stream_int_register_handler()
+
+The task returned by stream_int_register_handler() is never used, however we
+always need to access the appctx afterwards. So make it return the appctx
+instead. We already plan for it to fail, which is the reason for the addition
+of a few tests and the possibility for the HTTP analyser to return a status
+code 500.
+---
+ include/proto/stream_interface.h |  3 +--
+ src/dumpstats.c                  |  5 +++--
+ src/peers.c                      | 10 ++++++----
+ src/proto_http.c                 |  9 ++++++++-
+ src/stream_interface.c           | 18 +++++++++---------
+ 5 files changed, 27 insertions(+), 18 deletions(-)
+
+diff --git a/include/proto/stream_interface.h b/include/proto/stream_interface.h
+index 41a29ad..4c4a6a8 100644
+--- a/include/proto/stream_interface.h
++++ b/include/proto/stream_interface.h
+@@ -42,8 +42,7 @@ extern struct si_ops si_embedded_ops;
+ extern struct si_ops si_conn_ops;
+ extern struct data_cb si_conn_cb;
+ 
+-struct task *stream_int_register_handler(struct stream_interface *si,
+-					 struct si_applet *app);
++struct appctx *stream_int_register_handler(struct stream_interface *si, struct si_applet *app);
+ void stream_int_unregister_handler(struct stream_interface *si);
+ 
+ /* initializes a stream interface in the SI_ST_INI state. It's detached from
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index cb5b256..1b6fe3d 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -159,8 +159,9 @@ static int stats_accept(struct session *s)
+ 	struct appctx *appctx;
+ 
+ 	s->target = &cli_applet.obj_type;
+-	stream_int_register_handler(&s->si[1], objt_applet(s->target));
+-	appctx = si_appctx(&s->si[1]);
++	appctx = stream_int_register_handler(&s->si[1], objt_applet(s->target));
++	if (!appctx)
++		return -1;
+ 	appctx->st1 = 0;
+ 	appctx->st0 = STAT_CLI_INIT;
+ 
+diff --git a/src/peers.c b/src/peers.c
+index c1d85f2..e56bdfc 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -1097,8 +1097,9 @@ int peer_accept(struct session *s)
+ 	struct appctx *appctx;
+ 
+ 	s->target = &peer_applet.obj_type;
+-	stream_int_register_handler(&s->si[1], objt_applet(s->target));
+-	appctx = si_appctx(&s->si[1]);
++	appctx = stream_int_register_handler(&s->si[1], objt_applet(s->target));
++	if (!appctx)
++		return -1;
+ 	appctx->st0 = PEER_SESSION_ACCEPT;
+ 	appctx->ctx.peers.ptr = s;
+ 
+@@ -1175,8 +1176,9 @@ static struct session *peer_session_create(struct peer *peer, struct peer_sessio
+ 	if (s->fe->options2 & PR_O2_INDEPSTR)
+ 		s->si[0].flags |= SI_FL_INDEP_STR;
+ 
+-	stream_int_register_handler(&s->si[0], &peer_applet);
+-	appctx = si_appctx(&s->si[0]);
++	appctx = stream_int_register_handler(&s->si[0], &peer_applet);
++	if (!appctx)
++		goto out_fail_conn1;
+ 	appctx->st0 = PEER_SESSION_CONNECT;
+ 	appctx->ctx.peers.ptr = (void *)ps;
+ 
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 1c5ae3d..a06b0ec 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3461,8 +3461,15 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 	if (!http_req_last_rule) {
+ 		if (stats_check_uri(s->rep->prod, txn, px)) {
+ 			s->target = &http_stats_applet.obj_type;
+-			stream_int_register_handler(s->rep->prod, objt_applet(s->target));
++			if (unlikely(!stream_int_register_handler(s->rep->prod, objt_applet(s->target)))) {
++				txn->status = 500;
++				s->logs.tv_request = now;
++				stream_int_retnclose(req->prod, http_error_message(s, HTTP_ERR_500));
+ 
++				if (!(s->flags & SN_ERR_MASK))
++					s->flags |= SN_ERR_RESOURCE;
++				goto return_prx_cond;
++			}
+ 			/* parse the whole stats request and extract the relevant information */
+ 			http_handle_stats(s, req);
+ 			http_req_last_rule = http_req_get_intercept_rule(px, &px->uri_auth->http_req_rules, s, txn);
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 1c13d42..3970760 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -342,21 +342,21 @@ static void stream_int_chk_snd(struct stream_interface *si)
+ 		task_wakeup(si->owner, TASK_WOKEN_IO);
+ }
+ 
+-/* Register an applet to handle a stream_interface as part of the stream
+- * interface's owner task, which is returned. The SI will wake it up everytime
+- * it is solicited. The task's processing function must call the applet's
+- * function before returning. It must be deleted by the task handler using
+- * stream_int_unregister_handler(), possibly from within the function itself.
+- * It also pre-initializes applet.state to zero and the connection context
+- * to NULL.
++/* Register an applet to handle a stream_interface as part of the
++ * stream interface's owner task. The SI will wake it up everytime it
++ * is solicited.  The task's processing function must call the applet's
++ * function before returning. It must be deleted by the task handler
++ * using stream_int_unregister_handler(), possibly from within the
++ * function itself. It also pre-initializes the applet's context and
++ * returns it (or NULL in case it could not be allocated).
+  */
+-struct task *stream_int_register_handler(struct stream_interface *si, struct si_applet *app)
++struct appctx *stream_int_register_handler(struct stream_interface *si, struct si_applet *app)
+ {
+ 	DPRINTF(stderr, "registering handler %p for si %p (was %p)\n", app, si, si->owner);
+ 
+ 	si_attach_applet(si, app);
+ 	si->flags |= SI_FL_WAIT_DATA;
+-	return si->owner;
++	return si_appctx(si);
+ }
+ 
+ /* Unregister a stream interface handler. This must be called by the handler task
+-- 
+1.8.1.5
+

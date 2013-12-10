@@ -1,0 +1,51 @@
+From b5e7ef6810c6a414ddae45c029260d3780fc65b1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 10 Dec 2013 11:19:04 +0100
+Subject: [PATCH 277/277] BUILD: use format tags in VERDATE and SUBVERS files
+
+The first line now contains a git format tag asking git-archive to
+place the last commit's commit date and the last commit's abbreviated
+ID respectively. The makefile will use these information in preference
+when they're available and git is not available.
+
+Now it's only necessary to add the two following lines in
+.git/info/attributes to have the files automatically filled by git-archive :
+
+SUBVERS export-subst
+VERDATE export-subst
+---
+ Makefile | 2 +-
+ SUBVERS  | 1 +
+ VERDATE  | 1 +
+ 3 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 4a51985..01e6959 100644
+--- a/Makefile
++++ b/Makefile
+@@ -359,7 +359,7 @@ ifeq ($(SUBVERS),)
+ SUBVERS := $(shell (grep -v '^\$$' SUBVERS 2>/dev/null || touch SUBVERS) | head -n 1)
+ endif
+ ifeq ($(VERDATE),)
+-VERDATE := $(shell (grep -v '^\$$' VERDATE 2>/dev/null || touch VERDATE) | head -n 1)
++VERDATE := $(shell (grep -v '^\$$' VERDATE 2>/dev/null || touch VERDATE) | head -n 1 | cut -f1 -d' ' | tr '-' '/')
+ endif
+ 
+ #### Build options
+diff --git a/SUBVERS b/SUBVERS
+index 8b13789..26d9d35 100644
+--- a/SUBVERS
++++ b/SUBVERS
+@@ -1 +1,2 @@
++-$Format:%h$
+ 
+diff --git a/VERDATE b/VERDATE
+index b03f7cf..893b906 100644
+--- a/VERDATE
++++ b/VERDATE
+@@ -1 +1,2 @@
++$Format:%ci$
+ 2013/06/17
+-- 
+1.8.1.5
+

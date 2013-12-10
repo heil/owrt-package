@@ -1,0 +1,109 @@
+From 9667a80676f9113f6954366d5ed25012d6b8197b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 9 Dec 2013 12:52:13 +0100
+Subject: [PATCH 204/277] BUG/MEDIUM: stick-tables: complete the latest fix
+ about store-responses
+
+The commit 37e340c (BUG/MEDIUM: stick: completely remove the unused flag
+from the store entries) was incomplete. We also need to ensure that only
+the first store-response for a table is applied and that it may coexist
+with a possible store-request that was already done on this table.
+
+This patch with the previous one should be backported to 1.4.
+---
+ doc/configuration.txt | 17 +++++++++++++++--
+ src/session.c         | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 1e71342..712afff 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -6297,7 +6297,12 @@ stick store-request <pattern> [table <table>] [{if | unless} <condition>]
+   request or the response, regardless of the number of rules. Only the 8 first
+   ones which match will be kept. Using this, it is possible to feed multiple
+   tables at once in the hope to increase the chance to recognize a user on
+-  another protocol or access method.
++  another protocol or access method. Using multiple store-request rules with
++  the same table is possible and may be used to find the best criterion to rely
++  on, by arranging the rules by decreasing preference order. Only the first
++  extracted criterion for a given table will be stored. All subsequent store-
++  request rules referencing the same table will be skipped and their ACLs will
++  not be evaluated.
+ 
+   The "store-request" rules are evaluated once the server connection has been
+   established, so that the table will contain the real server that processed
+@@ -6601,7 +6606,15 @@ stick store-response <pattern> [table <table>] [{if | unless} <condition>]
+   request or the response, regardless of the number of rules. Only the 8 first
+   ones which match will be kept. Using this, it is possible to feed multiple
+   tables at once in the hope to increase the chance to recognize a user on
+-  another protocol or access method.
++  another protocol or access method. Using multiple store-response rules with
++  the same table is possible and may be used to find the best criterion to rely
++  on, by arranging the rules by decreasing preference order. Only the first
++  extracted criterion for a given table will be stored. All subsequent store-
++  response rules referencing the same table will be skipped and their ACLs will
++  not be evaluated. However, even if a store-request rule references a table, a
++  store-response rule may also use the same table. This means that each table
++  may learn exactly one element from the request and one element from the
++  response at once.
+ 
+   The table will contain the real server that processed the request.
+ 
+diff --git a/src/session.c b/src/session.c
+index c23891f..5f94ad1 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -1371,6 +1371,13 @@ static int process_sticking_rules(struct session *s, struct channel *req, int an
+ 		int ret = 1 ;
+ 		int i;
+ 
++		/* Only the first stick store-request of each table is applied
++		 * and other ones are ignored. The purpose is to allow complex
++		 * configurations which look for multiple entries by decreasing
++		 * order of precision and to stop at the first which matches.
++		 * An example could be a store of the IP address from an HTTP
++		 * header first, then from the source if not found.
++		 */
+ 		for (i = 0; i < s->store_count; i++) {
+ 			if (rule->table.t == s->store[i].table)
+ 				break;
+@@ -1447,6 +1454,7 @@ static int process_store_rules(struct session *s, struct channel *rep, int an_bi
+ 	struct proxy    *px   = s->be;
+ 	struct sticking_rule  *rule;
+ 	int i;
++	int nbreq = s->store_count;
+ 
+ 	DPRINTF(stderr,"[%u] %s: session=%p b=%p, exp(r,w)=%u,%u bf=%08x bh=%d analysers=%02x\n",
+ 		now_ms, __FUNCTION__,
+@@ -1460,6 +1468,27 @@ static int process_store_rules(struct session *s, struct channel *rep, int an_bi
+ 	list_for_each_entry(rule, &px->storersp_rules, list) {
+ 		int ret = 1 ;
+ 
++		/* Only the first stick store-response of each table is applied
++		 * and other ones are ignored. The purpose is to allow complex
++		 * configurations which look for multiple entries by decreasing
++		 * order of precision and to stop at the first which matches.
++		 * An example could be a store of a set-cookie value, with a
++		 * fallback to a parameter found in a 302 redirect.
++		 *
++		 * The store-response rules are not allowed to override the
++		 * store-request rules for the same table, but they may coexist.
++		 * Thus we can have up to one store-request entry and one store-
++		 * response entry for the same table at any time.
++		 */
++		for (i = nbreq; i < s->store_count; i++) {
++			if (rule->table.t == s->store[i].table)
++				break;
++		}
++
++		/* skip existing entries for this table */
++		if (i < s->store_count)
++			continue;
++
+ 		if (rule->cond) {
+ 	                ret = acl_exec_cond(rule->cond, px, s, &s->txn, SMP_OPT_DIR_RES|SMP_OPT_FINAL);
+ 	                ret = acl_pass(ret);
+-- 
+1.8.1.5
+

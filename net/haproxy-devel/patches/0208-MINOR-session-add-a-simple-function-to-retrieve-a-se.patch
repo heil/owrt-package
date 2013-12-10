@@ -1,0 +1,32 @@
+From 787add29327c510d894dae62d2084939be99bfca Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 23 Nov 2013 23:37:04 +0100
+Subject: [PATCH 208/277] MINOR: session: add a simple function to retrieve a
+ session from a task
+
+This function only casts t->context to (struct session *). It will
+avoid some ugly and unsafe casts in upcoming changes.
+---
+ include/proto/session.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/include/proto/session.h b/include/proto/session.h
+index f597d59..aaf4161 100644
+--- a/include/proto/session.h
++++ b/include/proto/session.h
+@@ -50,6 +50,12 @@ int parse_track_counters(char **args, int *arg,
+ 			 struct track_ctr_prm *prm,
+ 			 struct proxy *defpx, char **err);
+ 
++/* returns the session from a void *owner */
++static inline struct session *session_from_task(struct task *t)
++{
++	return (struct session *)t->context;
++}
++
+ /* Remove the refcount from the session to the tracked counters, and clear the
+  * pointer to ensure this is only performed once. The caller is responsible for
+  * ensuring that the pointer is valid first.
+-- 
+1.8.1.5
+

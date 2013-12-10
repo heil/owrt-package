@@ -1,0 +1,39 @@
+From 05efc0f33a0eaa0762f7781b51d27c9886b8c7a3 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 7 Dec 2013 01:01:39 +0100
+Subject: [PATCH 271/277] DIET/MINOR: task: reduce struct task size by 8 bytes
+
+Just by reordering the struct task, we could shrink it by 8 bytes from
+120 to 112 bytes. A careful reordering allowed each part to be located
+closer to the hot parts it's used with, resulting in another performance
+increase of about 0.5%.
+---
+ include/types/task.h | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/include/types/task.h b/include/types/task.h
+index 405404b..0379a22 100644
+--- a/include/types/task.h
++++ b/include/types/task.h
+@@ -52,14 +52,14 @@
+ 
+ /* The base for all tasks */
+ struct task {
+-	struct eb32_node wq;		/* ebtree node used to hold the task in the wait queue */
+ 	struct eb32_node rq;		/* ebtree node used to hold the task in the run queue */
+-	int state;			/* task state : bit field of TASK_* */
+-	int expire;			/* next expiration date for this task, in ticks */
++	unsigned short state;		/* task state : bit field of TASK_* */
++	short nice;			/* the task's current nice value from -1024 to +1024 */
+ 	unsigned int calls;		/* number of times ->process() was called */
+ 	struct task * (*process)(struct task *t);  /* the function which processes the task */
+ 	void *context;			/* the task's context */
+-	int nice;			/* the task's current nice value from -1024 to +1024 */
++	struct eb32_node wq;		/* ebtree node used to hold the task in the wait queue */
++	int expire;			/* next expiration date for this task, in ticks */
+ };
+ 
+ /*
+-- 
+1.8.1.5
+

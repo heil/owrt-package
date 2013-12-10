@@ -1,0 +1,38 @@
+From 3ce88c76a05c786d4b83655b5ce9a4a047133996 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 9 Dec 2013 11:29:46 +0100
+Subject: [PATCH 205/277] BUG/MEDIUM: pattern: Pattern node has type of "struct
+ pat_idx_elt" in place of "struct eb_node"
+
+The free() function must free the "struct pat_idx_elt".
+
+This bug was introduced by commit ed66c29 (REORG: acl/pattern: extract
+pattern matching from the acl file and create pattern.c), no backport
+is needed.
+---
+ src/pattern.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/pattern.c b/src/pattern.c
+index 4f049f7..aef2a00 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -769,11 +769,14 @@ void free_pattern_list(struct list *head)
+ void free_pattern_tree(struct eb_root *root)
+ {
+ 	struct eb_node *node, *next;
++	struct pat_idx_elt *elt;
++
+ 	node = eb_first(root);
+ 	while (node) {
+ 		next = eb_next(node);
+ 		eb_delete(node);
+-		free(node);
++		elt = container_of(node, struct pat_idx_elt, node);
++		free(elt);
+ 		node = next;
+ 	}
+ }
+-- 
+1.8.1.5
+

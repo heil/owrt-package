@@ -1,0 +1,75 @@
+From 910c6aa5b7a6796740a6506216ab7eeef55ccf07 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Oct 2013 15:08:37 +0200
+Subject: [PATCH 247/277] MINOR: connection: reintroduce conn_prepare to set
+ the protocol and transport
+
+Now that we can assign conn->xprt regardless of the initialization state,
+we can reintroduce conn_prepare() to set only the protocol, the transport
+layer and initialize the transport layer's state.
+---
+ include/proto/connection.h | 13 +++++++++++--
+ src/checks.c               |  1 +
+ src/session.c              |  2 +-
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index e3b6e89..5c72a95 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -468,6 +468,17 @@ static inline int conn_sock_shutw_pending(struct connection *c)
+ 	return (c->flags & (CO_FL_DATA_WR_SH | CO_FL_SOCK_WR_SH)) == CO_FL_DATA_WR_SH;
+ }
+ 
++/* prepares a connection to work with protocol <proto> and transport <xprt>.
++ * The transport's context is initialized as well.
++ */
++static inline void conn_prepare(struct connection *conn, const struct protocol *proto, const struct xprt_ops *xprt)
++{
++	conn->ctrl = proto;
++	conn->xprt = xprt;
++	conn->xprt_st = 0;
++	conn->xprt_ctx = NULL;
++}
++
+ /* Initializes all required fields for a new connection. Note that it does the
+  * minimum acceptable initialization for a connection that already exists and
+  * is about to be reused. It also leaves the addresses untouched, which makes
+@@ -477,8 +488,6 @@ static inline void conn_init(struct connection *conn)
+ {
+ 	conn->obj_type = OBJ_TYPE_CONN;
+ 	conn->flags = CO_FL_NONE;
+-	conn->xprt_st = 0;
+-	conn->xprt_ctx = NULL;
+ 	conn->data = NULL;
+ 	conn->owner = NULL;
+ 	conn->t.sock.fd = -1; /* just to help with debugging */
+diff --git a/src/checks.c b/src/checks.c
+index 2213782..b96f13d 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1541,6 +1541,7 @@ static struct task *process_chk(struct task *t)
+ 
+ 		/* prepare a new connection */
+ 		conn_init(conn);
++		conn_prepare(conn, s->check_common.proto, s->check_common.xprt);
+ 		conn_assign(conn, &check_conn_cb, s->check_common.proto, s->check_common.xprt, check);
+ 		conn->target = &s->obj_type;
+ 
+diff --git a/src/session.c b/src/session.c
+index df1b43c..9acfa7a 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -110,8 +110,8 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 	 */
+ 	conn_init(cli_conn);
+ 	cli_conn->t.sock.fd = cfd;
+-	cli_conn->ctrl = l->proto;
+ 	cli_conn->flags |= CO_FL_ADDR_FROM_SET;
++	conn_prepare(cli_conn, l->proto, l->xprt);
+ 	cli_conn->addr.from = *addr;
+ 	cli_conn->target = &l->obj_type;
+ 
+-- 
+1.8.1.5
+
