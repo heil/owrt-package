@@ -1,0 +1,39 @@
+From 50523167ef7f68062580b6db8b715bebd3dfc492 Mon Sep 17 00:00:00 2001
+From: Godbach <nylzhaowei@gmail.com>
+Date: Wed, 11 Dec 2013 19:48:57 +0800
+Subject: [PATCH 281/283] CLEANUP: code style: use tabs to indent codes
+
+The original codes are indented by spaces and not aligned with the former line.
+It should be a convention to indent by tabs in HAProxy.
+
+Signed-off-by: Godbach <nylzhaowei@gmail.com>
+---
+ src/cfgparse.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 73a08a4..b05bfe9 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2932,12 +2932,12 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			}
+ 			else if (strcmp(args[myidx], "peers") == 0) {
+ 				myidx++;
+-                                if (!*(args[myidx])) {
+-                                        Alert("parsing [%s:%d] : stick-table: missing argument after '%s'.\n",
+-                                              file, linenum, args[myidx-1]);
+-                                        err_code |= ERR_ALERT | ERR_FATAL;
+-                                        goto out;
+-                                }
++				if (!*(args[myidx])) {
++				        Alert("parsing [%s:%d] : stick-table: missing argument after '%s'.\n",
++				              file, linenum, args[myidx-1]);
++				        err_code |= ERR_ALERT | ERR_FATAL;
++				        goto out;
++				}
+ 				curproxy->table.peers.name = strdup(args[myidx++]);
+ 			}
+ 			else if (strcmp(args[myidx], "expire") == 0) {
+-- 
+1.8.1.5
+
