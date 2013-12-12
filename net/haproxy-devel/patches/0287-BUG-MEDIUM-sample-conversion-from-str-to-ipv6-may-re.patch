@@ -1,0 +1,65 @@
+From fd1399091e6f88c3ceac8030367ad94e982dd1a1 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 11 Dec 2013 12:38:57 +0100
+Subject: [PATCH 287/287] BUG/MEDIUM: sample: conversion from str to ipv6 may
+ read data past end
+
+Applying inet_pton() to input contents is not reliable because the
+function requires a zero-terminated string. While inet_pton() will
+stop when contents do not match an IPv6 address anymore, it could
+theorically read past the end of a buffer if the data to be converted
+was at the end of a buffer (this cannot happen right now thanks to
+the reserve at the end of the buffer). At least the conversion does
+not work.
+
+Fix this by using buf2ip6() instead, which copies the string into a
+padded aread.
+
+This bug came with recent commit b805f71 (MEDIUM: sample: let the
+cast functions set their output type), no backport is needed.
+---
+ src/sample.c | 20 ++++++++------------
+ 1 file changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index 50ceb85..97e9b6e 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -451,13 +451,11 @@ static int c_int2ip(struct sample *smp)
+ 
+ static int c_str2addr(struct sample *smp)
+ {
+-	int ret;
+-
+ 	if (!buf2ip(smp->data.str.str, smp->data.str.len, &smp->data.ipv4)) {
+-		ret = inet_pton(AF_INET6, smp->data.str.str, &smp->data.ipv6);
+-		if (ret)
+-			smp->type = SMP_T_IPV6;
+-		return ret;
++		if (!buf2ip6(smp->data.str.str, smp->data.str.len, &smp->data.ipv6))
++			return 0;
++		smp->type = SMP_T_IPV6;
++		return 1;
+ 	}
+ 	smp->type = SMP_T_IPV4;
+ 	return 1;
+@@ -473,12 +471,10 @@ static int c_str2ip(struct sample *smp)
+ 
+ static int c_str2ipv6(struct sample *smp)
+ {
+-	int ret;
+-
+-	ret = inet_pton(AF_INET6, smp->data.str.str, &smp->data.ipv6);
+-	if (ret)
+-		smp->type = SMP_T_IPV6;
+-	return ret;
++	if (!buf2ip6(smp->data.str.str, smp->data.str.len, &smp->data.ipv6))
++		return 0;
++	smp->type = SMP_T_IPV6;
++	return 1;
+ }
+ 
+ static int c_bin2str(struct sample *smp)
+-- 
+1.8.1.5
+

@@ -1,0 +1,32 @@
+From cd6599150f3a12459e9fcd1cd45be207f12bb4be Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 11 Dec 2013 12:33:54 +0100
+Subject: [PATCH 286/287] CLEANUP/MINOR: standard: use the system define
+ INET6_ADDRSTRLEN in place of MAX_IP6_LEN
+
+---
+ src/standard.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/standard.c b/src/standard.c
+index 1b7fdb0..ebbc70c 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1696,12 +1696,11 @@ int buf2ip(const char *buf, size_t len, struct in_addr *dst)
+  * struct in6_addr <dst> which must be allocated by the caller.
+  * This function returns 1 in success case, otherwise zero.
+  */
+-#define MAX_IP6_LEN 45
+ int buf2ip6(const char *buf, size_t len, struct in6_addr *dst)
+ {
+-	char null_term_ip6[MAX_IP6_LEN + 1];
++	char null_term_ip6[INET6_ADDRSTRLEN + 1];
+ 
+-	if (len > MAX_IP6_LEN)
++	if (len > INET6_ADDRSTRLEN)
+ 		return 0;
+ 
+ 	memcpy(null_term_ip6, buf, len);
+-- 
+1.8.1.5
+
