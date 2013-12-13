@@ -1,0 +1,152 @@
+From 1d7ca2ec1f71168aa0e5dfab60356272fe5fbebb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 13 Dec 2013 01:32:09 +0100
+Subject: [PATCH 310/311] TESTS: add regression tests for ACL and sample
+ expression parsers
+
+These ones trigger each of the error messages in the code about
+argument and converters syntax.
+---
+ tests/test-acl-args.cfg          | 36 ++++++++++++++++++++++++++++++++++
+ tests/test-sample-fetch-args.cfg | 36 ++++++++++++++++++++++++++++++++++
+ tests/test-sample-fetch-conv.cfg | 42 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 114 insertions(+)
+ create mode 100644 tests/test-acl-args.cfg
+ create mode 100644 tests/test-sample-fetch-args.cfg
+ create mode 100644 tests/test-sample-fetch-conv.cfg
+
+diff --git a/tests/test-acl-args.cfg b/tests/test-acl-args.cfg
+new file mode 100644
+index 0000000..5946f0e
+--- /dev/null
++++ b/tests/test-acl-args.cfg
+@@ -0,0 +1,36 @@
++# This config file aims to trigger all error detection cases in the ACL
++# expression parser related to the fetch arguments.
++
++# silence some warnings
++defaults
++	mode http
++	timeout client 1s
++	timeout server 1s
++	timeout connect 1s
++
++frontend 1
++	bind :10000
++
++	# missing fetch method in ACL expression '(arg)'.
++	block if { (arg) }
++
++	# unknown fetch method 'blah' in ACL expression 'blah(arg)'.
++	block if { blah(arg) }
++
++	# missing closing ')' after arguments to fetch keyword 'req.hdr' in ACL expression 'req.hdr('.
++	block if { req.hdr( }
++
++	# cannot be triggerred : "returns type of fetch method '%s' is unknown"
++
++	# fetch method 'always_true' : no argument supported, but got 'arg' in ACL expression 'always_true(arg)'.
++	block if { always_true(arg) }
++
++	# fetch method 'req.hdr' : failed to parse 'a' as type 'signed integer' at position 2 in ACL expression 'req.hdr(a,a)'.
++	block if { req.hdr(a,a) }
++
++	# in argument to 'payload_lv', payload length must be > 0.
++	block if { payload_lv(0,0) }
++
++	# ACL keyword 'payload_lv' : expected type 'unsigned integer' at position 1, but got nothing.
++	block if { payload_lv }
++
+diff --git a/tests/test-sample-fetch-args.cfg b/tests/test-sample-fetch-args.cfg
+new file mode 100644
+index 0000000..cddf4fe
+--- /dev/null
++++ b/tests/test-sample-fetch-args.cfg
+@@ -0,0 +1,36 @@
++# This config file aims to trigger all error detection cases in the sample
++# fetch expression parser related to the fetch arguments.
++
++# silence some warnings
++defaults
++	mode http
++	timeout client 1s
++	timeout server 1s
++	timeout connect 1s
++
++frontend 1
++	bind :10000
++
++	# missing fetch method
++	http-request add-header name %[(arg)]
++
++	# unknown fetch method 'blah'
++	http-request add-header name %[blah(arg)]
++
++	# missing closing ')' after arguments to fetch keyword 'req.hdr'
++	http-request add-header name %[req.hdr(]
++
++	# cannot be triggerred : "returns type of fetch method '%s' is unknown"
++
++	# fetch method 'always_true' : no argument supported, but got 'arg'
++	http-request add-header name %[always_true(arg)]
++
++	# fetch method 'req.hdr' : failed to parse 'a' as 'signed integer' at position 2
++	http-request add-header name %[req.hdr(a,a)]
++
++	# invalid args in fetch method 'payload_lv' : payload length must be > 0
++	http-request add-header name %[payload_lv(0,0)]
++
++	# fetch method 'payload_lv' : expected type 'unsigned integer' at position 1, but got nothing
++	http-request add-header name %[payload_lv]
++
+diff --git a/tests/test-sample-fetch-conv.cfg b/tests/test-sample-fetch-conv.cfg
+new file mode 100644
+index 0000000..50eda5d
+--- /dev/null
++++ b/tests/test-sample-fetch-conv.cfg
+@@ -0,0 +1,42 @@
++# This config file aims to trigger all error detection cases in the sample
++# fetch expression parser related to the sample converters.
++
++# silence some warnings
++defaults
++	mode http
++	timeout client 1s
++	timeout server 1s
++	timeout connect 1s
++
++frontend 1
++	bind :10000
++
++	# report "missing comma after fetch keyword %s"
++	http-request add-header name %[hdr(arg))]
++
++	# report "missing comma after conv keyword %s"
++	http-request add-header name %[hdr(arg),ipmask(2))]
++
++	# report "unknown conv method '%s'"
++	http-request add-header name %[hdr(arg),blah]
++
++	# report "syntax error: missing ')' after conv keyword '%s'"
++	http-request add-header name %[hdr(arg),ipmask(2]
++
++	# no way to report "returns type of conv method '%s' is unknown"
++
++	# "conv method '%s' cannot be applied"
++	http-request add-header name %[wait_end,ipmask(2)]
++
++	# "conv method '%s' does not support any args"
++	http-request add-header name %[hdr(arg),upper()]
++
++	# "invalid arg %d in conv method '%s' : %s"
++	http-request add-header name %[hdr(arg),ipmask(a)]
++
++	# "invalid args in conv method '%s' : %s"
++	http-request add-header name %[hdr(arg),map()]
++
++	# "missing args for conv method '%s'"
++	http-request add-header name %[hdr(arg),ipmask]
++
+-- 
+1.8.1.5
+

@@ -1,0 +1,106 @@
+From 689a1df0a13a9da79169dd20288819ff9a706c31 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 13 Dec 2013 00:40:11 +0100
+Subject: [PATCH 306/311] BUG/MEDIUM: sample: simplify and fix the argument
+ parsing
+
+Some errors may be reported about missing mandatory arguments when some
+sample fetch arguments are marked as mandatory and implicit (eg: proxy
+names such as in table_cnt or be_conn).
+
+In practice the argument parser already handles all the situations very
+well, it's just that the sample fetch parser want to go beyond its role
+and starts some controls that it should not do. Simply removing these
+useless controls lets make_arg_list() create the correct argument types
+when such types are encountered.
+
+This regression was introduced by the recent use of sample_parse_expr()
+in ACLs which makes use of its own argument parser, while previously
+the arguments were parsed in the ACL function itself. No backport is
+needed.
+---
+ src/sample.c | 45 ++++++++++++++++++++-------------------------
+ 1 file changed, 20 insertions(+), 25 deletions(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index 8560a07..2a114d9 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -600,6 +600,7 @@ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, stru
+ 	unsigned long prev_type;
+ 	char *fkw = NULL;
+ 	char *ckw = NULL;
++	int err_arg;
+ 
+ 	begw = str[*idx];
+ 	for (endw = begw; *endw && *endw != '(' && *endw != ','; endw++);
+@@ -620,7 +621,8 @@ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, stru
+ 
+ 	endt = endw;
+ 	if (*endt == '(') {
+-		/* look for the end of this term */
++		/* look for the end of this term and skip the opening parenthesis */
++		endt = ++endw;
+ 		while (*endt && *endt != ')')
+ 			endt++;
+ 		if (*endt != ')') {
+@@ -631,7 +633,9 @@ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, stru
+ 
+ 	/* At this point, we have :
+ 	 *   - begw : beginning of the keyword
+-	 *   - endw : end of the keyword (points to next delimiter or '(')
++	 *   - endw : end of the keyword, first character not part of keyword
++	 *            nor the opening parenthesis (so first character of args
++	 *            if present).
+ 	 *   - endt : end of the term (=endw or last parenthesis if args are present)
+ 	 */
+ 
+@@ -649,31 +653,22 @@ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, stru
+ 	expr->fetch = fetch;
+ 	expr->arg_p = empty_arg_list;
+ 
+-	if (endt != endw) {
+-		int err_arg;
+-
+-		if (!fetch->arg_mask) {
+-			memprintf(err_msg, "fetch method '%s' does not support any args", fkw);
+-			goto out_error;
+-		}
+-
+-		al->kw = expr->fetch->kw;
+-		al->conv = NULL;
+-		if (make_arg_list(endw + 1, endt - endw - 1, fetch->arg_mask, &expr->arg_p, err_msg, NULL, &err_arg, al) < 0) {
+-			memprintf(err_msg, "invalid arg %d in fetch method '%s' : %s", err_arg+1, fkw, *err_msg);
+-			goto out_error;
+-		}
+-
+-		if (!expr->arg_p)
+-			expr->arg_p = empty_arg_list;
++	/* Note that we call the argument parser even with an empty string,
++	 * this allows it to automatically create entries for mandatory
++	 * implicit arguments (eg: local proxy name).
++	 */
++	al->kw = expr->fetch->kw;
++	al->conv = NULL;
++	if (make_arg_list(endw, endt - endw, fetch->arg_mask, &expr->arg_p, err_msg, NULL, &err_arg, al) < 0) {
++		memprintf(err_msg, "fetch method '%s' : %s", fkw, *err_msg);
++		goto out_error;
++	}
+ 
+-		if (fetch->val_args && !fetch->val_args(expr->arg_p, err_msg)) {
+-			memprintf(err_msg, "invalid args in fetch method '%s' : %s", fkw, *err_msg);
+-			goto out_error;
+-		}
++	if (!expr->arg_p) {
++		expr->arg_p = empty_arg_list;
+ 	}
+-	else if (ARGM(fetch->arg_mask)) {
+-		memprintf(err_msg, "missing args for fetch method '%s'", fkw);
++	else if (fetch->val_args && !fetch->val_args(expr->arg_p, err_msg)) {
++		memprintf(err_msg, "invalid args in fetch method '%s' : %s", fkw, *err_msg);
+ 		goto out_error;
+ 	}
+ 
+-- 
+1.8.1.5
+

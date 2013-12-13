@@ -1,0 +1,77 @@
+From 39e258fcee94f26fc29b732225decc418bfb930a Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 6 Dec 2013 20:38:46 +0100
+Subject: [PATCH 296/311] MINOR: regex: Copy the original regex expression into
+ string.
+
+This is useful for the debug or for search regex in maps.
+---
+ include/common/regex.h |  3 +++
+ src/regex.c            | 10 ++++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/include/common/regex.h b/include/common/regex.h
+index 9789ec3..a3d1b5f 100644
+--- a/include/common/regex.h
++++ b/include/common/regex.h
+@@ -47,6 +47,7 @@ struct my_regex {
+ #else /* no PCRE */
+ 	regex_t regex;
+ #endif
++	char *regstr; /* this contain the original string */
+ };
+ 
+ /* what to do when a header matches a regex */
+@@ -108,6 +109,8 @@ static inline void regex_free(struct my_regex *preg) {
+ #else
+ 	regfree(&preg->regex);
+ #endif
++	free(preg->regstr);
++	preg->regstr = NULL;
+ }
+ 
+ #endif /* _COMMON_REGEX_H */
+diff --git a/src/regex.c b/src/regex.c
+index 7a76940..64f93c3 100644
+--- a/src/regex.c
++++ b/src/regex.c
+@@ -124,6 +124,13 @@ const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
+ 
+ int regex_comp(const char *str, struct my_regex *regex, int cs, int cap, char **err)
+ {
++	/* copy the original regex format */
++	regex->regstr = strdup(str);
++	if (!regex->regstr) {
++		memprintf(err, "out of memory");
++		return 0;
++	}
++
+ #ifdef USE_PCRE_JIT
+ 	int flags = 0;
+ 	const char *error;
+@@ -136,12 +143,14 @@ int regex_comp(const char *str, struct my_regex *regex, int cs, int cap, char **
+ 
+ 	regex->reg = pcre_compile(str, flags, &error, &erroffset, NULL);
+ 	if (!regex->reg) {
++		free(regex->regstr);
+ 		memprintf(err, "regex '%s' is invalid (error=%s, erroffset=%d)", str, error, erroffset);
+ 		return 0;
+ 	}
+ 
+ 	regex->extra = pcre_study(regex->reg, PCRE_STUDY_JIT_COMPILE, &error);
+ 	if (!regex->extra) {
++		free(regex->regstr);
+ 		pcre_free(regex->reg);
+ 		memprintf(err, "failed to compile regex '%s' (error=%s)", str, error);
+ 		return 0;
+@@ -155,6 +164,7 @@ int regex_comp(const char *str, struct my_regex *regex, int cs, int cap, char **
+ 		flags |= REG_NOSUB;
+ 
+ 	if (regcomp(&regex->regex, str, flags) != 0) {
++		free(regex->regstr);
+ 		memprintf(err, "regex '%s' is invalid", str);
+ 		return 0;
+ 	}
+-- 
+1.8.1.5
+

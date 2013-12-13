@@ -1,0 +1,197 @@
+From e3ded59706cd8ad6d4739ab94c67be886ab61b58 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 6 Dec 2013 15:36:54 +0100
+Subject: [PATCH 290/311] MEDIUM: acl: Last patch change the output type
+
+This patch remove the compatibility check from the input type and the
+match method. Now, it checks if a casts from the input type to output
+type exists and the pattern_exec_match() function apply casts before
+each pattern matching.
+---
+ doc/configuration.txt   | 22 +++++++++++-----------
+ include/proto/sample.h  | 13 +++++++++++++
+ include/types/pattern.h |  1 +
+ src/acl.c               | 22 +++-------------------
+ src/pattern.c           | 33 ++++++++++++++++++++++++++++-----
+ 5 files changed, 56 insertions(+), 35 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index dda20e3..4043e5c 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -8746,27 +8746,27 @@ the method is implicit and will work by default without "-m".
+     +----------------------+---------+---------+---------+---------+---------+
+     | none (presence only) |  found  |  found  |  found  |  found  |  found  |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | none (boolean value) |  *bool  |   bool  |         |         |         |
++    | none (boolean value) |  *bool  |   bool  |         |   bool  |         |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | integer (value)      |   int   |   *int  |         |         |         |
++    | integer (value)      |   int   |   *int  |   int   |   int   |         |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | integer (length)     |         |         |         |   len   |   len   |
++    | integer (length)     |   len   |   len   |   len   |   len   |   len   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | IP address           |         |         |   *ip   |         |         |
++    | IP address           |         |         |   *ip   |    ip   |    ip   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | exact string         |         |         |         |   str   |   str   |
++    | exact string         |   str   |   str   |   str   |   str   |   str   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | prefix               |         |         |         |   beg   |   beg   |
++    | prefix               |   beg   |   beg   |   beg   |   beg   |   beg   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | suffix               |         |         |         |   end   |   end   |
++    | suffix               |   end   |   end   |   end   |   end   |   end   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | substring            |         |         |         |   sub   |   sub   |
++    | substring            |   sub   |   sub   |   sub   |   sub   |   sub   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | subdir               |         |         |         |   dir   |   dir   |
++    | subdir               |   dir   |   dir   |   dir   |   dir   |   dir   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | domain               |         |         |         |   dom   |   dom   |
++    | domain               |   dom   |   dom   |   dom   |   dom   |   dom   |
+     +----------------------+---------+---------+---------+---------+---------+
+-    | regex                |         |         |         |   reg   |   reg   |
++    | regex                |   reg   |   reg   |   reg   |   reg   |   reg   |
+     +----------------------+---------+---------+---------+---------+---------+
+     | hex block            |         |         |         |   bin   |   bin   |
+     +----------------------+---------+---------+---------+---------+---------+
+diff --git a/include/proto/sample.h b/include/proto/sample.h
+index 20c2954..79d123c 100644
+--- a/include/proto/sample.h
++++ b/include/proto/sample.h
+@@ -41,4 +41,17 @@ struct sample_fetch *find_sample_fetch(const char *kw, int len);
+ int smp_resolve_args(struct proxy *p);
+ int smp_expr_output_type(struct sample_expr *expr);
+ 
++/*
++ * This function just apply a cast on sample. It returns 0 if the cast is not
++ * avalaible or if the cast fails, otherwise returns 1. It does not modify the
++ * input sample on failure.
++ */
++static inline
++int sample_convert(struct sample *sample, int req_type)
++{
++	if (!sample_casts[sample->type][req_type])
++		return 0;
++	return sample_casts[sample->type][req_type](sample);
++}
++
+ #endif /* _PROTO_SAMPLE_H */
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 7a00e8b..d6136c2 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -161,5 +161,6 @@ struct pattern_expr {
+ extern char *pat_match_names[PAT_MATCH_NUM];
+ extern int (*pat_parse_fcts[PAT_MATCH_NUM])(const char **, struct pattern *, struct sample_storage *, int *, char **);
+ extern enum pat_match_res (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern *);
++extern int pat_match_types[PAT_MATCH_NUM];
+ 
+ #endif /* _TYPES_PATTERN_H */
+diff --git a/src/acl.c b/src/acl.c
+index 62a58f6..be20959 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -474,28 +474,12 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			}
+ 
+ 			/* Note: -m found is always valid, bool/int are compatible, str/bin/reg/len are compatible */
+-			if (idx == PAT_MATCH_FOUND ||                           /* -m found */
+-			    ((idx == PAT_MATCH_BOOL || idx == PAT_MATCH_INT) && /* -m bool/int */
+-			     (cur_type == SMP_T_BOOL ||
+-			      cur_type == SMP_T_UINT ||
+-			      cur_type == SMP_T_SINT)) ||
+-			    (idx == PAT_MATCH_IP &&                             /* -m ip */
+-			     (cur_type == SMP_T_IPV4 ||
+-			      cur_type == SMP_T_IPV6)) ||
+-			    ((idx == PAT_MATCH_BIN || idx == PAT_MATCH_LEN || idx == PAT_MATCH_STR ||
+-			      idx == PAT_MATCH_BEG || idx == PAT_MATCH_SUB || idx == PAT_MATCH_DIR ||
+-			      idx == PAT_MATCH_DOM || idx == PAT_MATCH_END || idx == PAT_MATCH_REG) &&  /* strings */
+-			     (cur_type == SMP_T_STR ||
+-			      cur_type == SMP_T_BIN ||
+-			      cur_type == SMP_T_CSTR ||
+-			      cur_type == SMP_T_CBIN))) {
+-				expr->pat.parse = pat_parse_fcts[idx];
+-				expr->pat.match = pat_match_fcts[idx];
+-			}
+-			else {
++			if (!sample_casts[cur_type][pat_match_types[idx]]) {
+ 				memprintf(err, "matching method '%s' cannot be used with fetch keyword '%s'", args[1], expr->kw);
+ 				goto out_free_expr;
+ 			}
++			expr->pat.parse = pat_parse_fcts[idx];
++			expr->pat.match = pat_match_fcts[idx];
+ 			args++;
+ 		}
+ 		else if ((*args)[1] == '-') {
+diff --git a/src/pattern.c b/src/pattern.c
+index 3f25607..084f73a 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -20,6 +20,7 @@
+ #include <types/pattern.h>
+ 
+ #include <proto/pattern.h>
++#include <proto/sample.h>
+ 
+ #include <ebsttree.h>
+ 
+@@ -71,6 +72,23 @@ enum pat_match_res (*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct patt
+ 	[PAT_MATCH_REG]   = pat_match_reg,
+ };
+ 
++/* Just used for checking configuration compatibility */
++int pat_match_types[PAT_MATCH_NUM] = {
++	[PAT_MATCH_FOUND] = SMP_T_UINT,
++	[PAT_MATCH_BOOL]  = SMP_T_UINT,
++	[PAT_MATCH_INT]   = SMP_T_UINT,
++	[PAT_MATCH_IP]    = SMP_T_ADDR,
++	[PAT_MATCH_BIN]   = SMP_T_CBIN,
++	[PAT_MATCH_LEN]   = SMP_T_CSTR,
++	[PAT_MATCH_STR]   = SMP_T_CSTR,
++	[PAT_MATCH_BEG]   = SMP_T_CSTR,
++	[PAT_MATCH_SUB]   = SMP_T_CSTR,
++	[PAT_MATCH_DIR]   = SMP_T_CSTR,
++	[PAT_MATCH_DOM]   = SMP_T_CSTR,
++	[PAT_MATCH_END]   = SMP_T_CSTR,
++	[PAT_MATCH_REG]   = SMP_T_CSTR,
++};
++
+ /*
+  * These functions are exported and may be used by any other component.
+  */
+@@ -949,10 +967,14 @@ enum pat_match_res pattern_exec_match(struct pattern_expr *expr, struct sample *
+ 	else {
+ 		if (!eb_is_empty(&expr->pattern_tree)) {
+ 			/* a tree is present, let's check what type it is */
+-			if (expr->match == pat_match_str)
+-				node = pat_lookup_str(smp, expr);
+-			else if (expr->match == pat_match_ip)
+-				node = pat_lookup_ip(smp, expr);
++			if (expr->match == pat_match_str) {
++				if (sample_convert(smp, SMP_T_STR))
++					node = pat_lookup_str(smp, expr);
++			}
++			else if (expr->match == pat_match_ip) {
++				if (sample_convert(smp, SMP_T_IPV4))
++					node = pat_lookup_ip(smp, expr);
++			}
+ 			if (node) {
+ 				pat_res |= PAT_MATCH;
+ 				elt = ebmb_entry(node, struct pat_idx_elt, node);
+@@ -965,7 +987,8 @@ enum pat_match_res pattern_exec_match(struct pattern_expr *expr, struct sample *
+ 		list_for_each_entry(pattern, &expr->patterns, list) {
+ 			if (pat_res == PAT_MATCH)
+ 				break;
+-			pat_res |= expr->match(smp, pattern);
++			if (sample_convert(smp, pattern->expect_type))
++				pat_res |= expr->match(smp, pattern);
+ 			if (sample)
+ 				*sample = pattern->smp;
+ 		}
+-- 
+1.8.1.5
+
