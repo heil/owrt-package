@@ -12,15 +12,11 @@ polling, resulting in a busy spinning loop.
 Thanks to Sander Klein and Guillaume Castagnino for reporting this bug.
 
 No backport is needed.
----
- src/stream_interface.c | 2 ++
- 1 file changed, 2 insertions(+)
-
-diff --git a/src/stream_interface.c b/src/stream_interface.c
-index 5c4633b..bf0a400 100644
---- a/src/stream_interface.c
-+++ b/src/stream_interface.c
-@@ -508,6 +508,8 @@ static void si_idle_conn_null_cb(struct connection *conn)
+Index: haproxy-1.5-dev21/src/stream_interface.c
+===================================================================
+--- haproxy-1.5-dev21.orig/src/stream_interface.c
++++ haproxy-1.5-dev21/src/stream_interface.c
+@@ -508,6 +508,8 @@ static void si_idle_conn_null_cb(struct 
  	/* disable draining if we were called and have no drain function */
  	if (!conn->ctrl->drain)
  		__conn_data_stop_recv(conn);
@@ -29,6 +25,3 @@ index 5c4633b..bf0a400 100644
  }
  
  /* Callback to be used by connection I/O handlers when some activity is detected
--- 
-1.8.1.5
-
