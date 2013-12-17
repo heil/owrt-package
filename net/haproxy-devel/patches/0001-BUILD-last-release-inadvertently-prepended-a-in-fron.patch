@@ -1,0 +1,22 @@
+From 783e1cf322bce051a64c5d0ee9e19347c0625ee3 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 17 Dec 2013 11:11:16 +0100
+Subject: [PATCH 1/2] BUILD: last release inadvertently prepended a "+" in
+ front of the date
+
+No impact.
+---
+ VERDATE | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/VERDATE b/VERDATE
+index 4ddbe04..f897dc8 100644
+--- a/VERDATE
++++ b/VERDATE
+@@ -1,2 +1,2 @@
+-+$Format:%ci$
++$Format:%ci$
+ 2013/12/17
+-- 
+1.8.1.5
+
