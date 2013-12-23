@@ -1,0 +1,33 @@
+From 9f708ab7070bce622d867eca3947256d50d9619d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 23 Dec 2013 14:04:17 +0100
+Subject: [PATCH 5/6] BUG/MINOR: checks: successful check completion must not
+ re-enable MAINT servers
+
+If a server is switched to maintenance mode while a check is in progress,
+the successful completion of the check must not switch it back up. This
+is still a consequence of using the same function set_server_up() for
+every state change. Bug reported by Igor at owind.
+
+This fix should be backported to 1.4 which is affected as well.
+---
+ src/checks.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 115cc85..bdb8f07 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1682,7 +1682,8 @@ static struct task *process_chk(struct task *t)
+ 					set_server_disabled(check);
+ 			}
+ 
+-			if (check->health < check->rise + check->fall - 1) {
++			if (!(s->state & SRV_MAINTAIN) &&
++			    check->health < check->rise + check->fall - 1) {
+ 				check->health++; /* was bad, stays for a while */
+ 				set_server_up(check);
+ 			}
+-- 
+1.8.1.5
+
