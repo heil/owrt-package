@@ -1,0 +1,32 @@
+From 72575509caed8cf12cf8b223d6e72421578417f8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 24 Dec 2013 14:41:35 +0100
+Subject: [PATCH 7/9] BUG/MINOR: http: always disable compression on HTTP/1.0
+
+Compression is normally disabled on HTTP/1.0 since it does not
+support chunked encoded responses. But the test was incomplete, and
+Bertrand Jacquin reported a case where if the server responded using
+1.1 to an 1.0 request, then haproxy still used to compress (and of
+course the client could not understand the response).
+
+No backport is needed, this is 1.5-specific.
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 624a51f..72259c9 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2143,7 +2143,7 @@ int select_compression_response_header(struct session *s, struct buffer *res)
+ 		goto fail;
+ 
+ 	/* HTTP < 1.1 should not be compressed */
+-	if (!(msg->flags & HTTP_MSGF_VER_11))
++	if (!(msg->flags & HTTP_MSGF_VER_11) || !(txn->req.flags & HTTP_MSGF_VER_11))
+ 		goto fail;
+ 
+ 	/* 200 only */
+-- 
+1.8.1.5
+

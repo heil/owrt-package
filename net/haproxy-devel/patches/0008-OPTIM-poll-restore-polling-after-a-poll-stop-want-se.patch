@@ -1,0 +1,53 @@
+From 12082663561aa2189d243328060c399f2fd95860 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 27 Dec 2013 20:11:50 +0100
+Subject: [PATCH 8/9] OPTIM: poll: restore polling after a poll/stop/want
+ sequence
+
+If a file descriptor is being polled, and it stopped (eg: buffer full
+or end of response), then re-enabled, currently what happens is that
+the polling is disabled, then the fd is enabled in speculative mode,
+an I/O attempt is made, it loses (otherwise the FD would surely not
+have been polled), and the polled is enabled again.
+
+This is too bad, especially with HTTP keep-alive on the server side
+where all operations are performed at once before going back to the
+poll loop.
+
+Now we improve the behaviour by ensuring that if an fd is still being
+polled, when it's enabled after having been disabled, we re-enable the
+polling. Doing so saves a number of syscalls and useless wakeups, and
+results in a significant performance gain on HTTP keep-alive. A 11%
+increase has been observed on the HTTP request rate in keep-alive
+thanks to this.
+
+It could be considered as a bug fix, but there was no harm with the
+current behaviour, except extra syscalls.
+---
+ include/proto/fd.h | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/include/proto/fd.h b/include/proto/fd.h
+index 7fe616e..472665f 100644
+--- a/include/proto/fd.h
++++ b/include/proto/fd.h
+@@ -171,7 +171,15 @@ static inline void fd_ev_set(int fd, int dir)
+ 	 */
+ 	if (i & (FD_EV_ACTIVE << dir))
+ 		return; /* already in desired state */
+-	fdtab[fd].spec_e |= (FD_EV_ACTIVE << dir);
++
++	/* If we're touching an FD which is still being polled, and was
++	 * recently disabled, we re-enable polling in order not to perform
++	 * a syscall dance and to avoid a missed speculative event.
++	 */
++	if ((((unsigned int)fdtab[fd].spec_e) >> 4) & (FD_EV_POLLED << dir))
++		fdtab[fd].spec_e ^= i ^ (FD_EV_POLLED << dir);
++	else
++		fdtab[fd].spec_e |= (FD_EV_ACTIVE << dir);
+ 	updt_fd(fd); /* need an update entry to change the state */
+ }
+ 
+-- 
+1.8.1.5
+
