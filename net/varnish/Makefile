@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=varnish
-PKG_VERSION:=3.0.4
+PKG_VERSION:=3.0.5
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://repo.varnish-cache.org/source/
-PKG_MD5SUM:=a130ce9c3504b9603a46542635e18701
+PKG_MD5SUM:=674d44775cc927aee4601edb37f60198
 
 PKG_FIXUP:=autoreconf
 
