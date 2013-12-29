@@ -1,0 +1,27 @@
+From b8006232bf2795a4803053640e593137f90bbffd Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 28 Dec 2013 21:48:56 +0100
+Subject: [PATCH 15/16] BUG/MEDIUM: stats: fix HTTP/1.0 breakage introduced in
+ previous patch
+
+Some debugging code was left in the code and committed, which breaks 1.0.
+---
+ src/dumpstats.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 9068634..bded907 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4151,7 +4151,7 @@ static int stats_send_http_headers(struct stream_interface *si)
+ 
+ 	if (appctx->ctx.stats.flags & STAT_CHUNKED)
+ 		chunk_appendf(&trash, "Transfer-Encoding: chunked\r\n");
+-	else if (appctx->ctx.stats.flags & STAT_CHUNKED)
++	else
+ 		chunk_appendf(&trash, "\r\n");
+ 
+ 	s->txn.status = 200;
+-- 
+1.8.1.5
+

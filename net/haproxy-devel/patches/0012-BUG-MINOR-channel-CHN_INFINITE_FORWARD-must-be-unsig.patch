@@ -1,0 +1,31 @@
+From 983eb31fd197abc3082f0d3691059adae595d534 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 28 Dec 2013 19:16:26 +0100
+Subject: [PATCH 12/16] BUG/MINOR: channel: CHN_INFINITE_FORWARD must be
+ unsigned
+
+This value is stored as unsigned in chn->to_forward. Having it defined
+as signed makes it impossible to pass channel_forward() a previously
+saved value because the argument will be zero-extended during the
+conversion to long long, while the test will be performed using sign
+extension. There is no impact on existing code right now.
+---
+ include/types/channel.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/types/channel.h b/include/types/channel.h
+index 42160af..7f524c1 100644
+--- a/include/types/channel.h
++++ b/include/types/channel.h
+@@ -164,7 +164,7 @@
+ 
+ 
+ /* Magic value to forward infinite size (TCP, ...), used with ->to_forward */
+-#define CHN_INFINITE_FORWARD    MAX_RANGE(int)
++#define CHN_INFINITE_FORWARD    MAX_RANGE(unsigned int)
+ 
+ /* needed for a declaration below */
+ struct session;
+-- 
+1.8.1.5
+
