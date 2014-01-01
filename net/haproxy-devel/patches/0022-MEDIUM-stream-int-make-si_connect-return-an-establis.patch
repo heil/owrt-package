@@ -1,0 +1,107 @@
+From 9e5a3aacf42204cc55ac819f127c37a56fba132d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 31 Dec 2013 23:32:12 +0100
+Subject: [PATCH 22/24] MEDIUM: stream-int: make si_connect() return an
+ established state when possible
+
+si_connect() used to only return SI_ST_CON. But it already detect the
+connection reuse and is the function which avoids calling connect().
+So it already knows the connection is valid and reuse. Thus we make it
+return SI_ST_EST when a connection is reused. This means that
+connect_server() can return this state and sess_update_stream_int()
+as well.
+
+Thanks to this change, we don't need to leave process_session() in
+SI_ST_CON state to immediately enter it again to switch to SI_ST_EST.
+Implementing this removes one call to process_session() per request
+in keep-alive mode. We're now at 2 calls per request, which is the
+minimum (one for the request and another one for the response). The
+number of calls to http_wait_for_response() has also dropped from 2
+to one.
+
+Tests indicate a performance gain of about 2.6% in request rate in
+keep-alive mode. There should be no gain in http-server-close() since
+we don't use this faster path.
+---
+ include/proto/stream_interface.h | 15 +++++++++------
+ src/session.c                    | 12 ++++++++----
+ 2 files changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/include/proto/stream_interface.h b/include/proto/stream_interface.h
+index 6d4da78..418fc83 100644
+--- a/include/proto/stream_interface.h
++++ b/include/proto/stream_interface.h
+@@ -323,24 +323,27 @@ static inline int si_connect(struct stream_interface *si)
+ 		ret = conn->ctrl->connect(conn, !channel_is_empty(si->ob), 0);
+ 		if (ret != SN_ERR_NONE)
+ 			return ret;
++
++		/* we need to be notified about connection establishment */
++		conn->flags |= CO_FL_WAKE_DATA;
++
++		/* we're in the process of establishing a connection */
++		si->state = SI_ST_CON;
+ 	}
+ 	else if (!channel_is_empty(si->ob)) {
+ 		/* reuse the existing connection, we'll have to send a
+ 		 * request there.
+ 		 */
+ 		conn_data_want_send(conn);
++
++		/* the connection is established */
++		si->state = SI_ST_EST;
+ 	}
+ 
+ 	/* needs src ip/port for logging */
+ 	if (si->flags & SI_FL_SRC_ADDR)
+ 		conn_get_from_addr(conn);
+ 
+-	/* we need to be notified about connection establishment */
+-	conn->flags |= CO_FL_WAKE_DATA;
+-
+-	/* we're in the process of establishing a connection */
+-	si->state = SI_ST_CON;
+-
+ 	return ret;
+ }
+ 
+diff --git a/src/session.c b/src/session.c
+index de78e7e..b248633 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -957,8 +957,9 @@ static void sess_establish(struct session *s, struct stream_interface *si)
+ 
+ /* Update stream interface status for input states SI_ST_ASS, SI_ST_QUE, SI_ST_TAR.
+  * Other input states are simply ignored.
+- * Possible output states are SI_ST_CLO, SI_ST_TAR, SI_ST_ASS, SI_ST_REQ, SI_ST_CON.
+- * Flags must have previously been updated for timeouts and other conditions.
++ * Possible output states are SI_ST_CLO, SI_ST_TAR, SI_ST_ASS, SI_ST_REQ, SI_ST_CON
++ * and SI_ST_EST. Flags must have previously been updated for timeouts and other
++ * conditions.
+  */
+ static void sess_update_stream_int(struct session *s, struct stream_interface *si)
+ {
+@@ -980,7 +981,7 @@ static void sess_update_stream_int(struct session *s, struct stream_interface *s
+ 		srv = objt_server(s->target);
+ 
+ 		if (conn_err == SN_ERR_NONE) {
+-			/* state = SI_ST_CON now */
++			/* state = SI_ST_CON or SI_ST_EST now */
+ 			if (srv)
+ 				srv_inc_sess_ctr(srv);
+ 			return;
+@@ -2225,7 +2226,10 @@ struct task *process_session(struct task *t)
+ 			if (s->si[1].state == SI_ST_REQ)
+ 				sess_prepare_conn_req(s, &s->si[1]);
+ 
+-			/* applets directly go to the ESTABLISHED state */
++			/* applets directly go to the ESTABLISHED state. Similarly,
++			 * servers experience the same fate when their connection
++			 * is reused.
++			 */
+ 			if (unlikely(s->si[1].state == SI_ST_EST))
+ 				sess_establish(s, &s->si[1]);
+ 
+-- 
+1.8.1.5
+

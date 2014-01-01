@@ -1,0 +1,70 @@
+From 9fe7aae6eb4b0576832bfaf5b10fa97cbbdf34b5 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 31 Dec 2013 23:47:37 +0100
+Subject: [PATCH 23/24] MINOR: checks: use an inline function for
+ health_adjust()
+
+This function is called twice per request, and does almost always nothing.
+Better use an inline version to avoid entering it when we can.
+
+About 0.5% additional performance was gained this way.
+---
+ include/proto/checks.h | 14 +++++++++++++-
+ src/checks.c           |  9 ++++-----
+ 2 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/include/proto/checks.h b/include/proto/checks.h
+index f4f9c49..17ed803 100644
+--- a/include/proto/checks.h
++++ b/include/proto/checks.h
+@@ -30,10 +30,22 @@ const char *get_check_status_info(short check_status);
+ void set_server_down(struct check *check);
+ void set_server_up(struct check *check);
+ int start_checks();
+-void health_adjust(struct server *s, short status);
++void __health_adjust(struct server *s, short status);
+ 
+ extern struct data_cb check_conn_cb;
+ 
++/* Use this one only. This inline version only ensures that we don't
++ * call the function when the observe mode is disabled.
++ */
++static inline void health_adjust(struct server *s, short status)
++{
++	/* return now if observing nor health check is not enabled */
++	if (!s->observe || !s->check.task)
++		return;
++
++	return __health_adjust(s, status);
++}
++
+ #endif /* _PROTO_CHECKS_H */
+ 
+ /*
+diff --git a/src/checks.c b/src/checks.c
+index c055017..c302866 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -641,15 +641,14 @@ static void check_failed(struct check *check)
+ 		set_server_down(check);
+ }
+ 
+-void health_adjust(struct server *s, short status)
++/* note: use health_adjust() only, which first checks that the observe mode is
++ * enabled.
++ */
++void __health_adjust(struct server *s, short status)
+ {
+ 	int failed;
+ 	int expire;
+ 
+-	/* return now if observing nor health check is not enabled */
+-	if (!s->observe || !s->check.task)
+-		return;
+-
+ 	if (s->observe >= HANA_OBS_SIZE)
+ 		return;
+ 
+-- 
+1.8.1.5
+
