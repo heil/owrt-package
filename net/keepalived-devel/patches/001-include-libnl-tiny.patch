@@ -1,0 +1,13 @@
+Index: keepalived-1.2.10/keepalived/libipvs-2.6/libipvs.c
+===================================================================
+--- keepalived-1.2.10.orig/keepalived/libipvs-2.6/libipvs.c
++++ keepalived-1.2.10/keepalived/libipvs-2.6/libipvs.c
+@@ -20,6 +20,8 @@
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ 
++#include "libnl-tiny/netlink/errno.h"
++
+ #include "libipvs.h"
+ 
+ typedef struct ipvs_servicedest_s {

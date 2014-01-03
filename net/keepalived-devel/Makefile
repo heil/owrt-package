@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=keepalived-devel
-PKG_VERSION:=1.2.9
-PKG_RELEASE:=2
+PKG_VERSION:=1.2.10
+PKG_RELEASE:=1
 
 PKG_SOURCE:=keepalived-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:= http://www.keepalived.org/software
-PKG_MD5SUM:=adfad98a2cc34230867d794ebc633492
+PKG_MD5SUM:=d838c23d80682650315d1ae447dad48a
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/keepalived-$(PKG_VERSION)
 
@@ -27,7 +27,8 @@ define Package/keepalived-devel
   URL:=http://www.keepalived.org/
   DEPENDS:=+libopenssl +libpcre +libltdl +libpopt +ipvsadm +kmod-ipvs-core +kmod-ipvs-dh +kmod-ipvs-ftp +kmod-ipvs-lblc +kmod-ipvs-lblcr \
 	+kmod-ipvs-lc +kmod-ipvs-nq +kmod-ipvs-pe-sip +kmod-ipvs-rr +kmod-ipvs-sed +kmod-ipvs-sh +kmod-ipvs-wlc +kmod-ipvs-wrr +kmod-ipt-nathelper-extra \
-	+iptables-mod-nat-extra
+	+iptables-mod-nat-extra \
+	+libnl-tiny
 
 endef
 
@@ -50,6 +51,9 @@ CONFIGURE_ARGS+= \
 CONFIGURE_VARS+= \
 	ac_cv_file_$(call acvar,$(LINUX_DIR)/net/core/link_watch.c)=yes \
 	ac_cv_lib_nl_nl_socket_modify_cb=no
+
+
+TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include 
 
 define Build/Compile
 	$(MAKE) -C $(PKG_BUILD_DIR) \
