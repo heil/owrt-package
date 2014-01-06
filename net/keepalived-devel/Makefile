@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=keepalived-devel
 PKG_VERSION:=1.2.10
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=keepalived-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:= http://www.keepalived.org/software
@@ -52,8 +52,6 @@ CONFIGURE_VARS+= \
 	ac_cv_file_$(call acvar,$(LINUX_DIR)/net/core/link_watch.c)=yes \
 	ac_cv_lib_nl_nl_socket_modify_cb=no
 
-
-TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include 
 
 define Build/Compile
 	$(MAKE) -C $(PKG_BUILD_DIR) \
