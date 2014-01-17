@@ -1,0 +1,15 @@
+Index: paxctl-0.7/Makefile
+===================================================================
+--- paxctl-0.7.orig/Makefile
++++ paxctl-0.7/Makefile
+@@ -19,8 +19,8 @@ $(PROG).o: $(PROG).c $(PROG).h $(PROG)-e
+ 
+ install: $(PROG)
+ #	$(MKDIR) $(DESTDIR)/sbin $(DESTDIR)$(MANDIR)
+-	$(INSTALL) -D --owner 0 --group 0 --mode a=rx $(PROG) $(DESTDIR)/sbin/$(PROG)
+-	$(INSTALL) -D --owner 0 --group 0 --mode a=r $(PROG).1 $(DESTDIR)/$(MANDIR)/$(PROG).1
++	$(INSTALL) -D --mode a=rx $(PROG) $(DESTDIR)/sbin/$(PROG)
++	$(INSTALL) -D --mode a=r $(PROG).1 $(DESTDIR)/$(MANDIR)/$(PROG).1
+ 
+ clean:
+ 	$(RM) -f $(PROG) $(PROG).o core
