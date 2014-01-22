@@ -1,0 +1,100 @@
+From 46be2e50396be22c54e781fd5accdbee1ef70115 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 20 Jan 2014 12:10:52 +0100
+Subject: [PATCH 38/41] MEDIUM: connection: update callers of ctrl->drain() to
+ use conn_drain()
+
+Now we can more safely rely on the connection state to decide how to
+drain and what to do when data are drained. Callers don't need to
+manipulate the file descriptor's state anymore.
+
+Note that it also removes the need for the fix ea90063 ("BUG/MEDIUM:
+stream-int: fix the keep-alive idle connection handler") since conn_drain()
+correctly sets the polling flags.
+---
+ src/checks.c           | 10 ++--------
+ src/ssl_sock.c         |  6 ++----
+ src/stream_interface.c | 10 ++++++----
+ 3 files changed, 10 insertions(+), 16 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 4682b2c..b990d61 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1445,10 +1445,7 @@ static int wake_srv_chk(struct connection *conn)
+ 		/* We're here because nobody wants to handle the error, so we
+ 		 * sure want to abort the hard way.
+ 		 */
+-		if (conn_ctrl_ready(conn) && !(conn->flags & CO_FL_SOCK_RD_SH)) {
+-			if (!(conn->flags & CO_FL_WAIT_RD) && conn->ctrl->drain && conn->ctrl->drain(conn->t.sock.fd) > 0)
+-				fdtab[conn->t.sock.fd].linger_risk = 0;
+-		}
++		conn_drain(conn);
+ 		conn_force_close(conn);
+ 	}
+ 	return 0;
+@@ -1664,10 +1661,7 @@ static struct task *process_chk(struct task *t)
+ 			 * as a failed response coupled with "observe layer7" caused the
+ 			 * server state to be suddenly changed.
+ 			 */
+-			if (conn_ctrl_ready(conn) && !(conn->flags & CO_FL_SOCK_RD_SH)) {
+-				if (!(conn->flags & CO_FL_WAIT_RD) && conn->ctrl->drain && conn->ctrl->drain(conn->t.sock.fd) > 0)
+-					fdtab[conn->t.sock.fd].linger_risk = 0;
+-			}
++			conn_drain(conn);
+ 			conn_force_close(conn);
+ 		}
+ 
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 87a2a58..0cfcca7 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1231,8 +1231,7 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ 				 * TCP sockets. We first try to drain possibly pending
+ 				 * data to avoid this as much as possible.
+ 				 */
+-				if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl && conn->ctrl->drain)
+-					conn->ctrl->drain(conn->t.sock.fd);
++				conn_drain(conn);
+ 				if (!conn->err_code)
+ 					conn->err_code = CO_ER_SSL_HANDSHAKE;
+ 				goto out_error;
+@@ -1282,8 +1281,7 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ 			 * TCP sockets. We first try to drain possibly pending
+ 			 * data to avoid this as much as possible.
+ 			 */
+-			if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl && conn->ctrl->drain)
+-				conn->ctrl->drain(conn->t.sock.fd);
++			conn_drain(conn);
+ 			if (!conn->err_code)
+ 				conn->err_code = CO_ER_SSL_HANDSHAKE;
+ 			goto out_error;
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index b9cb799..c76c7ae 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -498,15 +498,17 @@ static void si_idle_conn_null_cb(struct connection *conn)
+ 	if (conn->flags & (CO_FL_ERROR | CO_FL_SOCK_RD_SH))
+ 		return;
+ 
+-	if ((fdtab[conn->t.sock.fd].ev & (FD_POLL_ERR|FD_POLL_HUP)) ||
+-	    (conn->ctrl->drain && conn->ctrl->drain(conn->t.sock.fd) > 0))
++	if (fdtab[conn->t.sock.fd].ev & (FD_POLL_ERR|FD_POLL_HUP)) {
++		fdtab[conn->t.sock.fd].linger_risk = 0;
+ 		conn->flags |= CO_FL_SOCK_RD_SH;
++	}
++	else {
++		conn_drain(conn);
++	}
+ 
+ 	/* disable draining if we were called and have no drain function */
+ 	if (!conn->ctrl->drain)
+ 		__conn_data_stop_recv(conn);
+-	else if (!(conn->flags & CO_FL_SOCK_RD_SH))
+-		__conn_data_poll_recv(conn);
+ }
+ 
+ /* Callback to be used by connection I/O handlers when some activity is detected
+-- 
+1.8.1.5
+

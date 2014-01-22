@@ -1,0 +1,41 @@
+From ee330afba09bf82e52c6f74fae45c17104efea90 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 21 Jan 2014 11:36:14 +0100
+Subject: [PATCH 41/41] MINOR: standard: The parse_binary() returns the length
+ consumed and his documentation is updated
+
+Actually the values returned by this function is never used. All the
+callers just check if the resultat is non-zero. Before this patch, the
+function returns the length of the produced content. This value is not
+useful because is returned twice: the first time in the return value and
+the second time in the <binstrlen> argument. Now the function returns
+the number of bytes consumed from <source>.
+---
+ src/standard.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/standard.c b/src/standard.c
+index 3ed1e2a..adaba75 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1360,7 +1360,7 @@ const char *parse_size_err(const char *text, unsigned *ret) {
+  * Parse binary string written in hexadecimal (source) and store the decoded
+  * result into binstr and set binstrlen to the lengh of binstr. Memory for
+  * binstr is allocated by the function. In case of error, returns 0 with an
+- * error message in err.
++ * error message in err. In succes case, it returns the consumed length.
+  */
+ int parse_binary(const char *source, char **binstr, int *binstrlen, char **err)
+ {
+@@ -1403,7 +1403,7 @@ int parse_binary(const char *source, char **binstr, int *binstrlen, char **err)
+ 			goto bad_input;
+ 		(*binstr)[j++] =  (hex2i(p[i-2]) << 4) + hex2i(p[i-1]);
+ 	}
+-	return len;
++	return len << 1;
+ 
+ bad_input:
+ 	memprintf(err, "an hex digit is expected (found '%c')", p[i-1]);
+-- 
+1.8.1.5
+

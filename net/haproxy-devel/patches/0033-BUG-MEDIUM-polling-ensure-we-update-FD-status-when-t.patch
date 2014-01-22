@@ -1,0 +1,48 @@
+From fa7fc95e16fae8b30f2522f59bb945c596e48419 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 20 Jan 2014 20:18:59 +0100
+Subject: [PATCH 33/41] BUG/MEDIUM: polling: ensure we update FD status when
+ there's no more activity
+
+Some rare unexplained busy loops were observed on versions up to 1.5-dev19.
+It happens that if a file descriptor happens to be disabled for both read and
+write while it was speculatively enabled for both and this without creating a
+new update entry, there will be no way to remove it from the speculative I/O
+list until some other changes occur. It is suspected that a double sequence
+such as enable_both/disable_both could have led to this situation where an
+update cancels itself and does not clear the spec list in the poll loop.
+While it is unclear what I/O sequence may cause this situation to arise, it
+is safer to always add the FD to the update list if nothing could be done on
+it so that the next poll round will automatically take care of it.
+
+This is 1.5-specific, no backport is needed.
+---
+ src/fd.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/fd.c b/src/fd.c
+index 7e69114..12f38f1 100644
+--- a/src/fd.c
++++ b/src/fd.c
+@@ -156,7 +156,8 @@ void fd_process_spec_events()
+ 		 * Principle: events which are marked FD_EV_ACTIVE are processed
+ 		 * with their usual I/O callback. The callback may remove the
+ 		 * events from the list or tag them for polling. Changes will be
+-		 * applied on next round.
++		 * applied on next round. Speculative entries with no more activity
++		 * are automatically scheduled for removal.
+ 		 */
+ 
+ 		fdtab[fd].ev &= FD_POLL_STICKY;
+@@ -169,6 +170,8 @@ void fd_process_spec_events()
+ 
+ 		if (fdtab[fd].iocb && fdtab[fd].owner && fdtab[fd].ev)
+ 			fdtab[fd].iocb(fd);
++		else
++			updt_fd(fd);
+ 
+ 		/* if the fd was removed from the spec list, it has been
+ 		 * replaced by the next one that we don't want to skip !
+-- 
+1.8.1.5
+
