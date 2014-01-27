@@ -1,0 +1,123 @@
+From fd803bb4d7272deeb9c6847ca01e9e51bc52ffbb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 20 Jan 2014 15:13:07 +0100
+Subject: [PATCH 60/69] MEDIUM: connection: add check for readiness in I/O
+ handlers
+
+The recv/send callbacks must check for readiness themselves instead of
+having their callers do it. This will strengthen the test and will also
+ensure we never refrain from calling a handshake handler because a
+direction is being polled while the other one is ready.
+---
+ src/connection.c       |  5 ++++-
+ src/proto_tcp.c        |  3 +++
+ src/raw_sock.c         | 20 ++++++++++++++++----
+ src/stream_interface.c |  3 +++
+ 4 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/src/connection.c b/src/connection.c
+index 2538cc5..876d71a 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -120,7 +120,7 @@ int conn_fd_handler(int fd)
+ 	if (unlikely(conn->flags & (CO_FL_HANDSHAKE | CO_FL_ERROR)))
+ 		goto process_handshake;
+ 
+-	if (unlikely(conn->flags & CO_FL_WAIT_L4_CONN) && fd_send_ready(conn->t.sock.fd)) {
++	if (unlikely(conn->flags & CO_FL_WAIT_L4_CONN)) {
+ 		/* still waiting for a connection to establish and nothing was
+ 		 * attempted yet to probe the connection. Then let's retry the
+ 		 * connect().
+@@ -255,6 +255,9 @@ int conn_recv_proxy(struct connection *conn, int flag)
+ 	if (!(conn->flags & CO_FL_CTRL_READY))
+ 		goto fail;
+ 
++	if (!fd_recv_ready(conn->t.sock.fd))
++		return 0;
++
+ 	do {
+ 		trash.len = recv(conn->t.sock.fd, trash.str, trash.size, MSG_PEEK);
+ 		if (trash.len < 0) {
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index cb10661..79c7baf 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -632,6 +632,9 @@ int tcp_connect_probe(struct connection *conn)
+ 	if (!(conn->flags & CO_FL_WAIT_L4_CONN))
+ 		return 1; /* strange we were called while ready */
+ 
++	if (!fd_send_ready(fd))
++		return 0;
++
+ 	/* we might be the first witness of FD_POLL_ERR. Note that FD_POLL_HUP
+ 	 * without FD_POLL_IN also indicates a hangup without input data meaning
+ 	 * there was no connection.
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index 3d42781..a67a8d9 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -75,7 +75,10 @@ int raw_sock_to_pipe(struct connection *conn, struct pipe *pipe, unsigned int co
+ 	int retval = 0;
+ 
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
++		return 0;
++
++	if (!fd_recv_ready(conn->t.sock.fd))
+ 		return 0;
+ 
+ 	errno = 0;
+@@ -193,7 +196,10 @@ int raw_sock_from_pipe(struct connection *conn, struct pipe *pipe)
+ {
+ 	int ret, done;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
++		return 0;
++
++	if (!fd_send_ready(conn->t.sock.fd))
+ 		return 0;
+ 
+ 	done = 0;
+@@ -240,7 +246,10 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 	int ret, done = 0;
+ 	int try;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
++		return 0;
++
++	if (!fd_recv_ready(conn->t.sock.fd))
+ 		return 0;
+ 
+ 	errno = 0;
+@@ -342,7 +351,10 @@ static int raw_sock_from_buf(struct connection *conn, struct buffer *buf, int fl
+ {
+ 	int ret, try, done, send_flag;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
++		return 0;
++
++	if (!fd_send_ready(conn->t.sock.fd))
+ 		return 0;
+ 
+ 	done = 0;
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 6096dd7..abbbcb1 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -400,6 +400,9 @@ int conn_si_send_proxy(struct connection *conn, unsigned int flag)
+ 	if (!conn_ctrl_ready(conn))
+ 		goto out_error;
+ 
++	if (!fd_send_ready(conn->t.sock.fd))
++		goto out_wait;
++
+ 	/* If we have a PROXY line to send, we'll use this to validate the
+ 	 * connection, in which case the connection is validated only once
+ 	 * we've sent the whole proxy line. Otherwise we use connect().
+-- 
+1.8.3.2
+

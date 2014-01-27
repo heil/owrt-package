@@ -1,0 +1,32 @@
+From e7054c71773854c40021c3ae042c2e4d8f07b926 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 24 Jan 2014 12:41:51 +0100
+Subject: [PATCH 45/69] BUG/MINOR: payload: the patterns of the acl
+ "req.ssl_ver" are no parsed with the good function.
+
+The fetch "req.ssl_ver" is not declared as explicit acl. If it is used
+as implicit ACL, the acl engine detect SMP_T_UINT output type and choose
+to use the default interger parser: pat_parse_int(). This fetch needs the
+parser pat_parse_dotted_ver().
+
+This patch declare explicit ACL named "req.ssl_ver" that use the good
+parser function pat_parse_dotted_ver().
+---
+ src/payload.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/payload.c b/src/payload.c
+index bb4c010..cd77291 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -687,6 +687,7 @@ static struct acl_kw_list acl_kws = {ILH, {
+ 	{ "req_rdp_cookie_cnt", "req.rdp_cookie_cnt", pat_parse_int,        pat_match_int     },
+ 	{ "req_ssl_sni",        "req.ssl_sni",        pat_parse_str,        pat_match_str     },
+ 	{ "req_ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_match_int     },
++	{ "req.ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_match_int     },
+ 	{ /* END */ },
+ }};
+ 
+-- 
+1.8.3.2
+

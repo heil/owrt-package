@@ -1,0 +1,322 @@
+From 310987a0389d01d4472b2c43c0c650c9b254510b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 22 Jan 2014 19:46:33 +0100
+Subject: [PATCH 58/69] MAJOR: connection: remove the CO_FL_WAIT_{RD,WR} flags
+
+These flags were used to report the readiness of the file descriptor.
+Now this readiness is directly checked at the file descriptor itself.
+This removes the need for constantly synchronizing updates between the
+file descriptor and the connection and ensures that all layers share
+the same level of information.
+
+For now, the readiness is updated in conn_{sock,data}_poll_* by directly
+touching the file descriptor. This must move to the lower layers instead
+so that these functions can disappear as well. In this state, the change
+works but is incomplete. It's sensible enough to avoid making it more
+complex.
+
+Now the sock/data updates become much simpler because they just have to
+enable/disable access to a file descriptor and not to care anymore about
+its readiness.
+---
+ include/proto/connection.h | 30 ++++++++++++++++--------------
+ include/types/connection.h |  4 ++--
+ src/checks.c               | 10 ++++------
+ src/connection.c           | 42 ++++++++++++------------------------------
+ src/stream_interface.c     |  4 ++--
+ 5 files changed, 36 insertions(+), 54 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index d44aeec..9954619 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -164,7 +164,7 @@ void conn_update_data_polling(struct connection *c);
+  */
+ static inline void conn_refresh_polling_flags(struct connection *conn)
+ {
+-	conn->flags &= ~(CO_FL_WAIT_ROOM | CO_FL_WAIT_RD | CO_FL_WAIT_DATA | CO_FL_WAIT_WR);
++	conn->flags &= ~(CO_FL_WAIT_ROOM | CO_FL_WAIT_DATA);
+ 
+ 	if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl) {
+ 		unsigned int flags = conn->flags & ~(CO_FL_CURR_RD_ENA | CO_FL_CURR_WR_ENA);
+@@ -194,11 +194,10 @@ static inline unsigned int conn_data_polling_changes(const struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 	f &= CO_FL_DATA_WR_ENA | CO_FL_DATA_RD_ENA | CO_FL_CURR_WR_ENA |
+-	     CO_FL_CURR_RD_ENA | CO_FL_ERROR | CO_FL_WAIT_WR | CO_FL_WAIT_RD;
++	     CO_FL_CURR_RD_ENA | CO_FL_ERROR;
+ 
+-	f = (f & (f << 2)) |                         /* test W & D */
+-	    ((f ^ (f << 1)) & (CO_FL_CURR_WR_ENA|CO_FL_CURR_RD_ENA));    /* test C ^ D */
+-	return f & (CO_FL_WAIT_WR | CO_FL_WAIT_RD | CO_FL_CURR_WR_ENA | CO_FL_CURR_RD_ENA | CO_FL_ERROR);
++	f = (f ^ (f << 1)) & (CO_FL_CURR_WR_ENA|CO_FL_CURR_RD_ENA);    /* test C ^ D */
++	return f & (CO_FL_CURR_WR_ENA | CO_FL_CURR_RD_ENA | CO_FL_ERROR);
+ }
+ 
+ /* inspects c->flags and returns non-zero if SOCK ENA changes from the CURR ENA
+@@ -218,11 +217,10 @@ static inline unsigned int conn_sock_polling_changes(const struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 	f &= CO_FL_SOCK_WR_ENA | CO_FL_SOCK_RD_ENA | CO_FL_CURR_WR_ENA |
+-	     CO_FL_CURR_RD_ENA | CO_FL_ERROR | CO_FL_WAIT_WR | CO_FL_WAIT_RD;
++	     CO_FL_CURR_RD_ENA | CO_FL_ERROR;
+ 
+-	f = (f & (f << 3)) |                         /* test W & S */
+-	    ((f ^ (f << 2)) & (CO_FL_CURR_WR_ENA|CO_FL_CURR_RD_ENA));    /* test C ^ S */
+-	return f & (CO_FL_WAIT_WR | CO_FL_WAIT_RD | CO_FL_CURR_WR_ENA | CO_FL_CURR_RD_ENA | CO_FL_ERROR);
++	f = (f ^ (f << 2)) & (CO_FL_CURR_WR_ENA|CO_FL_CURR_RD_ENA);    /* test C ^ S */
++	return f & (CO_FL_CURR_WR_ENA | CO_FL_CURR_RD_ENA | CO_FL_ERROR);
+ }
+ 
+ /* Automatically updates polling on connection <c> depending on the DATA flags
+@@ -286,7 +284,8 @@ static inline void __conn_data_stop_recv(struct connection *c)
+ 
+ static inline void __conn_data_poll_recv(struct connection *c)
+ {
+-	c->flags |= CO_FL_WAIT_RD | CO_FL_DATA_RD_ENA;
++	c->flags |= CO_FL_DATA_RD_ENA;
++	fd_cant_recv(c->t.sock.fd);
+ }
+ 
+ static inline void __conn_data_want_send(struct connection *c)
+@@ -301,7 +300,8 @@ static inline void __conn_data_stop_send(struct connection *c)
+ 
+ static inline void __conn_data_poll_send(struct connection *c)
+ {
+-	c->flags |= CO_FL_WAIT_WR | CO_FL_DATA_WR_ENA;
++	c->flags |= CO_FL_DATA_WR_ENA;
++	fd_cant_send(c->t.sock.fd);
+ }
+ 
+ static inline void __conn_data_stop_both(struct connection *c)
+@@ -368,7 +368,8 @@ static inline void __conn_sock_stop_recv(struct connection *c)
+ 
+ static inline void __conn_sock_poll_recv(struct connection *c)
+ {
+-	c->flags |= CO_FL_WAIT_RD | CO_FL_SOCK_RD_ENA;
++	c->flags |= CO_FL_SOCK_RD_ENA;
++	fd_cant_recv(c->t.sock.fd);
+ }
+ 
+ static inline void __conn_sock_want_send(struct connection *c)
+@@ -383,7 +384,8 @@ static inline void __conn_sock_stop_send(struct connection *c)
+ 
+ static inline void __conn_sock_poll_send(struct connection *c)
+ {
+-	c->flags |= CO_FL_WAIT_WR | CO_FL_SOCK_WR_ENA;
++	c->flags |= CO_FL_SOCK_WR_ENA;
++	fd_cant_send(c->t.sock.fd);
+ }
+ 
+ static inline void __conn_sock_stop_both(struct connection *c)
+@@ -580,7 +582,7 @@ static inline int conn_drain(struct connection *conn)
+ 	if (conn->flags & CO_FL_SOCK_RD_SH)
+ 		return 1;
+ 
+-	if (conn->flags & CO_FL_WAIT_RD)
++	if (!fd_recv_ready(conn->t.sock.fd))
+ 		return 0;
+ 
+ 	if (!conn->ctrl->drain)
+diff --git a/include/types/connection.h b/include/types/connection.h
+index cf93999..e5c6f03 100644
+--- a/include/types/connection.h
++++ b/include/types/connection.h
+@@ -75,12 +75,12 @@ enum {
+ 	CO_FL_SOCK_RD_ENA   = 0x00000001,  /* receiving handshakes is allowed */
+ 	CO_FL_DATA_RD_ENA   = 0x00000002,  /* receiving data is allowed */
+ 	CO_FL_CURR_RD_ENA   = 0x00000004,  /* receiving is currently allowed */
+-	CO_FL_WAIT_RD       = 0x00000008,  /* receiving needs to poll first */
++	/* unused : 0x00000008 */
+ 
+ 	CO_FL_SOCK_WR_ENA   = 0x00000010,  /* sending handshakes is desired */
+ 	CO_FL_DATA_WR_ENA   = 0x00000020,  /* sending data is desired */
+ 	CO_FL_CURR_WR_ENA   = 0x00000040,  /* sending is currently desired */
+-	CO_FL_WAIT_WR       = 0x00000080,  /* sending needs to poll first */
++	/* unused : 0x00000080 */
+ 
+ 	/* These flags indicate whether the Control and Transport layers are initialized */
+ 	CO_FL_CTRL_READY    = 0x00000100, /* FD was registered, fd_delete() needed */
+diff --git a/src/checks.c b/src/checks.c
+index bdc7a6b..82aec1a 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -934,7 +934,7 @@ static void event_srv_chk_w(struct connection *conn)
+ 	if (unlikely(check->result == CHK_RES_FAILED))
+ 		goto out_wakeup;
+ 
+-	if (conn->flags & (CO_FL_HANDSHAKE | CO_FL_WAIT_WR))
++	if (conn->flags & CO_FL_HANDSHAKE)
+ 		return;
+ 
+ 	if (retrieve_errno_from_socket(conn)) {
+@@ -1011,7 +1011,7 @@ static void event_srv_chk_r(struct connection *conn)
+ 	if (unlikely(check->result == CHK_RES_FAILED))
+ 		goto out_wakeup;
+ 
+-	if (conn->flags & (CO_FL_HANDSHAKE | CO_FL_WAIT_RD))
++	if (conn->flags & CO_FL_HANDSHAKE)
+ 		return;
+ 
+ 	if (check->type == PR_O2_TCPCHK_CHK) {
+@@ -2006,8 +2006,7 @@ static void tcpcheck_main(struct connection *conn)
+ 		     check->current_step->action != TCPCHK_ACT_SEND ||
+ 		     check->current_step->string_len >= buffer_total_space(check->bo))) {
+ 
+-			if ((conn->flags & CO_FL_WAIT_WR) ||
+-			    conn->xprt->snd_buf(conn, check->bo, MSG_DONTWAIT | MSG_NOSIGNAL) <= 0) {
++			if (conn->xprt->snd_buf(conn, check->bo, MSG_DONTWAIT | MSG_NOSIGNAL) <= 0) {
+ 				if (conn->flags & CO_FL_ERROR) {
+ 					chk_report_conn_err(conn, errno, 0);
+ 					__conn_data_stop_both(conn);
+@@ -2060,8 +2059,7 @@ static void tcpcheck_main(struct connection *conn)
+ 			if (unlikely(check->result == CHK_RES_FAILED))
+ 				goto out_end_tcpcheck;
+ 
+-			if ((conn->flags & CO_FL_WAIT_RD) ||
+-			    conn->xprt->rcv_buf(conn, check->bi, check->bi->size) <= 0) {
++			if (conn->xprt->rcv_buf(conn, check->bi, check->bi->size) <= 0) {
+ 				if (conn->flags & (CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_DATA_RD_SH)) {
+ 					done = 1;
+ 					if ((conn->flags & CO_FL_ERROR) && !check->bi->i) {
+diff --git a/src/connection.c b/src/connection.c
+index 367d1e3..0056ec0 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -59,7 +59,7 @@ int conn_fd_handler(int fd)
+ 	 * around.
+ 	 */
+ 	while (unlikely(conn->flags & (CO_FL_HANDSHAKE | CO_FL_ERROR))) {
+-		if (unlikely(conn->flags & (CO_FL_ERROR|CO_FL_WAIT_RD|CO_FL_WAIT_WR)))
++		if (unlikely(conn->flags & CO_FL_ERROR))
+ 			goto leave;
+ 
+ 		if (conn->flags & CO_FL_ACCEPT_PROXY)
+@@ -94,7 +94,8 @@ int conn_fd_handler(int fd)
+ 	 */
+ 	if ((fdtab[fd].ev & (FD_POLL_IN | FD_POLL_HUP | FD_POLL_ERR)) &&
+ 	    conn->xprt &&
+-	    !(conn->flags & (CO_FL_WAIT_RD|CO_FL_WAIT_ROOM|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
++	    fd_recv_ready(fd) &&
++	    !(conn->flags & (CO_FL_WAIT_ROOM|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
+ 		/* force detection of a flag change : it's impossible to have both
+ 		 * CONNECTED and WAIT_CONN so we're certain to trigger a change.
+ 		 */
+@@ -104,7 +105,8 @@ int conn_fd_handler(int fd)
+ 
+ 	if ((fdtab[fd].ev & (FD_POLL_OUT | FD_POLL_ERR)) &&
+ 	    conn->xprt &&
+-	    !(conn->flags & (CO_FL_WAIT_WR|CO_FL_WAIT_DATA|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
++	    fd_send_ready(fd) &&
++	    !(conn->flags & (CO_FL_WAIT_DATA|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
+ 		/* force detection of a flag change : it's impossible to have both
+ 		 * CONNECTED and WAIT_CONN so we're certain to trigger a change.
+ 		 */
+@@ -118,7 +120,7 @@ int conn_fd_handler(int fd)
+ 	if (unlikely(conn->flags & (CO_FL_HANDSHAKE | CO_FL_ERROR)))
+ 		goto process_handshake;
+ 
+-	if (unlikely(conn->flags & CO_FL_WAIT_L4_CONN) && !(conn->flags & CO_FL_WAIT_WR)) {
++	if (unlikely(conn->flags & CO_FL_WAIT_L4_CONN) && fd_send_ready(conn->t.sock.fd)) {
+ 		/* still waiting for a connection to establish and nothing was
+ 		 * attempted yet to probe the connection. Then let's retry the
+ 		 * connect().
+@@ -163,12 +165,7 @@ void conn_update_data_polling(struct connection *c)
+ 		return;
+ 
+ 	/* update read status if needed */
+-	if (unlikely((f & (CO_FL_DATA_RD_ENA|CO_FL_WAIT_RD)) == (CO_FL_DATA_RD_ENA|CO_FL_WAIT_RD))) {
+-		fd_want_recv(c->t.sock.fd);
+-		fd_cant_recv(c->t.sock.fd);
+-		f |= CO_FL_CURR_RD_ENA;
+-	}
+-	else if (unlikely((f & (CO_FL_CURR_RD_ENA|CO_FL_DATA_RD_ENA)) == CO_FL_DATA_RD_ENA)) {
++	if (unlikely((f & (CO_FL_CURR_RD_ENA|CO_FL_DATA_RD_ENA)) == CO_FL_DATA_RD_ENA)) {
+ 		fd_want_recv(c->t.sock.fd);
+ 		f |= CO_FL_CURR_RD_ENA;
+ 	}
+@@ -178,12 +175,7 @@ void conn_update_data_polling(struct connection *c)
+ 	}
+ 
+ 	/* update write status if needed */
+-	if (unlikely((f & (CO_FL_DATA_WR_ENA|CO_FL_WAIT_WR)) == (CO_FL_DATA_WR_ENA|CO_FL_WAIT_WR))) {
+-		fd_want_send(c->t.sock.fd);
+-		fd_cant_send(c->t.sock.fd);
+-		f |= CO_FL_CURR_WR_ENA;
+-	}
+-	else if (unlikely((f & (CO_FL_CURR_WR_ENA|CO_FL_DATA_WR_ENA)) == CO_FL_DATA_WR_ENA)) {
++	if (unlikely((f & (CO_FL_CURR_WR_ENA|CO_FL_DATA_WR_ENA)) == CO_FL_DATA_WR_ENA)) {
+ 		fd_want_send(c->t.sock.fd);
+ 		f |= CO_FL_CURR_WR_ENA;
+ 	}
+@@ -191,7 +183,7 @@ void conn_update_data_polling(struct connection *c)
+ 		fd_stop_send(c->t.sock.fd);
+ 		f &= ~CO_FL_CURR_WR_ENA;
+ 	}
+-	c->flags = f & ~(CO_FL_WAIT_RD | CO_FL_WAIT_WR);
++	c->flags = f;
+ }
+ 
+ /* Update polling on connection <c>'s file descriptor depending on its current
+@@ -208,12 +200,7 @@ void conn_update_sock_polling(struct connection *c)
+ 		return;
+ 
+ 	/* update read status if needed */
+-	if (unlikely((f & (CO_FL_SOCK_RD_ENA|CO_FL_WAIT_RD)) == (CO_FL_SOCK_RD_ENA|CO_FL_WAIT_RD))) {
+-		fd_want_recv(c->t.sock.fd);
+-		fd_cant_recv(c->t.sock.fd);
+-		f |= CO_FL_CURR_RD_ENA;
+-	}
+-	else if (unlikely((f & (CO_FL_CURR_RD_ENA|CO_FL_SOCK_RD_ENA)) == CO_FL_SOCK_RD_ENA)) {
++	if (unlikely((f & (CO_FL_CURR_RD_ENA|CO_FL_SOCK_RD_ENA)) == CO_FL_SOCK_RD_ENA)) {
+ 		fd_want_recv(c->t.sock.fd);
+ 		f |= CO_FL_CURR_RD_ENA;
+ 	}
+@@ -223,12 +210,7 @@ void conn_update_sock_polling(struct connection *c)
+ 	}
+ 
+ 	/* update write status if needed */
+-	if (unlikely((f & (CO_FL_SOCK_WR_ENA|CO_FL_WAIT_WR)) == (CO_FL_SOCK_WR_ENA|CO_FL_WAIT_WR))) {
+-		fd_want_send(c->t.sock.fd);
+-		fd_cant_send(c->t.sock.fd);
+-		f |= CO_FL_CURR_WR_ENA;
+-	}
+-	else if (unlikely((f & (CO_FL_CURR_WR_ENA|CO_FL_SOCK_WR_ENA)) == CO_FL_SOCK_WR_ENA)) {
++	if (unlikely((f & (CO_FL_CURR_WR_ENA|CO_FL_SOCK_WR_ENA)) == CO_FL_SOCK_WR_ENA)) {
+ 		fd_want_send(c->t.sock.fd);
+ 		f |= CO_FL_CURR_WR_ENA;
+ 	}
+@@ -236,7 +218,7 @@ void conn_update_sock_polling(struct connection *c)
+ 		fd_stop_send(c->t.sock.fd);
+ 		f &= ~CO_FL_CURR_WR_ENA;
+ 	}
+-	c->flags = f & ~(CO_FL_WAIT_RD | CO_FL_WAIT_WR);
++	c->flags = f;
+ }
+ 
+ /* This handshake handler waits a PROXY protocol header at the beginning of the
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 6d15edc..063c173 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -679,7 +679,7 @@ static void si_conn_send(struct connection *conn)
+ 	/* when we're here, we already know that there is no spliced
+ 	 * data left, and that there are sendable buffered data.
+ 	 */
+-	if (!(conn->flags & (CO_FL_ERROR | CO_FL_SOCK_WR_SH | CO_FL_DATA_WR_SH | CO_FL_WAIT_DATA | CO_FL_WAIT_WR | CO_FL_HANDSHAKE))) {
++	if (!(conn->flags & (CO_FL_ERROR | CO_FL_SOCK_WR_SH | CO_FL_DATA_WR_SH | CO_FL_WAIT_DATA | CO_FL_HANDSHAKE))) {
+ 		/* check if we want to inform the kernel that we're interested in
+ 		 * sending more data after this call. We want this if :
+ 		 *  - we're about to close after this last send and want to merge
+@@ -1158,7 +1158,7 @@ static void si_conn_recv_cb(struct connection *conn)
+ 	 * that if such an event is not handled above in splice, it will be handled here by
+ 	 * recv().
+ 	 */
+-	while (!(conn->flags & (CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_DATA_RD_SH | CO_FL_WAIT_RD | CO_FL_WAIT_ROOM | CO_FL_HANDSHAKE))) {
++	while (!(conn->flags & (CO_FL_ERROR | CO_FL_SOCK_RD_SH | CO_FL_DATA_RD_SH | CO_FL_WAIT_ROOM | CO_FL_HANDSHAKE))) {
+ 		max = bi_avail(chn);
+ 
+ 		if (!max) {
+-- 
+1.8.3.2
+

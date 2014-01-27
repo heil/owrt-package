@@ -1,0 +1,242 @@
+From 3c72872da17280beb61c46b7b7424cc10e1e1610 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 23 Jan 2014 13:50:42 +0100
+Subject: [PATCH 64/69] CLEANUP: connection: use conn_ctrl_ready() instead of
+ checking the flag
+
+It's easier and safer to rely on conn_ctrl_ready() everywhere than to
+check the flag itself. It will also simplify adding extra checks later
+if needed. Some useless controls for !ctrl have been removed, as the
+CTRL_READY flag itself guarantees ctrl is set.
+---
+ include/proto/connection.h | 17 +++++++++--------
+ src/checks.c               |  2 +-
+ src/connection.c           |  6 +++---
+ src/dumpstats.c            |  2 +-
+ src/proto_http.c           | 12 ++++++------
+ src/proto_tcp.c            |  2 +-
+ src/ssl_sock.c             |  4 ++--
+ 7 files changed, 23 insertions(+), 22 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 0bec98e..97abe3f 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -50,7 +50,7 @@ static inline int conn_xprt_ready(struct connection *conn)
+ }
+ 
+ /* returns true is the control layer is ready */
+-static inline int conn_ctrl_ready(struct connection *conn)
++static inline int conn_ctrl_ready(const struct connection *conn)
+ {
+ 	return (conn->flags & CO_FL_CTRL_READY);
+ }
+@@ -88,11 +88,12 @@ static inline void conn_xprt_close(struct connection *conn)
+ 
+ /* Initializes the connection's control layer which essentially consists in
+  * registering the file descriptor for polling and setting the CO_FL_CTRL_READY
+- * flag.
++ * flag. The caller is responsible for ensuring that the control layer is
++ * already assigned to the connection prior to the call.
+  */
+ static inline void conn_ctrl_init(struct connection *conn)
+ {
+-	if (!(conn->flags & CO_FL_CTRL_READY)) {
++	if (!conn_ctrl_ready(conn)) {
+ 		int fd = conn->t.sock.fd;
+ 
+ 		fd_insert(fd);
+@@ -137,7 +138,7 @@ static inline void conn_force_close(struct connection *conn)
+ 	if ((conn->flags & CO_FL_XPRT_READY) && conn->xprt && conn->xprt->close)
+ 		conn->xprt->close(conn);
+ 
+-	if (conn->flags & CO_FL_CTRL_READY)
++	if (conn_ctrl_ready(conn))
+ 		fd_delete(conn->t.sock.fd);
+ 
+ 	conn->flags &= ~(CO_FL_XPRT_READY|CO_FL_CTRL_READY);
+@@ -166,7 +167,7 @@ static inline void conn_refresh_polling_flags(struct connection *conn)
+ {
+ 	conn->flags &= ~(CO_FL_WAIT_ROOM | CO_FL_WAIT_DATA);
+ 
+-	if ((conn->flags & CO_FL_CTRL_READY) && conn->ctrl) {
++	if (conn_ctrl_ready(conn)) {
+ 		unsigned int flags = conn->flags & ~(CO_FL_CURR_RD_ENA | CO_FL_CURR_WR_ENA);
+ 
+ 		if (fd_recv_active(conn->t.sock.fd))
+@@ -395,7 +396,7 @@ static inline void conn_sock_read0(struct connection *c)
+ 	/* we don't risk keeping ports unusable if we found the
+ 	 * zero from the other side.
+ 	 */
+-	if (c->flags & CO_FL_CTRL_READY)
++	if (conn_ctrl_ready(c))
+ 		fdtab[c->t.sock.fd].linger_risk = 0;
+ }
+ 
+@@ -484,7 +485,7 @@ static inline void conn_get_from_addr(struct connection *conn)
+ 	if (conn->flags & CO_FL_ADDR_FROM_SET)
+ 		return;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl || !conn->ctrl->get_src)
++	if (!conn_ctrl_ready(conn) || !conn->ctrl->get_src)
+ 		return;
+ 
+ 	if (conn->ctrl->get_src(conn->t.sock.fd, (struct sockaddr *)&conn->addr.from,
+@@ -500,7 +501,7 @@ static inline void conn_get_to_addr(struct connection *conn)
+ 	if (conn->flags & CO_FL_ADDR_TO_SET)
+ 		return;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl || !conn->ctrl->get_dst)
++	if (!conn_ctrl_ready(conn) || !conn->ctrl->get_dst)
+ 		return;
+ 
+ 	if (conn->ctrl->get_dst(conn->t.sock.fd, (struct sockaddr *)&conn->addr.to,
+diff --git a/src/checks.c b/src/checks.c
+index 82aec1a..70b5a2e 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -800,7 +800,7 @@ static int retrieve_errno_from_socket(struct connection *conn)
+ 	if (conn->flags & CO_FL_ERROR && ((errno && errno != EAGAIN) || !conn->ctrl))
+ 		return 1;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl)
++	if (!conn_ctrl_ready(conn))
+ 		return 0;
+ 
+ 	if (getsockopt(conn->t.sock.fd, SOL_SOCKET, SO_ERROR, &skerr, &lskerr) == 0)
+diff --git a/src/connection.c b/src/connection.c
+index f85e775..1483f18 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -157,7 +157,7 @@ void conn_update_data_polling(struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 
+-	if (!(c->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(c))
+ 		return;
+ 
+ 	/* update read status if needed */
+@@ -192,7 +192,7 @@ void conn_update_sock_polling(struct connection *c)
+ {
+ 	unsigned int f = c->flags;
+ 
+-	if (!(c->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(c))
+ 		return;
+ 
+ 	/* update read status if needed */
+@@ -248,7 +248,7 @@ int conn_recv_proxy(struct connection *conn, int flag)
+ 	if (conn->flags & CO_FL_SOCK_RD_SH)
+ 		goto fail;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
+ 		goto fail;
+ 
+ 	if (!fd_recv_ready(conn->t.sock.fd))
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 19d4dbd..18aadf6 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4286,7 +4286,7 @@ static void http_stats_io_handler(struct stream_interface *si)
+ 
+ static inline const char *get_conn_ctrl_name(const struct connection *conn)
+ {
+-	if (!(conn->flags & CO_FL_CTRL_READY) || !conn->ctrl)
++	if (!conn_ctrl_ready(conn))
+ 		return "NONE";
+ 	return conn->ctrl->name;
+ }
+diff --git a/src/proto_http.c b/src/proto_http.c
+index bc5b014..95fb870 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2502,7 +2502,7 @@ int http_wait_for_request(struct session *s, struct channel *req, int an_bit)
+ 		req->flags |= CF_READ_DONTWAIT; /* try to get back here ASAP */
+ 		s->rep->flags &= ~CF_EXPECT_MORE; /* speed up sending a previous response */
+ #ifdef TCP_QUICKACK
+-		if (s->listener->options & LI_O_NOQUICKACK && req->buf->i && objt_conn(s->req->prod->end) && (__objt_conn(s->req->prod->end)->flags & CO_FL_CTRL_READY)) {
++		if (s->listener->options & LI_O_NOQUICKACK && req->buf->i && objt_conn(s->req->prod->end) && conn_ctrl_ready(__objt_conn(s->req->prod->end))) {
+ 			/* We need more data, we have to re-enable quick-ack in case we
+ 			 * previously disabled it, otherwise we might cause the client
+ 			 * to delay next data.
+@@ -3031,13 +3031,13 @@ http_req_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_TOS:
+-			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && conn_ctrl_ready(cli_conn))
+ 				inet_set_tos(cli_conn->t.sock.fd, cli_conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_REQ_ACT_SET_MARK:
+ #ifdef SO_MARK
+-			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && conn_ctrl_ready(cli_conn))
+ 				setsockopt(cli_conn->t.sock.fd, SOL_SOCKET, SO_MARK, &rule->arg.mark, sizeof(rule->arg.mark));
+ #endif
+ 			break;
+@@ -3117,13 +3117,13 @@ http_res_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_TOS:
+-			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && conn_ctrl_ready(cli_conn))
+ 				inet_set_tos(cli_conn->t.sock.fd, cli_conn->addr.from, rule->arg.tos);
+ 			break;
+ 
+ 		case HTTP_RES_ACT_SET_MARK:
+ #ifdef SO_MARK
+-			if ((cli_conn = objt_conn(s->req->prod->end)) && (cli_conn->flags & CO_FL_CTRL_READY))
++			if ((cli_conn = objt_conn(s->req->prod->end)) && conn_ctrl_ready(cli_conn))
+ 				setsockopt(cli_conn->t.sock.fd, SOL_SOCKET, SO_MARK, &rule->arg.mark, sizeof(rule->arg.mark));
+ #endif
+ 			break;
+@@ -4004,7 +4004,7 @@ int http_process_request(struct session *s, struct channel *req, int an_bit)
+ 		 * the client to delay further data.
+ 		 */
+ 		if ((s->listener->options & LI_O_NOQUICKACK) &&
+-		    cli_conn && (cli_conn->flags & CO_FL_CTRL_READY) &&
++		    cli_conn && conn_ctrl_ready(cli_conn) &&
+ 		    ((msg->flags & HTTP_MSGF_TE_CHNK) ||
+ 		     (msg->body_len > req->buf->i - txn->req.eoh - 2)))
+ 			setsockopt(cli_conn->t.sock.fd, IPPROTO_TCP, TCP_QUICKACK, &one, sizeof(one));
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 79c7baf..cd05678 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -626,7 +626,7 @@ int tcp_connect_probe(struct connection *conn)
+ 	if (conn->flags & CO_FL_ERROR)
+ 		return 0;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
+ 		return 0;
+ 
+ 	if (!(conn->flags & CO_FL_WAIT_L4_CONN))
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index d30a8eb..31f0939 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1097,7 +1097,7 @@ static int ssl_sock_init(struct connection *conn)
+ 	if (conn->xprt_ctx)
+ 		return 0;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
+ 		return 0;
+ 
+ 	if (global.maxsslconn && sslconns >= global.maxsslconn) {
+@@ -1169,7 +1169,7 @@ int ssl_sock_handshake(struct connection *conn, unsigned int flag)
+ {
+ 	int ret;
+ 
+-	if (!(conn->flags & CO_FL_CTRL_READY))
++	if (!conn_ctrl_ready(conn))
+ 		return 0;
+ 
+ 	if (!conn->xprt_ctx)
+-- 
+1.8.3.2
+

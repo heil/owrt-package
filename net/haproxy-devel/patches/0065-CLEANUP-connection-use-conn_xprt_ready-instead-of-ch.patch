@@ -1,0 +1,74 @@
+From aad69387ac9c34c4cd6311a7c0de7e41fa81fb05 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 23 Jan 2014 14:21:42 +0100
+Subject: [PATCH 65/69] CLEANUP: connection: use conn_xprt_ready() instead of
+ checking the flag
+
+It's easier and safer to rely on conn_xprt_ready() everywhere than to
+check the flag itself. It will also simplify adding extra checks later
+if needed. Some useless controls for !xprt have been removed, as the
+XPRT_READY flag itself guarantees xprt is set.
+---
+ include/proto/connection.h | 10 +++++-----
+ src/dumpstats.c            |  2 +-
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/include/proto/connection.h b/include/proto/connection.h
+index 97abe3f..8609f17 100644
+--- a/include/proto/connection.h
++++ b/include/proto/connection.h
+@@ -44,9 +44,9 @@ int conn_recv_proxy(struct connection *conn, int flag);
+ int make_proxy_line(char *buf, int buf_len, struct sockaddr_storage *src, struct sockaddr_storage *dst);
+ 
+ /* returns true is the transport layer is ready */
+-static inline int conn_xprt_ready(struct connection *conn)
++static inline int conn_xprt_ready(const struct connection *conn)
+ {
+-	return (conn->flags & CO_FL_XPRT_READY) && conn->xprt;
++	return (conn->flags & CO_FL_XPRT_READY);
+ }
+ 
+ /* returns true is the control layer is ready */
+@@ -63,7 +63,7 @@ static inline int conn_xprt_init(struct connection *conn)
+ {
+ 	int ret = 0;
+ 
+-	if (!(conn->flags & CO_FL_XPRT_READY) && conn->xprt && conn->xprt->init)
++	if (!conn_xprt_ready(conn) && conn->xprt && conn->xprt->init)
+ 		ret = conn->xprt->init(conn);
+ 
+ 	if (ret >= 0)
+@@ -80,7 +80,7 @@ static inline int conn_xprt_init(struct connection *conn)
+ static inline void conn_xprt_close(struct connection *conn)
+ {
+ 	if ((conn->flags & (CO_FL_XPRT_READY|CO_FL_XPRT_TRACKED)) == CO_FL_XPRT_READY) {
+-		if (conn->xprt && conn->xprt->close)
++		if (conn->xprt->close)
+ 			conn->xprt->close(conn);
+ 		conn->flags &= ~CO_FL_XPRT_READY;
+ 	}
+@@ -135,7 +135,7 @@ static inline void conn_full_close(struct connection *conn)
+  */
+ static inline void conn_force_close(struct connection *conn)
+ {
+-	if ((conn->flags & CO_FL_XPRT_READY) && conn->xprt && conn->xprt->close)
++	if (conn_xprt_ready(conn) && conn->xprt->close)
+ 		conn->xprt->close(conn);
+ 
+ 	if (conn_ctrl_ready(conn))
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 18aadf6..40b0287 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4295,7 +4295,7 @@ static inline const char *get_conn_xprt_name(const struct connection *conn)
+ {
+ 	static char ptr[17];
+ 
+-	if (!(conn->flags & CO_FL_XPRT_READY) || !conn->xprt)
++	if (!conn_xprt_ready(conn))
+ 		return "NONE";
+ 
+ 	if (conn->xprt == &raw_sock)
+-- 
+1.8.3.2
+

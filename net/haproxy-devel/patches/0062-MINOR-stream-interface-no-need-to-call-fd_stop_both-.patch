@@ -1,0 +1,32 @@
+From 798c3c9c4161576835fe89ca13bf59040645c924 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 21 Jan 2014 10:30:08 +0100
+Subject: [PATCH 62/69] MINOR: stream-interface: no need to call fd_stop_both()
+ on error
+
+We don't need to call fd_stop_both() since we already call
+conn_cond_update_polling() which will do it. This call was introduced by
+commit d29a066 ("BUG/MAJOR: connection: always recompute polling status
+upon I/O").
+---
+ src/stream_interface.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index bb5b962..c4d2715 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -988,9 +988,8 @@ static void stream_int_chk_snd_conn(struct stream_interface *si)
+ 
+ 	if (!(conn->flags & (CO_FL_HANDSHAKE|CO_FL_WAIT_L4_CONN|CO_FL_WAIT_L6_CONN))) {
+ 		si_conn_send(conn);
+-		if (conn_ctrl_ready(conn) && (conn->flags & CO_FL_ERROR)) {
++		if (conn->flags & CO_FL_ERROR) {
+ 			/* Write error on the file descriptor */
+-			fd_stop_both(conn->t.sock.fd);
+ 			__conn_data_stop_both(conn);
+ 			si->flags |= SI_FL_ERR;
+ 			goto out_wakeup;
+-- 
+1.8.3.2
+

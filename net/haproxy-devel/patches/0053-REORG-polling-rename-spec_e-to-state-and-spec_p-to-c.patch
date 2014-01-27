@@ -1,0 +1,154 @@
+From 15a4dec87eac29b45182e0927114d98c7e147d97 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 20 Jan 2014 11:09:39 +0100
+Subject: [PATCH 53/69] REORG: polling: rename "spec_e" to "state" and "spec_p"
+ to "cache"
+
+We're completely changing the way FDs will be polled. There will be no
+more speculative I/O since we'll know the exact FD state, so these will
+only be cached events.
+
+First, let's fix a few field names which become confusing. "spec_e" was
+used to store a speculative I/O event state. Now we'll store the whole
+R/W states for the FD there. "spec_p" was used to store a speculative
+I/O cache position. Now let's clearly call it "cache".
+---
+ include/proto/fd.h | 10 +++++-----
+ include/types/fd.h |  4 ++--
+ src/dumpstats.c    |  4 ++--
+ src/ev_epoll.c     |  2 +-
+ src/ev_kqueue.c    |  2 +-
+ src/ev_poll.c      |  2 +-
+ src/ev_select.c    |  2 +-
+ 7 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/include/proto/fd.h b/include/proto/fd.h
+index a67a320..3563a08 100644
+--- a/include/proto/fd.h
++++ b/include/proto/fd.h
+@@ -97,11 +97,11 @@ static inline void updt_fd(const int fd)
+ /* allocate an entry for a speculative event. This can be done at any time. */
+ static inline void alloc_spec_entry(const int fd)
+ {
+-	if (fdtab[fd].spec_p)
++	if (fdtab[fd].cache)
+ 		/* FD already in speculative I/O list */
+ 		return;
+ 	fd_nbspec++;
+-	fdtab[fd].spec_p = fd_nbspec;
++	fdtab[fd].cache = fd_nbspec;
+ 	fd_spec[fd_nbspec-1] = fd;
+ }
+ 
+@@ -113,16 +113,16 @@ static inline void release_spec_entry(int fd)
+ {
+ 	unsigned int pos;
+ 
+-	pos = fdtab[fd].spec_p;
++	pos = fdtab[fd].cache;
+ 	if (!pos)
+ 		return;
+-	fdtab[fd].spec_p = 0;
++	fdtab[fd].cache = 0;
+ 	fd_nbspec--;
+ 	if (likely(pos <= fd_nbspec)) {
+ 		/* was not the last entry */
+ 		fd = fd_spec[fd_nbspec];
+ 		fd_spec[pos - 1] = fd;
+-		fdtab[fd].spec_p = pos;
++		fdtab[fd].cache = pos;
+ 	}
+ }
+ 
+diff --git a/include/types/fd.h b/include/types/fd.h
+index 23550cb..3bfe48f 100644
+--- a/include/types/fd.h
++++ b/include/types/fd.h
+@@ -69,8 +69,8 @@ enum {
+ struct fdtab {
+ 	int (*iocb)(int fd);                 /* I/O handler, returns FD_WAIT_* */
+ 	void *owner;                         /* the connection or listener associated with this fd, NULL if closed */
+-	unsigned int  spec_p;                /* speculative polling: position in spec list+1. 0=not in list. */
+-	unsigned char state;                 /* FD state for read and write directions */
++	unsigned int  cache;                 /* position+1 in the FD cache. 0=not in cache. */
++	unsigned char state;                 /* FD state for read and write directions (4+4 bits) */
+ 	unsigned char ev;                    /* event seen in return of poll() : FD_POLL_* */
+ 	unsigned char new:1;                 /* 1 if this fd has just been created */
+ 	unsigned char updated:1;             /* 1 if this fd is already in the update list */
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index f861650..aabb556 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4529,7 +4529,7 @@ static int stats_dump_full_sess_to_buffer(struct stream_interface *si, struct se
+ 			              conn->flags,
+ 			              conn->t.sock.fd,
+ 			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].state : 0,
+-			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].spec_p : 0,
++			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].cache : 0,
+ 			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].updated : 0);
+ 		}
+ 		else if ((tmpctx = objt_appctx(sess->si[0].end)) != NULL) {
+@@ -4557,7 +4557,7 @@ static int stats_dump_full_sess_to_buffer(struct stream_interface *si, struct se
+ 			              conn->flags,
+ 			              conn->t.sock.fd,
+ 			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].state : 0,
+-			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].spec_p : 0,
++			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].cache : 0,
+ 			              conn->t.sock.fd >= 0 ? fdtab[conn->t.sock.fd].updated : 0);
+ 		}
+ 		else if ((tmpctx = objt_appctx(sess->si[1].end)) != NULL) {
+diff --git a/src/ev_epoll.c b/src/ev_epoll.c
+index ba0025b..e826af3 100644
+--- a/src/ev_epoll.c
++++ b/src/ev_epoll.c
+@@ -187,7 +187,7 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
+-			if (fdtab[fd].spec_p) {
++			if (fdtab[fd].cache) {
+ 				/* This fd was already scheduled for being called as a speculative I/O */
+ 				continue;
+ 			}
+diff --git a/src/ev_kqueue.c b/src/ev_kqueue.c
+index ca14eeb..d59a570 100644
+--- a/src/ev_kqueue.c
++++ b/src/ev_kqueue.c
+@@ -158,7 +158,7 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
+-			if (fdtab[fd].spec_p) {
++			if (fdtab[fd].cache) {
+ 				/* This fd was already scheduled for being
+ 				 * called as a speculative I/O.
+ 				 */
+diff --git a/src/ev_poll.c b/src/ev_poll.c
+index 8b3f595..6a97c98 100644
+--- a/src/ev_poll.c
++++ b/src/ev_poll.c
+@@ -183,7 +183,7 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 			if (fdtab[fd].ev & FD_POLL_OUT)
+ 				fd_ev_set(fd, DIR_WR);
+ 
+-			if (fdtab[fd].spec_p) {
++			if (fdtab[fd].cache) {
+ 				/* This fd was already scheduled for being
+ 				 * called as a speculative I/O
+ 				 */
+diff --git a/src/ev_select.c b/src/ev_select.c
+index 300cffa..14f1b1e 100644
+--- a/src/ev_select.c
++++ b/src/ev_select.c
+@@ -167,7 +167,7 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 				if (fdtab[fd].ev & FD_POLL_OUT)
+ 					fd_ev_set(fd, DIR_WR);
+ 
+-				if (fdtab[fd].spec_p) {
++				if (fdtab[fd].cache) {
+ 					/* This fd was already scheduled for being
+ 					 * called as a speculative I/O.
+ 					 */
+-- 
+1.8.3.2
+

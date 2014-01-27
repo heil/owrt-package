@@ -1,0 +1,70 @@
+From 4afd70aeaba5ca2952e60f978701c7f98dc438ae Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 25 Jan 2014 02:26:39 +0100
+Subject: [PATCH 48/69] BUG/MAJOR: fix freezes during compression
+
+Recent commit d7ad9f5 ("MAJOR: channel: add a new flag CF_WAKE_WRITE to
+notify the task of writes") introduced this new CF_WAKE_WRITE flag that
+an analyser which requires some free space to write must set if it wants
+to be notified.
+
+Unfortunately, some places were missing. More specifically, the
+compression engine can rarely be stuck by a lack of output space,
+especially when dealing with non-compressible data. It then has to
+stop until some pending data are flushed and for this it must set
+the CF_WAKE_WRITE flag. But these cases were missed by the commit
+above.
+
+Fortunately, this change was introduced very recently and never
+released, so the impact was limited.
+
+Huge thanks to Sander Klein who first reported this issue and who kindly
+and patiently provided lots of traces and test data that made it possible
+to reproduce, analyze, then fix this issue.
+---
+ src/proto_http.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index cd8ceae..bc5b014 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -4864,8 +4864,10 @@ int http_request_forward_body(struct session *s, struct channel *req, int an_bit
+ 
+ 		if (msg->msg_state == HTTP_MSG_DATA) {
+ 			/* must still forward */
+-			if (req->to_forward)
++			if (req->to_forward) {
++				req->flags |= CF_WAKE_WRITE;
+ 				goto missing_data;
++			}
+ 
+ 			/* nothing left to forward */
+ 			if (msg->flags & HTTP_MSGF_TE_CHNK)
+@@ -5986,8 +5988,10 @@ int http_response_forward_body(struct session *s, struct channel *res, int an_bi
+ 
+ 	if (s->comp_algo != NULL) {
+ 		ret = http_compression_buffer_init(s, res->buf, tmpbuf); /* init a buffer with headers */
+-		if (ret < 0)
++		if (ret < 0) {
++			res->flags |= CF_WAKE_WRITE;
+ 			goto missing_data; /* not enough spaces in buffers */
++		}
+ 		compressing = 1;
+ 	}
+ 
+@@ -6012,8 +6016,10 @@ int http_response_forward_body(struct session *s, struct channel *res, int an_bi
+ 					goto aborted_xfer;
+ 			}
+ 
+-			if (res->to_forward || msg->chunk_len)
++			if (res->to_forward || msg->chunk_len) {
++				res->flags |= CF_WAKE_WRITE;
+ 				goto missing_data;
++			}
+ 
+ 			/* nothing left to forward */
+ 			if (msg->flags & HTTP_MSGF_TE_CHNK) {
+-- 
+1.8.3.2
+

@@ -1,0 +1,121 @@
+From 1f0da2485ea53b86a254be061ded69f5371d4a05 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 25 Jan 2014 11:01:50 +0100
+Subject: [PATCH 46/69] BUG/MEDIUM: unique_id: HTTP request counter is not
+ stable
+
+Patrick Hemmer reported that using unique_id_format and logs did not
+report the same unique ID counter since commit 9f09521 ("BUG/MEDIUM:
+unique_id: HTTP request counter must be unique!"). This is because
+the increment was done while producing the log message, so it was
+performed twice.
+
+A better solution consists in fetching a new value once per request
+and saving it in the request or session context for all of this
+request's life.
+
+It happens that sessions already have a unique ID field which is used
+for debugging and reporting errors, and which differs from the one
+sent in logs and unique_id header.
+
+So let's change this to reuse this field to have coherent IDs everywhere.
+As of now, a session gets a new unique ID once it is instanciated. This
+means that TCP sessions will also benefit from a unique ID that can be
+logged. And this ID is renewed for each extra HTTP request received on
+an existing session. Thus, all TCP sessions and HTTP requests will have
+distinct IDs that will be stable along all their life, and coherent
+between all places where they're used (logs, unique_id header,
+"show sess", "show errors").
+
+This feature is 1.5-specific, no backport to 1.4 is needed.
+---
+ doc/configuration.txt  | 2 +-
+ include/types/global.h | 2 +-
+ src/log.c              | 6 +++---
+ src/proto_http.c       | 1 +
+ src/session.c          | 2 +-
+ 5 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 9831021..030a9a6 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -11438,7 +11438,7 @@ Please refer to the table below for currently defined variables :
+   |   | %pid | PID                                           | numeric     |
+   | H | %r   | http_request                                  | string      |
+   |   | %rc  | retries                                       | numeric     |
+-  | H | %rt  | http_request_counter                          | numeric     |
++  |   | %rt  | request_counter (HTTP req or TCP session)     | numeric     |
+   |   | %s   | server_name                                   | string      |
+   |   | %sc  | srv_conn     (server concurrent connections)  | numeric     |
+   |   | %si  | server_IP                   (target address)  | IP          |
+diff --git a/include/types/global.h b/include/types/global.h
+index cfc3d23..7d78d20 100644
+--- a/include/types/global.h
++++ b/include/types/global.h
+@@ -90,7 +90,7 @@ struct global {
+ 	int rlimit_memmax;	/* default ulimit-d in megs value : 0=unset */
+ 	long maxzlibmem;        /* max RAM for zlib in bytes */
+ 	int mode;
+-	unsigned int req_count; /* HTTP request counter for logs and unique_id */
++	unsigned int req_count; /* request counter (HTTP or TCP session) for logs and unique_id */
+ 	int last_checks;
+ 	int spread_checks;
+ 	char *chroot;
+diff --git a/src/log.c b/src/log.c
+index f2ba621..2a6acf4 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -111,7 +111,7 @@ static const struct logformat_type logformat_keywords[] = {
+ 	{ "pid", LOG_FMT_PID, PR_MODE_TCP, LW_INIT, NULL }, /* log pid */
+ 	{ "r", LOG_FMT_REQ, PR_MODE_HTTP, LW_REQ, NULL },  /* request */
+ 	{ "rc", LOG_FMT_RETRIES, PR_MODE_TCP, LW_BYTES, NULL },  /* retries */
+-	{ "rt", LOG_FMT_COUNTER, PR_MODE_HTTP, LW_REQ, NULL }, /* HTTP request counter */
++	{ "rt", LOG_FMT_COUNTER, PR_MODE_TCP, LW_REQ, NULL }, /* request counter (HTTP or TCP session) */
+ 	{ "s", LOG_FMT_SERVER, PR_MODE_TCP, LW_SVID, NULL },    /* server */
+ 	{ "sc", LOG_FMT_SRVCONN, PR_MODE_TCP, LW_BYTES, NULL },  /* srv_conn */
+ 	{ "si", LOG_FMT_SERVERIP, PR_MODE_TCP, LW_SVIP, NULL }, /* server destination ip */
+@@ -1512,13 +1512,13 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
+ 
+ 			case LOG_FMT_COUNTER: // %rt
+ 				if (tmp->options & LOG_OPT_HEXA) {
+-					iret = snprintf(tmplog, dst + maxsize - tmplog, "%04X", global.req_count++);
++					iret = snprintf(tmplog, dst + maxsize - tmplog, "%04X", s->uniq_id);
+ 					if (iret < 0 || iret > dst + maxsize - tmplog)
+ 						goto out;
+ 					last_isspace = 0;
+ 					tmplog += iret;
+ 				} else {
+-					ret = ltoa_o(global.req_count++, tmplog, dst + maxsize - tmplog);
++					ret = ltoa_o(s->uniq_id, tmplog, dst + maxsize - tmplog);
+ 					if (ret == NULL)
+ 						goto out;
+ 					tmplog = ret;
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 7a9eaa0..cd8ceae 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8202,6 +8202,7 @@ void http_reset_txn(struct session *s)
+ 	s->target = NULL;
+ 	/* re-init store persistence */
+ 	s->store_count = 0;
++	s->uniq_id = global.req_count++;
+ 
+ 	s->pend_pos = NULL;
+ 
+diff --git a/src/session.c b/src/session.c
+index 9712faa..8241d06 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -119,7 +119,7 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 
+ 	s->logs.accept_date = date; /* user-visible date for logging */
+ 	s->logs.tv_accept = now;  /* corrected date for internal use */
+-	s->uniq_id = totalconn;
++	s->uniq_id = global.req_count++;
+ 	p->feconn++;
+ 	/* This session was accepted, count it now */
+ 	if (p->feconn > p->fe_counters.conn_max)
+-- 
+1.8.3.2
+

@@ -1,0 +1,190 @@
+From 25002d206bcf61a766b0cd75f2d9b34a1c77ede4 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 25 Jan 2014 10:32:56 +0100
+Subject: [PATCH 69/69] MINOR: polling: create function
+ fd_compute_new_polled_status()
+
+This function is used to compute the new polling state based on
+the previous state. All pollers have to do this in their update
+loop, so better centralize the logic for it.
+---
+ include/proto/fd.h | 22 ++++++++++++++++++++++
+ src/ev_epoll.c     | 17 ++---------------
+ src/ev_kqueue.c    | 18 ++----------------
+ src/ev_poll.c      | 17 ++---------------
+ src/ev_select.c    | 17 ++---------------
+ 5 files changed, 30 insertions(+), 61 deletions(-)
+
+diff --git a/include/proto/fd.h b/include/proto/fd.h
+index f74fbcb..605dc21 100644
+--- a/include/proto/fd.h
++++ b/include/proto/fd.h
+@@ -135,6 +135,28 @@ static inline void fd_release_cache_entry(int fd)
+ 	}
+ }
+ 
++/* Computes the new polled status based on the active and ready statuses, for
++ * each direction. This is meant to be used by pollers while processing updates.
++ */
++static inline int fd_compute_new_polled_status(int state)
++{
++	if (state & FD_EV_ACTIVE_R) {
++		if (!(state & FD_EV_READY_R))
++			state |= FD_EV_POLLED_R;
++	}
++	else
++		state &= ~FD_EV_POLLED_R;
++
++	if (state & FD_EV_ACTIVE_W) {
++		if (!(state & FD_EV_READY_W))
++			state |= FD_EV_POLLED_W;
++	}
++	else
++		state &= ~FD_EV_POLLED_W;
++
++	return state;
++}
++
+ /* Automatically allocates or releases a cache entry for fd <fd> depending on
+  * its new state. This is meant to be used by pollers while processing updates.
+  */
+diff --git a/src/ev_epoll.c b/src/ev_epoll.c
+index b90d9c1..2849ec6 100644
+--- a/src/ev_epoll.c
++++ b/src/ev_epoll.c
+@@ -59,27 +59,14 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 	/* first, scan the update list to find changes */
+ 	for (updt_idx = 0; updt_idx < fd_nbupdt; updt_idx++) {
+ 		fd = fd_updt[updt_idx];
+-		en = eo = fdtab[fd].state;
+-
+ 		fdtab[fd].updated = 0;
+ 		fdtab[fd].new = 0;
+ 
+ 		if (!fdtab[fd].owner)
+ 			continue;
+ 
+-		if (en & FD_EV_ACTIVE_R) {
+-			if (!(en & FD_EV_READY_R))
+-				en |= FD_EV_POLLED_R;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_R;
+-
+-		if (en & FD_EV_ACTIVE_W) {
+-			if (!(en & FD_EV_READY_W))
+-				en |= FD_EV_POLLED_W;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_W;
++		eo = fdtab[fd].state;
++		en = fd_compute_new_polled_status(eo);
+ 
+ 		if ((eo ^ en) & FD_EV_POLLED_RW) {
+ 			/* poll status changed */
+diff --git a/src/ev_kqueue.c b/src/ev_kqueue.c
+index 0473adc..06ccaee 100644
+--- a/src/ev_kqueue.c
++++ b/src/ev_kqueue.c
+@@ -47,28 +47,14 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 	/* first, scan the update list to find changes */
+ 	for (updt_idx = 0; updt_idx < fd_nbupdt; updt_idx++) {
+ 		fd = fd_updt[updt_idx];
+-		en = eo = fdtab[fd].state;
+-
+ 		fdtab[fd].updated = 0;
+ 		fdtab[fd].new = 0;
+ 
+ 		if (!fdtab[fd].owner)
+ 			continue;
+ 
+-		if (en & FD_EV_ACTIVE_R) {
+-			if (!(en & FD_EV_READY_R))
+-				en |= FD_EV_POLLED_R;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_R;
+-
+-		if (en & FD_EV_ACTIVE_W) {
+-			if (!(en & FD_EV_READY_W))
+-				en |= FD_EV_POLLED_W;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_W;
+-
++		eo = fdtab[fd].state;
++		en = fd_compute_new_polled_status(eo);
+ 
+ 		if ((eo ^ en) & FD_EV_POLLED_RW) {
+ 			/* poll status changed */
+diff --git a/src/ev_poll.c b/src/ev_poll.c
+index 84ba486..2f6e56d 100644
+--- a/src/ev_poll.c
++++ b/src/ev_poll.c
+@@ -70,27 +70,14 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 	/* first, scan the update list to find changes */
+ 	for (updt_idx = 0; updt_idx < fd_nbupdt; updt_idx++) {
+ 		fd = fd_updt[updt_idx];
+-		en = eo = fdtab[fd].state;
+-
+ 		fdtab[fd].updated = 0;
+ 		fdtab[fd].new = 0;
+ 
+ 		if (!fdtab[fd].owner)
+ 			continue;
+ 
+-		if (en & FD_EV_ACTIVE_R) {
+-			if (!(en & FD_EV_READY_R))
+-				en |= FD_EV_POLLED_R;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_R;
+-
+-		if (en & FD_EV_ACTIVE_W) {
+-			if (!(en & FD_EV_READY_W))
+-				en |= FD_EV_POLLED_W;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_W;
++		eo = fdtab[fd].state;
++		en = fd_compute_new_polled_status(eo);
+ 
+ 		if ((eo ^ en) & FD_EV_POLLED_RW) {
+ 			/* poll status changed, update the lists */
+diff --git a/src/ev_select.c b/src/ev_select.c
+index 87ca348..5a76d44 100644
+--- a/src/ev_select.c
++++ b/src/ev_select.c
+@@ -53,27 +53,14 @@ REGPRM2 static void _do_poll(struct poller *p, int exp)
+ 	/* first, scan the update list to find changes */
+ 	for (updt_idx = 0; updt_idx < fd_nbupdt; updt_idx++) {
+ 		fd = fd_updt[updt_idx];
+-		en = eo = fdtab[fd].state;
+-
+ 		fdtab[fd].updated = 0;
+ 		fdtab[fd].new = 0;
+ 
+ 		if (!fdtab[fd].owner)
+ 			continue;
+ 
+-		if (en & FD_EV_ACTIVE_R) {
+-			if (!(en & FD_EV_READY_R))
+-				en |= FD_EV_POLLED_R;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_R;
+-
+-		if (en & FD_EV_ACTIVE_W) {
+-			if (!(en & FD_EV_READY_W))
+-				en |= FD_EV_POLLED_W;
+-		}
+-		else
+-			en &= ~FD_EV_POLLED_W;
++		eo = fdtab[fd].state;
++		en = fd_compute_new_polled_status(eo);
+ 
+ 		if ((eo ^ en) & FD_EV_POLLED_RW) {
+ 			/* poll status changed, update the lists */
+-- 
+1.8.3.2
+

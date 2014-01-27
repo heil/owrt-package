@@ -1,0 +1,71 @@
+From e6300be8f807858d146d23b4eabb9934b96873ee Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 25 Jan 2014 02:33:21 +0100
+Subject: [PATCH 49/69] BUG/MEDIUM: stream-interface: don't wake the task up
+ before end of transfer
+
+Recent commit d7ad9f5 ("MAJOR: channel: add a new flag CF_WAKE_WRITE to
+notify the task of writes") was not correct. It used to wake up the task
+as soon as there was some write activity and the flag was set, even if there
+were still some data to be forwarded. This resulted in process_session()
+being called a lot when transfering chunk-encoded HTTP responses made of
+very large chunks.
+
+The purpose of the flag is to wake up only a task waiting for some
+room and not the other ones, so it's totally counter-productive to
+wake it up as long as there are data to forward because the task
+will not be allowed to write anyway.
+
+Also, the commit above was taking some risks by not considering
+certain events anymore (eg: state != SI_ST_EST). While such events
+are not used at the moment, if some new features were developped
+in the future relying on these, it would be better that they could
+be notified when subscribing to the WAKE_WRITE event, so let's
+restore the condition.
+---
+ src/stream_interface.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index c76c7ae..6d15edc 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -205,7 +205,10 @@ static void stream_int_update_embedded(struct stream_interface *si)
+ 	    /* changes on the consumption side */
+ 	    (si->ob->flags & (CF_WRITE_NULL|CF_WRITE_ERROR)) ||
+ 	    ((si->ob->flags & CF_WRITE_ACTIVITY) &&
+-	     (si->ob->flags & (CF_SHUTW|CF_WAKE_WRITE)))) {
++	     ((si->ob->flags & CF_SHUTW) ||
++	      ((si->ob->flags & CF_WAKE_WRITE) &&
++	       (si->ob->prod->state != SI_ST_EST ||
++	        (channel_is_empty(si->ob) && !si->ob->to_forward)))))) {
+ 		if (!(si->flags & SI_FL_DONT_WAKE) && si->owner)
+ 			task_wakeup(si->owner, TASK_WOKEN_IO);
+ 	}
+@@ -630,7 +633,10 @@ static int si_conn_wake_cb(struct connection *conn)
+ 	    /* changes on the consumption side */
+ 	    (si->ob->flags & (CF_WRITE_NULL|CF_WRITE_ERROR)) ||
+ 	    ((si->ob->flags & CF_WRITE_ACTIVITY) &&
+-	     (si->ob->flags & (CF_SHUTW|CF_WAKE_WRITE)))) {
++	     ((si->ob->flags & CF_SHUTW) ||
++	      ((si->ob->flags & CF_WAKE_WRITE) &&
++	       (si->ob->prod->state != SI_ST_EST ||
++	        (channel_is_empty(si->ob) && !si->ob->to_forward)))))) {
+ 		task_wakeup(si->owner, TASK_WOKEN_IO);
+ 	}
+ 	if (si->ib->flags & CF_READ_ACTIVITY)
+@@ -1043,7 +1049,10 @@ static void stream_int_chk_snd_conn(struct stream_interface *si)
+ 	/* in case of special condition (error, shutdown, end of write...), we
+ 	 * have to notify the task.
+ 	 */
+-	if (likely(ob->flags & (CF_WRITE_NULL|CF_WRITE_ERROR|CF_SHUTW|CF_WAKE_WRITE))) {
++	if (likely((ob->flags & (CF_WRITE_NULL|CF_WRITE_ERROR|CF_SHUTW)) ||
++	          ((ob->flags & CF_WAKE_WRITE) &&
++	           ((channel_is_empty(si->ob) && !ob->to_forward) ||
++	            si->state != SI_ST_EST)))) {
+ 	out_wakeup:
+ 		if (!(si->flags & SI_FL_DONT_WAKE) && si->owner)
+ 			task_wakeup(si->owner, TASK_WOKEN_IO);
+-- 
+1.8.3.2
+

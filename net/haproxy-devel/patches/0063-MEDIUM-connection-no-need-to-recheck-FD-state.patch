@@ -1,0 +1,47 @@
+From d8375891fcd48ecd5069a7d6838d6e07b5cf06b0 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 21 Jan 2014 11:01:08 +0100
+Subject: [PATCH 63/69] MEDIUM: connection: no need to recheck FD state
+
+We already have everything in the connection flags using the
+CO_FL_DATA_*_ENA bits combined with the fd's ready state, so
+we do not need to check fdtab[fd].ev anymore. This considerably
+simplifies the connection handling logic since it doesn't
+have to mix connection flags with past polling states.
+---
+ src/connection.c | 12 ++++--------
+ 1 file changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/src/connection.c b/src/connection.c
+index 876d71a..f85e775 100644
+--- a/src/connection.c
++++ b/src/connection.c
+@@ -92,10 +92,8 @@ int conn_fd_handler(int fd)
+ 	 * that we must absolutely test conn->xprt at each step in case it suddenly
+ 	 * changes due to a quick unexpected close().
+ 	 */
+-	if ((fdtab[fd].ev & (FD_POLL_IN | FD_POLL_HUP | FD_POLL_ERR)) &&
+-	    conn->xprt &&
+-	    fd_recv_ready(fd) &&
+-	    !(conn->flags & (CO_FL_WAIT_ROOM|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
++	if (conn->xprt && fd_recv_ready(fd) &&
++	    ((conn->flags & (CO_FL_DATA_RD_ENA|CO_FL_WAIT_ROOM|CO_FL_ERROR|CO_FL_HANDSHAKE)) == CO_FL_DATA_RD_ENA)) {
+ 		/* force detection of a flag change : it's impossible to have both
+ 		 * CONNECTED and WAIT_CONN so we're certain to trigger a change.
+ 		 */
+@@ -103,10 +101,8 @@ int conn_fd_handler(int fd)
+ 		conn->data->recv(conn);
+ 	}
+ 
+-	if ((fdtab[fd].ev & (FD_POLL_OUT | FD_POLL_ERR)) &&
+-	    conn->xprt &&
+-	    fd_send_ready(fd) &&
+-	    !(conn->flags & (CO_FL_WAIT_DATA|CO_FL_ERROR|CO_FL_HANDSHAKE))) {
++	if (conn->xprt && fd_send_ready(fd) &&
++	    ((conn->flags & (CO_FL_DATA_WR_ENA|CO_FL_WAIT_DATA|CO_FL_ERROR|CO_FL_HANDSHAKE)) == CO_FL_DATA_WR_ENA)) {
+ 		/* force detection of a flag change : it's impossible to have both
+ 		 * CONNECTED and WAIT_CONN so we're certain to trigger a change.
+ 		 */
+-- 
+1.8.3.2
+
