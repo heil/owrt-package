@@ -1,0 +1,35 @@
+From 59ad9d65939c07e5dc83332b68817a1cdcf80729 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 27 Jan 2014 16:04:43 +0100
+Subject: [PATCH 70/70] BUG/MEDIUM: pattern: "pat_parse_dotted_ver()" set bad
+ expect_type.
+
+This is a regression introducted by the patches "MINOR: pattern: Each
+pattern sets the expected input type" and "MEDIUM: acl: Last patch
+change the output type". The expected value is SMP_T_CSTR in place of
+SMP_T_UINT.
+
+This bug impact all the acl using the parser "pat_parse_dotted_ver()".
+The two acl are "req_ssl_ver()" and "req.ssl_ver()".
+
+This is a recent bug, no backport is needed.
+---
+ src/pattern.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/pattern.c b/src/pattern.c
+index ce12a0e..306b514 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -495,7 +495,7 @@ int pat_parse_dotted_ver(const char **text, struct pattern *pattern, enum pat_us
+ 		return 0;
+ 	}
+ 
+-	pattern->expect_type = SMP_T_CSTR;
++	pattern->expect_type = SMP_T_UINT;
+ 
+ 	if (!last)
+ 		pattern->val.range.min = i;
+-- 
+1.8.3.2
+
