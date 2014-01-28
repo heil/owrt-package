@@ -1,0 +1,111 @@
+From a43ba4eee039e5b28d74a2ef59baff276cb7b8cf Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Tue, 28 Jan 2014 18:14:25 +0100
+Subject: [PATCH 77/77] MINOR: http: smp_fetch_capture_header_* fetch captured
+ headers
+
+Allows you to fetch a captured header content with capture.res.hdr()
+and capture.req.hdr().
+---
+ doc/configuration.txt | 10 +++++++++
+ src/proto_http.c      | 56 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 0fd73a4..68603bc 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -10456,6 +10456,16 @@ cookie([<name>]) : string (deprecated)
+   ambiguously uses the direction based on the context where it is used.
+   See also : "appsession".
+ 
++capture.req.hdr(<idx>) : string
++  This extracts the content of the header captured by the "capture request
++  header", idx is the position of the capture keyword in the configuration.
++  See also: "capture request header"
++
++capture.res.hdr(<idx>) : string
++  This extracts the content of the header captured by the "capture response
++  header", idx is the position of the capture keyword in the configuration.
++  See also: "capture response header"
++
+ hdr([<name>[,<occ>]]) : string
+   This is equivalent to req.hdr() when used on requests, and to res.hdr() when
+   used on responses. Please refer to these respective fetches for more details.
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 95fb870..1484e13 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -9646,6 +9646,58 @@ extract_cookie_value(char *hdr, const char *hdr_end,
+ 	return NULL;
+ }
+ 
++/* Fetch a captured HTTP request header. The index is the position of
++ * the "capture" option in the configuration file
++ */
++static int
++smp_fetch_capture_header_req(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++                 const struct arg *args, struct sample *smp, const char *kw)
++{
++	struct proxy *fe = l4->fe;
++	struct http_txn *txn = l7;
++	int idx;
++
++	if (!args || args->type != ARGT_UINT)
++		return 0;
++
++	idx = args->data.uint;
++
++	if (idx > (fe->nb_req_cap - 1) || txn->req.cap == NULL || txn->req.cap[idx] == NULL)
++		return 0;
++
++	smp->type = SMP_T_CSTR;
++	smp->data.str.str = txn->req.cap[idx];
++	smp->data.str.len = strlen(txn->req.cap[idx]);
++
++	return 1;
++}
++
++/* Fetch a captured HTTP response header. The index is the position of
++ * the "capture" option in the configuration file
++ */
++static int
++smp_fetch_capture_header_res(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++                 const struct arg *args, struct sample *smp, const char *kw)
++{
++	struct proxy *fe = l4->fe;
++	struct http_txn *txn = l7;
++	int idx;
++
++	if (!args || args->type != ARGT_UINT)
++		return 0;
++
++	idx = args->data.uint;
++
++	if (idx > (fe->nb_rsp_cap - 1) || txn->rsp.cap == NULL || txn->rsp.cap[idx] == NULL)
++		return 0;
++
++	smp->type = SMP_T_CSTR;
++	smp->data.str.str = txn->rsp.cap[idx];
++	smp->data.str.len = strlen(txn->rsp.cap[idx]);
++
++	return 1;
++}
++
+ /* Iterate over all cookies present in a message. The context is stored in
+  * smp->ctx.a[0] for the in-header position, smp->ctx.a[1] for the
+  * end-of-header-value, and smp->ctx.a[2] for the hdr_ctx. Depending on
+@@ -10204,6 +10256,10 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+ 	{ "base32",          smp_fetch_base32,         0,                NULL,    SMP_T_UINT, SMP_USE_HRQHV },
+ 	{ "base32+src",      smp_fetch_base32_src,     0,                NULL,    SMP_T_BIN,  SMP_USE_HRQHV },
+ 
++	/* capture are allocated and are permanent in the session */
++	{ "capture.req.hdr", smp_fetch_capture_header_req, ARG1(1, UINT), NULL, SMP_T_CSTR, SMP_USE_HRQHP },
++	{ "capture.res.hdr", smp_fetch_capture_header_res, ARG1(1, UINT), NULL, SMP_T_CSTR, SMP_USE_HRSHP },
++
+ 	/* cookie is valid in both directions (eg: for "stick ...") but cook*
+ 	 * are only here to match the ACL's name, are request-only and are used
+ 	 * for ACL compatibility only.
+-- 
+1.8.3.2
+
