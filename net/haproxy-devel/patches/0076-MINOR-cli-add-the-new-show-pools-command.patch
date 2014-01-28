@@ -1,0 +1,168 @@
+From 12833bbca510857c6505fc18486635a08731d443 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 28 Jan 2014 16:49:56 +0100
+Subject: [PATCH 76/76] MINOR: cli: add the new "show pools" command
+
+show pools
+  Dump the status of internal memory pools. This is useful to track memory
+  usage when suspecting a memory leak for example. It does exactly the same
+  as the SIGQUIT when running in foreground except that it does not flush
+  the pools.
+---
+ doc/configuration.txt   |  6 ++++++
+ include/common/memory.h |  1 +
+ src/dumpstats.c         | 23 +++++++++++++++++++++++
+ src/memory.c            | 19 +++++++++++++------
+ 4 files changed, 43 insertions(+), 6 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 50985eb..0fd73a4 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -12725,6 +12725,12 @@ show map [<map>]
+   Dump info about map converters. Without argument, the list of all available
+   maps is returned. If a <map> is specified, its contents are dumped.
+ 
++show pools
++  Dump the status of internal memory pools. This is useful to track memory
++  usage when suspecting a memory leak for example. It does exactly the same
++  as the SIGQUIT when running in foreground except that it does not flush
++  the pools.
++
+ show sess
+   Dump all known sessions. Avoid doing this on slow connections as this can
+   be huge. This command is restricted and can only be issued on sockets
+diff --git a/include/common/memory.h b/include/common/memory.h
+index 96519d4..dd2b21f 100644
+--- a/include/common/memory.h
++++ b/include/common/memory.h
+@@ -145,6 +145,7 @@ struct pool_head *create_pool(char *name, unsigned int size, unsigned int flags)
+ 
+ /* Dump statistics on pools usage.
+  */
++void dump_pools_to_trash();
+ void dump_pools(void);
+ 
+ /*
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index c2dfe1f..3adfdf3 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -81,9 +81,11 @@ enum {
+ 	STAT_CLI_O_MAPS,     /* list all maps */
+ 	STAT_CLI_O_MAP,      /* list all map entries of a map */
+ 	STAT_CLI_O_MLOOK,    /* lookup a map entry */
++	STAT_CLI_O_POOLS,    /* dump memory pools */
+ };
+ 
+ static int stats_dump_info_to_buffer(struct stream_interface *si);
++static int stats_dump_pools_to_buffer(struct stream_interface *si);
+ static int stats_dump_full_sess_to_buffer(struct stream_interface *si, struct session *sess);
+ static int stats_dump_sess_to_buffer(struct stream_interface *si);
+ static int stats_dump_errors_to_buffer(struct stream_interface *si);
+@@ -133,6 +135,7 @@ static const char stats_sock_usage_msg[] =
+ 	"  prompt         : toggle interactive mode with prompt\n"
+ 	"  quit           : disconnect\n"
+ 	"  show info      : report information about the running process\n"
++	"  show pools     : report information about the memory pools usage\n"
+ 	"  show stat      : report counters for each proxy and server\n"
+ 	"  show errors    : report last request and response errors for each proxy\n"
+ 	"  show sess [id] : report the list of current sessions or dump this session\n"
+@@ -1053,6 +1056,10 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			appctx->st2 = STAT_ST_INIT;
+ 			appctx->st0 = STAT_CLI_O_INFO; // stats_dump_info_to_buffer
+ 		}
++		else if (strcmp(args[1], "pools") == 0) {
++			appctx->st2 = STAT_ST_INIT;
++			appctx->st0 = STAT_CLI_O_POOLS; // stats_dump_pools_to_buffer
++		}
+ 		else if (strcmp(args[1], "sess") == 0) {
+ 			appctx->st2 = STAT_ST_INIT;
+ 			if (s->listener->bind_conf->level < ACCESS_LVL_OPER) {
+@@ -2173,6 +2180,10 @@ static void cli_io_handler(struct stream_interface *si)
+ 			case STAT_CLI_O_MLOOK:
+ 				if (stats_map_lookup(si))
+ 					appctx->st0 = STAT_CLI_PROMPT;
++			case STAT_CLI_O_POOLS:
++				if (stats_dump_pools_to_buffer(si))
++					appctx->st0 = STAT_CLI_PROMPT;
++				break;
+ 			default: /* abnormal state */
+ 				appctx->st0 = STAT_CLI_PROMPT;
+ 				break;
+@@ -2333,6 +2344,18 @@ static int stats_dump_info_to_buffer(struct stream_interface *si)
+ 	return 1;
+ }
+ 
++/* This function dumps memory usage information onto the stream interface's
++ * read buffer. It returns 0 as long as it does not complete, non-zero upon
++ * completion. No state is used.
++ */
++static int stats_dump_pools_to_buffer(struct stream_interface *si)
++{
++	dump_pools_to_trash();
++	if (bi_putchk(si->ib, &trash) == -1)
++		return 0;
++	return 1;
++}
++
+ /* Dumps a frontend's line to the trash for the current proxy <px> and uses
+  * the state from stream interface <si>. The caller is responsible for clearing
+  * the trash if needed. Returns non-zero if it emits anything, zero otherwise.
+diff --git a/src/memory.c b/src/memory.c
+index 128f6ef..1e62259 100644
+--- a/src/memory.c
++++ b/src/memory.c
+@@ -10,6 +10,7 @@
+  *
+  */
+ 
++#include <types/global.h>
+ #include <common/config.h>
+ #include <common/debug.h>
+ #include <common/memory.h>
+@@ -176,18 +177,17 @@ void *pool_destroy2(struct pool_head *pool)
+ 	return NULL;
+ }
+ 
+-/* Dump statistics on pools usage.
+- */
+-void dump_pools(void)
++/* This function dumps memory usage information into the trash buffer. */
++void dump_pools_to_trash()
+ {
+ 	struct pool_head *entry;
+ 	unsigned long allocated, used;
+ 	int nbpools;
+ 
+ 	allocated = used = nbpools = 0;
+-	qfprintf(stderr, "Dumping pools usage.\n");
++	chunk_printf(&trash, "Dumping pools usage. Use SIGQUIT to flush them.\n");
+ 	list_for_each_entry(entry, &pools, list) {
+-		qfprintf(stderr, "  - Pool %s (%d bytes) : %d allocated (%u bytes), %d used, %d users%s\n",
++		chunk_appendf(&trash, "  - Pool %s (%d bytes) : %d allocated (%u bytes), %d used, %d users%s\n",
+ 			 entry->name, entry->size, entry->allocated,
+ 			 entry->size * entry->allocated, entry->used,
+ 			 entry->users, (entry->flags & MEM_F_SHARED) ? " [SHARED]" : "");
+@@ -196,10 +196,17 @@ void dump_pools(void)
+ 		used += entry->used * entry->size;
+ 		nbpools++;
+ 	}
+-	qfprintf(stderr, "Total: %d pools, %lu bytes allocated, %lu used.\n",
++	chunk_appendf(&trash, "Total: %d pools, %lu bytes allocated, %lu used.\n",
+ 		 nbpools, allocated, used);
+ }
+ 
++/* Dump statistics on pools usage. */
++void dump_pools(void)
++{
++	dump_pools_to_trash();
++	qfprintf(stderr, "%s", trash.str);
++}
++
+ /*
+  * Local variables:
+  *  c-indent-level: 8
+-- 
+1.8.3.2
+

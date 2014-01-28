@@ -1,0 +1,39 @@
+From 60bb020d702d04076ff16c9cf09c67c6bf7bb638 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 27 Jan 2014 18:20:48 +0100
+Subject: [PATCH 71/76] BUG/MINOR: sample: The c_str2int converter does not
+ fail if the entry is not an integer
+
+If the string not start with a number, the converter fails. In other, it
+converts a maximum of characters to a number and stop to the first
+character that not match a number.
+---
+ src/sample.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index 2a114d9..f0a346a 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -549,11 +549,17 @@ static int c_str2int(struct sample *smp)
+ 	int i;
+ 	uint32_t ret = 0;
+ 
++	if (smp->data.str.len == 0)
++		return 0;
++
+ 	for (i = 0; i < smp->data.str.len; i++) {
+ 		uint32_t val = smp->data.str.str[i] - '0';
+ 
+-		if (val > 9)
++		if (val > 9) {
++			if (i == 0)
++				return 0;
+ 			break;
++		}
+ 
+ 		ret = ret * 10 + val;
+ 	}
+-- 
+1.8.3.2
+
