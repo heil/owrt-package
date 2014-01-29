@@ -1,0 +1,68 @@
+From 59ad1a2e7584669d591ccd290fd027e8c190ebe4 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 29 Jan 2014 14:39:58 +0100
+Subject: [PATCH 83/84] BUG/MINOR: config: correctly report when log-format
+ headers require HTTP mode
+
+When using some log-format directives in header insertion without HTTP mode,
+the config parser used to report a cryptic message about option httplog being
+downgraded to tcplog and with "(null):0" as the file name and line number.
+
+This is because the lfs_file and lfs_line were not properly set for some valid
+use cases of log-format directives. Now we cover http-request and http-response
+as well.
+---
+ src/proto_http.c | 9 +++++++++
+ src/proxy.c      | 2 +-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 76932f5..7916c27 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8383,6 +8383,9 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 		proxy->conf.args.ctx = ARGC_HRQ;
+ 		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, 0,
+ 				       (proxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++		free(proxy->conf.lfs_file);
++		proxy->conf.lfs_file = strdup(proxy->conf.args.file);
++		proxy->conf.lfs_line = proxy->conf.args.line;
+ 		cur_arg += 2;
+ 	} else if (strcmp(args[0], "redirect") == 0) {
+ 		struct redirect_rule *redir;
+@@ -8551,6 +8554,9 @@ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, i
+ 		proxy->conf.args.ctx = ARGC_HRS;
+ 		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, 0,
+ 				       (proxy->cap & PR_CAP_BE) ? SMP_VAL_BE_HRS_HDR : SMP_VAL_FE_HRS_HDR);
++		free(proxy->conf.lfs_file);
++		proxy->conf.lfs_file = strdup(proxy->conf.args.file);
++		proxy->conf.lfs_line = proxy->conf.args.line;
+ 		cur_arg += 2;
+ 	} else {
+ 		Alert("parsing [%s:%d]: 'http-response' expects 'allow', 'deny', 'redirect', 'add-header', 'set-header', 'set-nice', 'set-tos', 'set-mark', 'set-log-level', but got '%s'%s.\n",
+@@ -8704,6 +8710,9 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+ 		if (!(type == REDIRECT_TYPE_PREFIX && destination[0] == '/' && destination[1] == '\0')) {
+ 			parse_logformat_string(destination, curproxy, &rule->rdr_fmt, 0,
+ 			                       (curproxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++			free(curproxy->conf.lfs_file);
++			curproxy->conf.lfs_file = strdup(curproxy->conf.args.file);
++			curproxy->conf.lfs_line = curproxy->conf.args.line;
+ 		}
+ 	}
+ 
+diff --git a/src/proxy.c b/src/proxy.c
+index f0863d6..5458f1b 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -406,7 +406,7 @@ int proxy_cfg_ensure_no_http(struct proxy *curproxy)
+ 	}
+ 	if (curproxy->to_log & (LW_REQ | LW_RESP)) {
+ 		curproxy->to_log &= ~(LW_REQ | LW_RESP);
+-		Warning("parsing [%s:%d] : 'option httplog' not usable with %s '%s' (needs 'mode http'). Falling back to 'option tcplog'.\n",
++		Warning("parsing [%s:%d] : HTTP log/header format not usable with %s '%s' (needs 'mode http').\n",
+ 			curproxy->conf.lfs_file, curproxy->conf.lfs_line,
+ 			proxy_type_str(curproxy), curproxy->id);
+ 	}
+-- 
+1.8.3.2
+
