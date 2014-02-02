@@ -1,0 +1,66 @@
+From d8b2bb5c05e64c65ea3a6c9c69e719d853a667ad Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Tue, 28 Jan 2014 15:43:53 +0100
+Subject: [PATCH 93/94] MINOR: ssl: handshake optim for long certificate
+ chains.
+
+Suggested on the mailing list by Ilya Grigorik and greatly inspired
+from Nginx code: we try to dynamicaly rise the output buffer size from
+4k to 16k during the handshake to reduce the number of round trips.
+This is mostly beneficial when initcwnd==10.
+
+Ilya's tests confirm the gain and show a handshake time divided by 3 :
+
+before:
+   http://www.webpagetest.org/result/140116_VW_3bd95a5cfb7e667498ef13b59639b9bf/2/details/
+after:
+   http://www.webpagetest.org/result/140201_2X_03511ec63344f442b81c24d2bf39f59d/3/details/
+---
+ src/ssl_sock.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 45a6dd0..7107a31 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -75,6 +75,7 @@
+ #include <proto/task.h>
+ 
+ #define SSL_SOCK_ST_FL_VERIFY_DONE  0x00000001
++#define SSL_SOCK_ST_FL_16K_WBFSIZE  0x00000002
+ /* bits 0xFFFF0000 are reserved to store verify errors */
+ 
+ /* Verify errors macros */
+@@ -101,6 +102,7 @@ void ssl_sock_infocbk(const SSL *ssl, int where, int ret)
+ {
+ 	struct connection *conn = (struct connection *)SSL_get_app_data(ssl);
+ 	(void)ret; /* shut gcc stupid warning */
++	BIO *write_bio;
+ 
+ 	if (where & SSL_CB_HANDSHAKE_START) {
+ 		/* Disable renegotiation (CVE-2009-3555) */
+@@ -109,6 +111,21 @@ void ssl_sock_infocbk(const SSL *ssl, int where, int ret)
+ 			conn->err_code = CO_ER_SSL_RENEG;
+ 		}
+ 	}
++
++	if ((where & SSL_CB_ACCEPT_LOOP) == SSL_CB_ACCEPT_LOOP) {
++		if (!(conn->xprt_st & SSL_SOCK_ST_FL_16K_WBFSIZE)) {
++			/* Long certificate chains optimz
++			   If write and read bios are differents, we
++			   consider that the buffering was activated,
++                           so we rise the output buffer size from 4k
++			   to 16k */
++			write_bio = SSL_get_wbio(ssl);
++			if (write_bio != SSL_get_rbio(ssl)) {
++				BIO_set_write_buffer_size(write_bio, 16384);
++				conn->xprt_st |= SSL_SOCK_ST_FL_16K_WBFSIZE;
++			}
++		}
++	}
+ }
+ 
+ /* Callback is called for each certificate of the chain during a verify
+-- 
+1.8.3.2
+
