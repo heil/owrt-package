@@ -1,0 +1,35 @@
+From a23ee3a2ea12bcb8244304d308b9f3fe69169fd8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 5 Feb 2014 00:18:47 +0100
+Subject: [PATCH 4/6] MINOR: session: clean up the connection free code
+
+Use conn_free() instead of pool_free2(conn...). This makes the code more
+auditable.
+---
+ src/session.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/session.c b/src/session.c
+index aae0c69..0a03677 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -314,6 +314,7 @@ static void kill_mini_session(struct session *s)
+ 
+ 	/* kill the connection now */
+ 	conn_force_close(conn);
++	conn_free(conn);
+ 
+ 	s->fe->feconn--;
+ 	session_store_counters(s);
+@@ -335,8 +336,6 @@ static void kill_mini_session(struct session *s)
+ 
+ 	task_delete(s->task);
+ 	task_free(s->task);
+-
+-	pool_free2(pool2_connection, conn);
+ 	pool_free2(pool2_session, s);
+ }
+ 
+-- 
+1.8.3.2
+

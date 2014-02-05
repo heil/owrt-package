@@ -1,0 +1,35 @@
+From f621bea74ab74cb19c48f972a066aba3e8326401 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Mon, 3 Feb 2014 22:38:15 +0100
+Subject: [PATCH 3/6] BUG/MINOR: tcpcheck connect wrong behavior
+
+A typo made first step of a tcpcheck to be a connect step. This patch
+prevents this behavior. The bug was introduced in 1.5-dev22 with
+"tcp-check connect" and only affects these directives. No backport is
+needed.
+---
+ src/checks.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index c3051aa..80f0bc0 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1578,8 +1578,12 @@ static struct task *process_chk(struct task *t)
+ 		}
+ 
+ 		if (check->type == PR_O2_TCPCHK_CHK) {
+-			tcpcheck_main(conn);
+-			return t;
++			struct tcpcheck_rule *r = (struct tcpcheck_rule *) s->proxy->tcpcheck_rules.n;
++			/* if first step is a 'connect', then tcpcheck_main must run it */
++			if (r->action == TCPCHK_ACT_CONNECT) {
++				tcpcheck_main(conn);
++				return t;
++			}
+ 		}
+ 
+ 
+-- 
+1.8.3.2
+

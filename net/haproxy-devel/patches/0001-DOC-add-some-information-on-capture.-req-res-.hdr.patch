@@ -1,0 +1,31 @@
+From 4d5b2e5a1d8396b728e5d3fc1d0973bdee19d1c0 Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Tue, 4 Feb 2014 21:04:21 +0100
+Subject: [PATCH 1/6] DOC: add some information on capture.(req|res).hdr
+
+Clarify the beginning of the index.
+---
+ doc/configuration.txt | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 95f8eec..014d9db 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -10604,11 +10604,13 @@ cookie([<name>]) : string (deprecated)
+ capture.req.hdr(<idx>) : string
+   This extracts the content of the header captured by the "capture request
+   header", idx is the position of the capture keyword in the configuration.
++  The first entry is an index of 0.
+   See also: "capture request header"
+ 
+ capture.res.hdr(<idx>) : string
+   This extracts the content of the header captured by the "capture response
+   header", idx is the position of the capture keyword in the configuration.
++  The first entry is an index of 0.
+   See also: "capture response header"
+ 
+ hdr([<name>[,<occ>]]) : string
+-- 
+1.8.3.2
+
