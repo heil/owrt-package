@@ -1,0 +1,71 @@
+From 7bed945be0cc9c91cd0114a9bcb965702f9389e3 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 2 Feb 2014 02:00:24 +0100
+Subject: [PATCH 8/8] OPTIM: ssl: implement dynamic record size adjustment
+
+By having the stream interface pass the CF_STREAMER flag to the
+snd_buf() primitive, we're able to tell the send layer whether
+we're sending large chunks or small ones.
+
+We use this information in SSL to adjust the max record dynamically.
+This results in small chunks respecting tune.ssl.maxrecord at the
+beginning of a transfer or for small transfers, with an automatic
+switch to full records if the exchanges last long. This allows the
+receiver to parse HTML contents on the fly without having to retrieve
+16kB of data, which is even more important with small initcwnd since
+the receiver does not need to wait for round trips to start fetching
+new objects. However, sending large files still produces large chunks.
+
+For example, with tune.ssl.maxrecord = 2859, we see 5 write(2885)
+sent in two segments each and 6 write(16421).
+
+This idea was first proposed on the haproxy mailing list by Ilya Grigorik.
+---
+ include/types/connection.h | 1 +
+ src/ssl_sock.c             | 3 ++-
+ src/stream_interface.c     | 3 +++
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/include/types/connection.h b/include/types/connection.h
+index f8e526a..5341a86 100644
+--- a/include/types/connection.h
++++ b/include/types/connection.h
+@@ -180,6 +180,7 @@ enum {
+ /* flags that can be passed to xprt->snd_buf() */
+ enum {
+ 	CO_SFL_MSG_MORE    = 0x0001,    /* More data to come afterwards */
++	CO_SFL_STREAMER    = 0x0002,    /* Producer is continuously streaming data */
+ };
+ 
+ /* xprt_ops describes transport-layer operations for a connection. They
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 19505e5..5ac2b06 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1528,7 +1528,8 @@ static int ssl_sock_from_buf(struct connection *conn, struct buffer *buf, int fl
+ 	while (buf->o) {
+ 		try = bo_contig_data(buf);
+ 
+-		if (global.tune.ssl_max_record && try > global.tune.ssl_max_record)
++		if (!(flags & CO_SFL_STREAMER) &&
++		    global.tune.ssl_max_record && try > global.tune.ssl_max_record)
+ 			try = global.tune.ssl_max_record;
+ 
+ 		ret = SSL_write(conn->xprt_ctx, bo_ptr(buf), try);
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 967f645..b3364a3 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -701,6 +701,9 @@ static void si_conn_send(struct connection *conn)
+ 		    ((chn->flags & (CF_SHUTW|CF_SHUTW_NOW)) == CF_SHUTW_NOW))
+ 			send_flag |= CO_SFL_MSG_MORE;
+ 
++		if (chn->flags & CF_STREAMER)
++			send_flag |= CO_SFL_STREAMER;
++
+ 		ret = conn->xprt->snd_buf(conn, chn->buf, send_flag);
+ 		if (ret > 0) {
+ 			chn->flags |= CF_WRITE_PARTIAL;
+-- 
+1.8.3.2
+

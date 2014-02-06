@@ -1,0 +1,120 @@
+From 1049b1f55137b6f28d829b81473ca495255b6e07 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 2 Feb 2014 01:51:17 +0100
+Subject: [PATCH 7/8] MEDIUM: connection: don't use real send() flags in
+ snd_buf()
+
+This prevents us from passing other useful info and requires the
+upper levels to know these flags. Let's use a new flags category
+instead : CO_SFL_*. For now, only MSG_MORE has been remapped.
+---
+ include/types/connection.h | 4 ++++
+ src/checks.c               | 4 ++--
+ src/raw_sock.c             | 8 ++++----
+ src/ssl_sock.c             | 4 ++--
+ src/stream_interface.c     | 4 ++--
+ 5 files changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/include/types/connection.h b/include/types/connection.h
+index eb9307f..f8e526a 100644
+--- a/include/types/connection.h
++++ b/include/types/connection.h
+@@ -177,6 +177,10 @@ enum {
+ 	CO_SRC_BIND        = 0x0008,    /* bind to a specific source address when connecting */
+ };
+ 
++/* flags that can be passed to xprt->snd_buf() */
++enum {
++	CO_SFL_MSG_MORE    = 0x0001,    /* More data to come afterwards */
++};
+ 
+ /* xprt_ops describes transport-layer operations for a connection. They
+  * generally run over a socket-based control layer, but not always. Some
+diff --git a/src/checks.c b/src/checks.c
+index b195c73..c9a531f 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -971,7 +971,7 @@ static void event_srv_chk_w(struct connection *conn)
+ 	}
+ 
+ 	if (check->bo->o) {
+-		conn->xprt->snd_buf(conn, check->bo, MSG_DONTWAIT | MSG_NOSIGNAL);
++		conn->xprt->snd_buf(conn, check->bo, 0);
+ 		if (conn->flags & CO_FL_ERROR) {
+ 			chk_report_conn_err(conn, errno, 0);
+ 			__conn_data_stop_both(conn);
+@@ -2037,7 +2037,7 @@ static void tcpcheck_main(struct connection *conn)
+ 		     check->current_step->action != TCPCHK_ACT_SEND ||
+ 		     check->current_step->string_len >= buffer_total_space(check->bo))) {
+ 
+-			if (conn->xprt->snd_buf(conn, check->bo, MSG_DONTWAIT | MSG_NOSIGNAL) <= 0) {
++			if (conn->xprt->snd_buf(conn, check->bo, 0) <= 0) {
+ 				if (conn->flags & CO_FL_ERROR) {
+ 					chk_report_conn_err(conn, errno, 0);
+ 					__conn_data_stop_both(conn);
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index 4b125ce..3708b19 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -341,8 +341,8 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 
+ 
+ /* Send all pending bytes from buffer <buf> to connection <conn>'s socket.
+- * <flags> may contain MSG_MORE to make the system hold on without sending
+- * data too fast.
++ * <flags> may contain some CO_SFL_* flags to hint the system about other
++ * pending data for example.
+  * Only one call to send() is performed, unless the buffer wraps, in which case
+  * a second call may be performed. The connection's flags are updated with
+  * whatever special event is detected (error, empty). The caller is responsible
+@@ -372,10 +372,10 @@ static int raw_sock_from_buf(struct connection *conn, struct buffer *buf, int fl
+ 			try = buf->data + try - buf->p;
+ 
+ 		send_flag = MSG_DONTWAIT | MSG_NOSIGNAL;
+-		if (try < buf->o)
++		if (try < buf->o || flags & CO_SFL_MSG_MORE)
+ 			send_flag |= MSG_MORE;
+ 
+-		ret = send(conn->t.sock.fd, bo_ptr(buf), try, send_flag | flags);
++		ret = send(conn->t.sock.fd, bo_ptr(buf), try, send_flag);
+ 
+ 		if (ret > 0) {
+ 			buf->o -= ret;
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 7107a31..19505e5 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -1499,8 +1499,8 @@ static int ssl_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 
+ 
+ /* Send all pending bytes from buffer <buf> to connection <conn>'s socket.
+- * <flags> may contain MSG_MORE to make the system hold on without sending
+- * data too fast, but this flag is ignored at the moment.
++ * <flags> may contain some CO_SFL_* flags to hint the system about other
++ * pending data for example, but this flag is ignored at the moment.
+  * Only one call to send() is performed, unless the buffer wraps, in which case
+  * a second call may be performed. The connection's flags are updated with
+  * whatever special event is detected (error, empty). The caller is responsible
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index c4d2715..967f645 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -693,13 +693,13 @@ static void si_conn_send(struct connection *conn)
+ 		 * The test is arranged so that the most common case does only 2
+ 		 * tests.
+ 		 */
+-		unsigned int send_flag = MSG_DONTWAIT | MSG_NOSIGNAL;
++		unsigned int send_flag = 0;
+ 
+ 		if ((!(chn->flags & (CF_NEVER_WAIT|CF_SEND_DONTWAIT)) &&
+ 		     ((chn->to_forward && chn->to_forward != CHN_INFINITE_FORWARD) ||
+ 		      (chn->flags & CF_EXPECT_MORE))) ||
+ 		    ((chn->flags & (CF_SHUTW|CF_SHUTW_NOW)) == CF_SHUTW_NOW))
+-			send_flag |= MSG_MORE;
++			send_flag |= CO_SFL_MSG_MORE;
+ 
+ 		ret = conn->xprt->snd_buf(conn, chn->buf, send_flag);
+ 		if (ret > 0) {
+-- 
+1.8.3.2
+
