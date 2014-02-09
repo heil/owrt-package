@@ -1,0 +1,346 @@
+From a20cb85eba3ac8249cd746cca495e8364800d0bd Mon Sep 17 00:00:00 2001
+From: Bhaskar Maddala <bhaskar@tumblr.com>
+Date: Mon, 3 Feb 2014 16:26:46 -0500
+Subject: [PATCH 09/10] MINOR: stats: Enhancement to stats page to provide
+ information of last session time.
+
+Summary:
+Track and report last session time on the stats page for each server
+in every backend, as well as the backend.
+
+This attempts to address the requirement in the ROADMAP
+
+  - add a last activity date for each server (req/resp) that will be
+    displayed in the stats. It will be useful with soft stop.
+
+The stats page reports this as time elapsed since last session. This
+change does not adequately address the requirement for long running
+session (websocket, RDP... etc).
+---
+ include/proto/backend.h  |  8 ++++++++
+ include/proto/server.h   |  9 +++++++++
+ include/types/counters.h |  2 ++
+ src/backend.c            | 11 +++++++++++
+ src/dumpstats.c          | 44 ++++++++++++++++++++++++--------------------
+ src/proto_http.c         |  1 +
+ src/server.c             |  8 ++++++++
+ src/session.c            |  4 ++++
+ 8 files changed, 67 insertions(+), 20 deletions(-)
+
+diff --git a/include/proto/backend.h b/include/proto/backend.h
+index 74caaaa..68ba3d6 100644
+--- a/include/proto/backend.h
++++ b/include/proto/backend.h
+@@ -23,6 +23,7 @@
+ #define _PROTO_BACKEND_H
+ 
+ #include <common/config.h>
++#include <common/time.h>
+ 
+ #include <types/backend.h>
+ #include <types/proxy.h>
+@@ -43,6 +44,13 @@ void recount_servers(struct proxy *px);
+ void update_backend_weight(struct proxy *px);
+ struct server *get_server_sh(struct proxy *px, const char *addr, int len);
+ struct server *get_server_uh(struct proxy *px, char *uri, int uri_len);
++int be_lastsession(const struct proxy *be);
++
++/* set the time of last session on the backend */
++static void inline be_set_sess_last(struct proxy *be)
++{
++	be->be_counters.last_sess = now.tv_sec;
++}
+ 
+ /* This function returns non-zero if a server with the given weight and state
+  * is usable for LB, otherwise zero.
+diff --git a/include/proto/server.h b/include/proto/server.h
+index 93f4f81..750d8d5 100644
+--- a/include/proto/server.h
++++ b/include/proto/server.h
+@@ -25,14 +25,17 @@
+ #include <unistd.h>
+ 
+ #include <common/config.h>
++#include <common/time.h>
+ #include <types/proxy.h>
+ #include <types/queue.h>
+ #include <types/server.h>
+ 
+ #include <proto/queue.h>
++#include <proto/log.h>
+ #include <proto/freq_ctr.h>
+ 
+ int srv_downtime(const struct server *s);
++int srv_lastsession(const struct server *s);
+ int srv_getinter(const struct check *check);
+ 
+ /* increase the number of cumulated connections on the designated server */
+@@ -44,6 +47,12 @@ static void inline srv_inc_sess_ctr(struct server *s)
+ 		s->counters.sps_max = s->sess_per_sec.curr_ctr;
+ }
+ 
++/* set the time of last session on the designated server */
++static void inline srv_set_sess_last(struct server *s)
++{
++	s->counters.last_sess = now.tv_sec;
++}
++
+ #endif /* _PROTO_SERVER_H */
+ 
+ /*
+diff --git a/include/types/counters.h b/include/types/counters.h
+index efb48f6..ecdc7cb 100644
+--- a/include/types/counters.h
++++ b/include/types/counters.h
+@@ -29,6 +29,7 @@ struct pxcounters {
+ 	long long    cum_conn;                  /* cumulated number of received connections */
+ 	long long    cum_sess;                  /* cumulated number of accepted connections */
+ 	long long  cum_lbconn;                  /* cumulated number of sessions processed by load balancing (BE only) */
++	unsigned long last_sess;                /* last session time */
+ 
+ 	unsigned int cps_max;                   /* maximum of new connections received per second */
+ 	unsigned int sps_max;                   /* maximum of new connections accepted per second (sessions) */
+@@ -85,6 +86,7 @@ struct srvcounters {
+ 
+ 	long long cum_sess;			/* cumulated number of sessions really sent to this server */
+ 	long long cum_lbconn;			/* cumulated number of sessions directed by load balancing */
++	unsigned long last_sess;                 /* last session time */
+ 
+ 	long long bytes_in;			/* number of bytes transferred from the client to the server */
+ 	long long bytes_out;			/* number of bytes transferred from the server to the client */
+diff --git a/src/backend.c b/src/backend.c
+index 8fcce7d..e561919 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -52,6 +52,14 @@
+ #include <proto/stream_interface.h>
+ #include <proto/task.h>
+ 
++int be_lastsession(const struct proxy *be)
++{
++	if (be->be_counters.last_sess)
++		return now.tv_sec - be->be_counters.last_sess;
++
++	return -1;
++}
++
+ /* helper function to invoke the correct hash method */
+ static unsigned long gen_hash(const struct proxy* px, const char* key, unsigned long len)
+ {
+@@ -668,6 +676,7 @@ int assign_server(struct session *s)
+ 			goto out;
+ 		}
+ 		else if (srv != prev_srv) {
++			be_set_sess_last(s->be);
+ 			s->be->be_counters.cum_lbconn++;
+ 			srv->counters.cum_lbconn++;
+ 		}
+@@ -1165,6 +1174,8 @@ int srv_redispatch_connect(struct session *t)
+ 		if (srv)
+ 			srv_inc_sess_ctr(srv);
+ 		if (srv)
++			srv_set_sess_last(srv);
++		if (srv)
+ 			srv->counters.failed_conns++;
+ 		t->be->be_counters.failed_conns++;
+ 
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 2599785..d147d0f 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -433,7 +433,7 @@ static void stats_dump_csv_header()
+ 	chunk_appendf(&trash,
+ 	              "# pxname,svname,"
+ 	              "qcur,qmax,"
+-	              "scur,smax,slim,stot,"
++	              "scur,smax,slim,stot,lastsess,"
+ 	              "bin,bout,"
+ 	              "dreq,dresp,"
+ 	              "ereq,econ,eresp,"
+@@ -2467,8 +2467,8 @@ static int stats_dump_fe_stats(struct stream_interface *si, struct proxy *px)
+ 
+ 		chunk_appendf(&trash,
+ 		              "</table></div></u></td>"
+-		              /* sessions: lbtot */
+-		              "<td></td>"
++		              /* sessions: lbtot, lastsess */
++		              "<td></td><td></td>"
+ 		              /* bytes : in */
+ 		              "<td>%s</td>"
+ 		              "",
+@@ -2505,8 +2505,8 @@ static int stats_dump_fe_stats(struct stream_interface *si, struct proxy *px)
+ 		chunk_appendf(&trash,
+ 		              /* pxid, name, queue cur, queue max, */
+ 		              "%s,FRONTEND,,,"
+-		              /* sessions : current, max, limit, total */
+-		              "%d,%d,%d,%lld,"
++		              /* sessions : current, max, limit, total, lastsess */
++		              "%d,%d,%d,%lld,,"
+ 		              /* bytes : in, out */
+ 		              "%lld,%lld,"
+ 		              /* denied: req, resp */
+@@ -2625,9 +2625,9 @@ static int stats_dump_li_stats(struct stream_interface *si, struct proxy *px, st
+ 		              "%s</td><td colspan=3></td>"
+ 		              /* sessions rate: current, max, limit */
+ 		              "<td colspan=3>&nbsp;</td>"
+-		              /* sessions: current, max, limit, total, lbtot */
++		              /* sessions: current, max, limit, total, lbtot, lastsess */
+ 		              "<td>%s</td><td>%s</td><td>%s</td>"
+-		              "<td>%s</td><td>&nbsp;</td>"
++		              "<td>%s</td><td>&nbsp;</td><td>&nbsp;</td>"
+ 		              /* bytes: in, out */
+ 		              "<td>%s</td><td>%s</td>"
+ 		              "",
+@@ -2655,8 +2655,8 @@ static int stats_dump_li_stats(struct stream_interface *si, struct proxy *px, st
+ 		chunk_appendf(&trash,
+ 		              /* pxid, name, queue cur, queue max, */
+ 		              "%s,%s,,,"
+-		              /* sessions: current, max, limit, total */
+-		              "%d,%d,%d,%lld,"
++		              /* sessions: current, max, limit, total, lastsess */
++		              "%d,%d,%d,%lld,,"
+ 		              /* bytes: in, out */
+ 		              "%lld,%lld,"
+ 		              /* denied: req, resp */
+@@ -2829,9 +2829,10 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 
+ 		chunk_appendf(&trash,
+ 		              "</table></div></u></td>"
+-		              /* sessions: lbtot */
+-		              "<td>%s</td>",
+-		              U2H(sv->counters.cum_lbconn));
++		              /* sessions: lbtot, last */
++		              "<td>%s</td><td>%s</td>",
++		              U2H(sv->counters.cum_lbconn),
++		              human_time(srv_lastsession(sv), 1));
+ 
+ 		chunk_appendf(&trash,
+ 		              /* bytes : in, out */
+@@ -2957,8 +2958,8 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		              "%s,%s,"
+ 		              /* queue : current, max */
+ 		              "%d,%d,"
+-		              /* sessions : current, max, limit, total */
+-		              "%d,%d,%s,%lld,"
++		              /* sessions : current, max, limit, total, lastsess */
++		              "%d,%d,%s,%lld,%d,"
+ 		              /* bytes : in, out */
+ 		              "%lld,%lld,"
+ 		              /* denied: req, resp */
+@@ -2971,6 +2972,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		              px->id, sv->id,
+ 		              sv->nbpend, sv->counters.nbpend_max,
+ 		              sv->cur_sess, sv->counters.cur_sess_max, LIM2A(sv->maxconn, ""), sv->counters.cum_sess,
++		              srv_lastsession(sv),
+ 		              sv->counters.bytes_in, sv->counters.bytes_out,
+ 		              sv->counters.failed_secu,
+ 		              sv->counters.failed_conns, sv->counters.failed_resp,
+@@ -3177,12 +3179,13 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 
+ 		chunk_appendf(&trash,
+ 		              "</table></div></u></td>"
+-		              /* sessions: lbtot */
+-		              "<td>%s</td>"
++		              /* sessions: lbtot, last */
++		              "<td>%s</td><td>%s</td>"
+ 		              /* bytes: in */
+ 		              "<td>%s</td>"
+ 		              "",
+ 		              U2H(px->be_counters.cum_lbconn),
++		              human_time(be_lastsession(px), 1),
+ 		              U2H(px->be_counters.bytes_in));
+ 
+ 		chunk_appendf(&trash,
+@@ -3238,8 +3241,8 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 		              "%s,BACKEND,"
+ 		              /* queue : current, max */
+ 		              "%d,%d,"
+-		              /* sessions : current, max, limit, total */
+-		              "%d,%d,%d,%lld,"
++		              /* sessions : current, max, limit, total, lastsess */
++		              "%d,%d,%d,%lld,%s,"
+ 		              /* bytes : in, out */
+ 		              "%lld,%lld,"
+ 		              /* denied: req, resp */
+@@ -3265,6 +3268,7 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 		              px->id,
+ 		              px->nbpend /* or px->totpend ? */, px->be_counters.nbpend_max,
+ 		              px->beconn, px->be_counters.conn_max, px->fullconn, px->be_counters.cum_conn,
++		              human_time(be_lastsession(px), 1),
+ 		              px->be_counters.bytes_in, px->be_counters.bytes_out,
+ 		              px->be_counters.denied_req, px->be_counters.denied_resp,
+ 		              px->be_counters.failed_conns, px->be_counters.failed_resp,
+@@ -3378,7 +3382,7 @@ static void stats_dump_html_px_hdr(struct stream_interface *si, struct proxy *px
+ 	chunk_appendf(&trash,
+ 	              "<th rowspan=2></th>"
+ 	              "<th colspan=3>Queue</th>"
+-	              "<th colspan=3>Session rate</th><th colspan=5>Sessions</th>"
++	              "<th colspan=3>Session rate</th><th colspan=6>Sessions</th>"
+ 	              "<th colspan=2>Bytes</th><th colspan=2>Denied</th>"
+ 	              "<th colspan=3>Errors</th><th colspan=2>Warnings</th>"
+ 	              "<th colspan=9>Server</th>"
+@@ -3386,7 +3390,7 @@ static void stats_dump_html_px_hdr(struct stream_interface *si, struct proxy *px
+ 	              "<tr class=\"titre\">"
+ 	              "<th>Cur</th><th>Max</th><th>Limit</th>"
+ 	              "<th>Cur</th><th>Max</th><th>Limit</th><th>Cur</th><th>Max</th>"
+-	              "<th>Limit</th><th>Total</th><th>LbTot</th><th>In</th><th>Out</th>"
++	              "<th>Limit</th><th>Total</th><th>LbTot</th><th>Last</th><th>In</th><th>Out</th>"
+ 	              "<th>Req</th><th>Resp</th><th>Req</th><th>Conn</th>"
+ 	              "<th>Resp</th><th>Retr</th><th>Redis</th>"
+ 	              "<th>Status</th><th>LastChk</th><th>Wght</th><th>Act</th>"
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 6c4ba7a..371b523 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -943,6 +943,7 @@ void http_perform_server_redirect(struct session *s, struct stream_interface *si
+ 
+ 	/* FIXME: we should increase a counter of redirects per server and per backend. */
+ 	srv_inc_sess_ctr(srv);
++	srv_set_sess_last(srv);
+ }
+ 
+ /* Return the error message corresponding to si->err_type. It is assumed
+diff --git a/src/server.c b/src/server.c
+index d91c726..ccae58b 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -30,6 +30,14 @@ int srv_downtime(const struct server *s)
+ 	return now.tv_sec - s->last_change + s->down_time;
+ }
+ 
++int srv_lastsession(const struct server *s)
++{
++	if (s->counters.last_sess)
++		return now.tv_sec - s->counters.last_sess;
++
++	return -1;
++}
++
+ int srv_getinter(const struct check *check)
+ {
+ 	const struct server *s = check->server;
+diff --git a/src/session.c b/src/session.c
+index 0a03677..b3da759 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -974,6 +974,8 @@ static void sess_update_stream_int(struct session *s, struct stream_interface *s
+ 			/* state = SI_ST_CON or SI_ST_EST now */
+ 			if (srv)
+ 				srv_inc_sess_ctr(srv);
++			if (srv)
++				srv_set_sess_last(srv);
+ 			return;
+ 		}
+ 
+@@ -988,6 +990,8 @@ static void sess_update_stream_int(struct session *s, struct stream_interface *s
+ 			if (srv)
+ 				srv_inc_sess_ctr(srv);
+ 			if (srv)
++				srv_set_sess_last(srv);
++			if (srv)
+ 				srv->counters.failed_conns++;
+ 			s->be->be_counters.failed_conns++;
+ 
+-- 
+1.8.3.2
+
