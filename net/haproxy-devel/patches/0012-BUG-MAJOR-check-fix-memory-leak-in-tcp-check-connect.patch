@@ -1,0 +1,30 @@
+From 852745d54844bf08456a5f4e1cae3ac6068f73ea Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 11 Feb 2014 17:53:37 +0100
+Subject: [PATCH 12/12] BUG/MAJOR: check: fix memory leak in "tcp-check
+ connect" over SSL
+
+tcp-check must not reinitialize the SSL stack upon each check!
+It's done once after the config parsing and leaks memory and eats
+performance when done upon every check.
+
+This bug was introduced in 1.5-dev22, no backport is needed.
+---
+ src/checks.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index c9a531f..1a3e865 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -2091,7 +2091,6 @@ static void tcpcheck_main(struct connection *conn)
+ #ifdef USE_OPENSSL
+ 			if (check->current_step->conn_opts & TCPCHK_OPT_SSL) {
+ 				xprt = &ssl_sock;
+-				ssl_sock_prepare_srv_ctx(s, s->proxy);
+ 			}
+ 			else {
+ 				xprt = &raw_sock;
+-- 
+1.8.3.2
+
