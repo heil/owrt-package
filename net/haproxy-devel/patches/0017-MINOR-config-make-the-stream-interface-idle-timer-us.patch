@@ -1,0 +1,141 @@
+From 7e3127391f29f068b33aeaf111462323eb7fb89f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 12 Feb 2014 16:35:14 +0100
+Subject: [PATCH 17/17] MINOR: config: make the stream interface idle timer
+ user-configurable
+
+The new tune.idletimer value allows one to set a different value for
+idle stream detection. The default value remains set to one second.
+It is possible to disable it using zero, and to change the default
+value at build time using DEFAULT_IDLE_TIMER.
+---
+ doc/configuration.txt  | 15 ++++++++++++++-
+ include/types/global.h |  1 +
+ src/cfgparse.c         | 25 +++++++++++++++++++++++++
+ src/haproxy.c          |  7 +++++--
+ src/stream_interface.c |  3 ++-
+ 5 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index c36d49f..7af752e 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -481,6 +481,7 @@ The following keywords are supported in the "global" section :
+    - tune.comp.maxlevel
+    - tune.http.cookielen
+    - tune.http.maxhdr
++   - tune.idletimer
+    - tune.maxaccept
+    - tune.maxpollevents
+    - tune.maxrewrite
+@@ -863,6 +864,17 @@ tune.http.maxhdr <number>
+   new header consumes 32bits of memory for each session, so don't push this
+   limit too high.
+ 
++tune.idletimer <timeout>
++  Sets the duration after which haproxy will consider that an empty buffer is
++  probably associated with an idle stream. This is used to optimally adjust
++  some packet sizes while forwarding large and small data alternatively. The
++  decision to use splice() or to send large buffers in SSL is modulated by this
++  parameter. The value is in milliseconds between 0 and 65535. A value of zero
++  means that haproxy will not try to detect idle streams. The default is 1000,
++  which seems to correctly detect end user pauses (eg: read a page before
++  clicking). There should be not reason for changing this value. Please check
++  tune.ssl.maxrecord below.
++
+ tune.maxaccept <number>
+   Sets the maximum number of consecutive connections a process may accept in a
+   row before switching to other work. In single process mode, higher numbers
+@@ -957,7 +969,8 @@ tune.ssl.maxrecord <number>
+   Ethernet with TCP timestamps enabled, or 1460 when timestamps are disabled),
+   keeping in mind that SSL/TLS add some overhead. Typical values of 1419 and
+   2859 gave good results during tests. Use "strace -e trace=write" to find the
+-  best value.
++  best value. Haproxy will automatically switch to this setting after an idle
++  stream has been detected (see tune.idletimer above).
+ 
+ tune.zlib.memlevel <number>
+   Sets the memLevel parameter in zlib initialization for each session. It
+diff --git a/include/types/global.h b/include/types/global.h
+index 3b010d8..669ec23 100644
+--- a/include/types/global.h
++++ b/include/types/global.h
+@@ -135,6 +135,7 @@ struct global {
+ 		int zlibwindowsize;  /* zlib window size */
+ #endif
+ 		int comp_maxlevel;    /* max HTTP compression level */
++		unsigned short idle_timer; /* how long before an empty buffer is considered idle (ms) */
+ 	} tune;
+ 	struct {
+ 		char *prefix;           /* path prefix of unix bind socket */
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 9993c61..462187a 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -618,6 +618,31 @@ int cfg_parse_global(const char *file, int linenum, char **args, int kwm)
+ 		if (global.tune.maxrewrite >= global.tune.bufsize / 2)
+ 			global.tune.maxrewrite = global.tune.bufsize / 2;
+ 	}
++	else if (!strcmp(args[0], "tune.idletimer")) {
++		unsigned int idle;
++		const char *res;
++
++		if (*(args[1]) == 0) {
++			Alert("parsing [%s:%d] : '%s' expects a timer value between 0 and 65535 ms.\n", file, linenum, args[0]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
++
++		res = parse_time_err(args[1], &idle, TIME_UNIT_MS);
++		if (res) {
++			Alert("parsing [%s:%d]: unexpected character '%c' in argument to <%s>.\n",
++			      file, linenum, *res, args[0]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
++
++		if (idle > 65535) {
++			Alert("parsing [%s:%d] : '%s' expects a timer value between 0 and 65535 ms.\n", file, linenum, args[0]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
++		global.tune.idle_timer = idle;
++	}
+ 	else if (!strcmp(args[0], "tune.rcvbuf.client")) {
+ 		if (global.tune.client_rcvbuf != 0) {
+ 			Alert("parsing [%s:%d] : '%s' already specified. Continuing.\n", file, linenum, args[0]);
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 5ba7a73..1825705 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -151,8 +151,11 @@ struct global global = {
+ 		.zlibwindowsize = MAX_WBITS,
+ #endif
+ 		.comp_maxlevel = 1,
+-
+-
++#ifdef DEFAULT_IDLE_TIMER
++		.idle_timer = DEFAULT_IDLE_TIMER,
++#else
++		.idle_timer = 1000, /* 1 second */
++#endif
+ 	},
+ #ifdef USE_OPENSSL
+ #ifdef DEFAULT_MAXSSLCONN
+diff --git a/src/stream_interface.c b/src/stream_interface.c
+index 83e814c..f23a9b0 100644
+--- a/src/stream_interface.c
++++ b/src/stream_interface.c
+@@ -1097,7 +1097,8 @@ static void si_conn_recv_cb(struct connection *conn)
+ 	cur_read = 0;
+ 
+ 	if ((chn->flags & (CF_STREAMER | CF_STREAMER_FAST)) && !chn->buf->o &&
+-	    (unsigned short)(now_ms - chn->last_read) >= 1000) {
++	    global.tune.idle_timer &&
++	    (unsigned short)(now_ms - chn->last_read) >= global.tune.idle_timer) {
+ 		/* The buffer was empty and nothing was transferred for more
+ 		 * than one second. This was caused by a pause and not by
+ 		 * congestion. Reset any streaming mode to reduce latency.
+-- 
+1.8.3.2
+

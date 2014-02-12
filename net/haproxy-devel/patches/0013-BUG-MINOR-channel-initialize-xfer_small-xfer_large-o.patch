@@ -1,0 +1,31 @@
+From 8f39dcdc8d48b28c2a76eac27aeb78ee89b3ae3f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 9 Feb 2014 08:31:49 +0100
+Subject: [PATCH 13/17] BUG/MINOR: channel: initialize xfer_small/xfer_large on
+ new buffers
+
+These ones are only reset during transfers. There is a low but non-null
+risk that a first full read causes the previous value to be reused and
+immediately to immediately set the CF_STREAMER flag. The impact is only
+to increase earlier than expected the SSL record size and to use splice().
+
+This bug was already present in 1.4, so a backport is possible.
+---
+ include/proto/channel.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/proto/channel.h b/include/proto/channel.h
+index 49a68b2..0afdc65 100644
+--- a/include/proto/channel.h
++++ b/include/proto/channel.h
+@@ -55,6 +55,7 @@ static inline void channel_init(struct channel *chn)
+ 	chn->buf->i = 0;
+ 	chn->buf->p = chn->buf->data;
+ 	chn->to_forward = 0;
++	chn->xfer_small = chn->xfer_large = 0;
+ 	chn->total = 0;
+ 	chn->pipe = NULL;
+ 	chn->analysers = 0;
+-- 
+1.8.3.2
+

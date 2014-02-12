@@ -1,0 +1,42 @@
+From b145c78623d081570b03837c54bb1f5ed9812c63 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sun, 9 Feb 2014 17:45:16 +0100
+Subject: [PATCH 14/17] MINOR: channel: add the date of last read in the
+ channel
+
+We store the time stamp of last read in the channel in order to
+be able to measure some bit rate and pause lengths. We only use
+16 bits which were unused for this. We don't need more, as it
+allows us to measure with a millisecond precision for up to 65s.
+---
+ include/proto/channel.h | 1 +
+ include/types/channel.h | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/include/proto/channel.h b/include/proto/channel.h
+index 0afdc65..36633c6 100644
+--- a/include/proto/channel.h
++++ b/include/proto/channel.h
+@@ -55,6 +55,7 @@ static inline void channel_init(struct channel *chn)
+ 	chn->buf->i = 0;
+ 	chn->buf->p = chn->buf->data;
+ 	chn->to_forward = 0;
++	chn->last_read = now_ms;
+ 	chn->xfer_small = chn->xfer_large = 0;
+ 	chn->total = 0;
+ 	chn->pipe = NULL;
+diff --git a/include/types/channel.h b/include/types/channel.h
+index 905308e..2eea3e8 100644
+--- a/include/types/channel.h
++++ b/include/types/channel.h
+@@ -172,6 +172,7 @@ struct channel {
+ 	struct stream_interface *prod;  /* producer attached to this channel */
+ 	struct pipe *pipe;		/* non-NULL only when data present */
+ 	unsigned int to_forward;        /* number of bytes to forward after out without a wake-up */
++	unsigned short last_read;       /* 16 lower bits of last read date (max pause=65s) */
+ 	unsigned char xfer_large;       /* number of consecutive large xfers */
+ 	unsigned char xfer_small;       /* number of consecutive small xfers */
+ 	unsigned long long total;       /* total data read */
+-- 
+1.8.3.2
+
