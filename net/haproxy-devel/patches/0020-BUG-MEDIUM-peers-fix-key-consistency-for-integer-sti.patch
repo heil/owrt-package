@@ -1,0 +1,39 @@
+From 9a60ff9cb60cb11fbf6db932dcfbc3fe810212d8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Sun, 16 Feb 2014 01:07:07 +0100
+Subject: [PATCH 20/24] BUG/MEDIUM: peers: fix key consistency for integer
+ stick tables
+
+Peers with integer stick tables are breaking the keys received. This is due to
+the fact that the sender converts the key with htonl() but the receiver doesn't
+convert the value back to its original format.
+
+Peers appeared in haproxy-1.5, no backport is needed.
+---
+ src/peers.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/peers.c b/src/peers.c
+index 0d06505..b1022ab 100644
+--- a/src/peers.c
++++ b/src/peers.c
+@@ -676,10 +676,14 @@ switchstate:
+ 						}
+ 					}
+ 					else if (ps->table->table->type == STKTABLE_TYPE_INTEGER) {
+-						newts = stksess_new(ps->table->table, NULL);
+-						reql = bo_getblk(si->ob, newts ? (char *)newts->key.key : trash.str, sizeof(netinteger), totl);
++						reql = bo_getblk(si->ob, (char *)&netinteger, sizeof(netinteger), totl);
+ 						if (reql <= 0) /* closed or EOL not found */
+ 							goto incomplete;
++						newts = stksess_new(ps->table->table, NULL);
++						if (newts) {
++							netinteger = ntohl(netinteger);
++							memcpy(newts->key.key, &netinteger, sizeof(netinteger));
++						}
+ 						totl += reql;
+ 					}
+ 					else {
+-- 
+1.8.3.2
+

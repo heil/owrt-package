@@ -1,0 +1,86 @@
+From 84310e2e731dbb6592cc063ae1c42ffc6b5f6e08 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 14 Feb 2014 11:59:04 +0100
+Subject: [PATCH 19/24] MINOR: sample: add a rand() sample fetch to return a
+ sample.
+
+Sometimes it can be useful to generate a random value, at least
+for debugging purposes, but also to take routing decisions or to
+pass such a value to a backend server.
+---
+ doc/configuration.txt |  7 +++++++
+ src/haproxy.c         |  2 ++
+ src/sample.c          | 19 +++++++++++++++++++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 35dcf37..b6a30de 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -9570,6 +9570,13 @@ queue([<backend>]) : integer
+   possible action could be to reject new users but still accept old ones. See
+   also the "avg_queue", "be_conn", and "be_sess_rate" fetches.
+ 
++rand([<range>]) : integer
++  Returns a random integer value within a range of <range> possible values,
++  starting at zero. If the range is not specified, it defaults to 2^32, which
++  gives numbers between 0 and 4294967295. It can be useful to pass some values
++  needed to take some routing decisions for example, or just for debugging
++  purposes. This random must not be used for security purposes.
++
+ srv_conn([<backend>/]<server>) : integer
+   Returns an integer value corresponding to the number of currently established
+   connections on the designated server, possibly including the connection being
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 45d1bd7..2b83c62 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -523,6 +523,8 @@ void init(int argc, char **argv)
+ 	tv_update_date(-1,-1);
+ 	start_date = now;
+ 
++	srandom(now_ms - getpid());
++
+ 	/* Get the numeric timezone. */
+ 	get_localtime(start_date.tv_sec, &curtime);
+ 	strftime(localtimezone, 6, "%z", &curtime);
+diff --git a/src/sample.c b/src/sample.c
+index f0a346a..7f121b3 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -1189,6 +1189,24 @@ smp_fetch_date(struct proxy *px, struct session *s, void *l7, unsigned int opt,
+ 	return 1;
+ }
+ 
++/* generate a random 32-bit integer for whatever purpose, with an optional
++ * range specified in argument.
++ */
++static int
++smp_fetch_rand(struct proxy *px, struct session *s, void *l7, unsigned int opt,
++               const struct arg *args, struct sample *smp, const char *kw)
++{
++	smp->data.uint = random();
++
++	/* reduce if needed. Don't do a modulo, use all bits! */
++	if (args && args[0].type == ARGT_UINT)
++		smp->data.uint = ((uint64_t)smp->data.uint * args[0].data.uint) >> 32;
++
++	smp->type = SMP_T_UINT;
++	smp->flags |= SMP_F_VOL_TEST | SMP_F_MAY_CHANGE;
++	return 1;
++}
++
+ /* Note: must not be declared <const> as its list will be overwritten.
+  * Note: fetches that may return multiple types must be declared as the lowest
+  * common denominator, the type that can be casted into all other ones. For
+@@ -1199,6 +1217,7 @@ static struct sample_fetch_kw_list smp_kws = {ILH, {
+ 	{ "always_true",  smp_fetch_true,  0,            NULL, SMP_T_BOOL, SMP_USE_INTRN },
+ 	{ "env",          smp_fetch_env,   ARG1(1,STR),  NULL, SMP_T_CSTR, SMP_USE_INTRN },
+ 	{ "date",         smp_fetch_date,  ARG1(0,SINT), NULL, SMP_T_UINT, SMP_USE_INTRN },
++	{ "rand",         smp_fetch_rand,  ARG1(0,UINT), NULL, SMP_T_UINT, SMP_USE_INTRN },
+ 	{ /* END */ },
+ }};
+ 
+-- 
+1.8.3.2
+
