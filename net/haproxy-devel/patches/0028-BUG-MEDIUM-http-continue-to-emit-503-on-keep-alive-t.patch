@@ -1,0 +1,71 @@
+From 36346247ac8ded5cdaf2e0beba519246da70b123 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 24 Feb 2014 18:26:30 +0100
+Subject: [PATCH 28/30] BUG/MEDIUM: http: continue to emit 503 on keep-alive to
+ different server
+
+Finn Arne Gangstad reported that commit 6b726adb35 ("MEDIUM: http: do
+not report connection errors for second and further requests") breaks
+support for serving static files by abusing the errorfile 503 statement.
+
+Indeed, a second request over a connection sent to any server or backend
+returning 503 would silently be dropped.
+
+The proper solution consists in adding a flag on the session indicating
+that the server connection was reused, and to only avoid the error code
+in this case.
+---
+ include/types/session.h | 1 +
+ src/backend.c           | 1 +
+ src/proto_http.c        | 4 ++--
+ 3 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/include/types/session.h b/include/types/session.h
+index 9b5a5bf..02772a8 100644
+--- a/include/types/session.h
++++ b/include/types/session.h
+@@ -89,6 +89,7 @@
+ #define SN_IGNORE_PRST	0x00080000	/* ignore persistence */
+ 
+ #define SN_COMP_READY   0x00100000	/* the compression is initialized */
++#define SN_SRV_REUSED   0x00200000	/* the server-side connection was reused */
+ 
+ /* WARNING: if new fields are added, they must be initialized in session_accept()
+  * and freed in session_free() !
+diff --git a/src/backend.c b/src/backend.c
+index c9fe11e..d878028 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -1073,6 +1073,7 @@ int connect_server(struct session *s)
+ 	else {
+ 		/* the connection is being reused, just re-attach it */
+ 		si_attach_conn(s->req->cons, srv_conn);
++		s->flags |= SN_SRV_REUSED;
+ 	}
+ 
+ 	/* flag for logging source ip/port */
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 371b523..52f626e 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -980,7 +980,7 @@ void http_return_srv_error(struct session *s, struct stream_interface *si)
+ 				  http_error_message(s, HTTP_ERR_503));
+ 	else if (err_type & SI_ET_CONN_ERR)
+ 		http_server_error(s, si, SN_ERR_SRVCL, SN_FINST_C,
+-				  503, (s->txn.flags & TX_NOT_FIRST) ? NULL :
++				  503, (s->flags & SN_SRV_REUSED) ? NULL :
+ 				  http_error_message(s, HTTP_ERR_503));
+ 	else if (err_type & SI_ET_CONN_RES)
+ 		http_server_error(s, si, SN_ERR_RESOURCE, SN_FINST_C,
+@@ -4446,7 +4446,7 @@ void http_end_txn_clean_session(struct session *s)
+ 	s->req->flags &= ~(CF_SHUTW|CF_SHUTW_NOW|CF_AUTO_CONNECT|CF_WRITE_ERROR|CF_STREAMER|CF_STREAMER_FAST|CF_NEVER_WAIT);
+ 	s->rep->flags &= ~(CF_SHUTR|CF_SHUTR_NOW|CF_READ_ATTACHED|CF_READ_ERROR|CF_READ_NOEXP|CF_STREAMER|CF_STREAMER_FAST|CF_WRITE_PARTIAL|CF_NEVER_WAIT);
+ 	s->flags &= ~(SN_DIRECT|SN_ASSIGNED|SN_ADDR_SET|SN_BE_ASSIGNED|SN_FORCE_PRST|SN_IGNORE_PRST);
+-	s->flags &= ~(SN_CURR_SESS|SN_REDIRECTABLE);
++	s->flags &= ~(SN_CURR_SESS|SN_REDIRECTABLE|SN_SRV_REUSED);
+ 
+ 	if (s->flags & SN_COMP_READY)
+ 		s->comp_algo->end(&s->comp_ctx);
+-- 
+1.8.3.2
+

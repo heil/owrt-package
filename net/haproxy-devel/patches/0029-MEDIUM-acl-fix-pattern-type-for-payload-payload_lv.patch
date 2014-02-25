@@ -1,0 +1,46 @@
+From 38d25d2a19efda87ba3424c7883c7b81e44f6ec9 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 24 Feb 2014 18:55:33 +0100
+Subject: [PATCH 29/30] MEDIUM: acl: fix pattern type for payload / payload_lv
+
+Since commit 0ce3aa0c ("MEDIUM: acl: implement payload and payload_lv"),
+the payload and payload_lv ACL patterns were declared as strings because
+at this date there was no support for binary patterns. At this time, these
+ACLs were not reliably usable due to the binary-to-string cast involved,
+and because it was not possible to specify the direction of the match.
+
+Since recent evolutions, the new fetch methods "req.payload" and
+"res.payload" have leveraged the ambiguity and were of type "binary",
+with an implicit ACL mapping of the same type. The doc also states
+that "payload" is an alias for "req.payload" etc... while these two
+don't share the same type.
+
+Better fix this mess before it's too late. "payload" and "payload_lv"
+return a binary content, so their ACLs must by default use a binary
+pattern. That way they behave like their "req." and "res." sisters.
+
+This change might break some configs making use of these, but there's
+almost a zero probability that anyone managed to use them to match
+exact strings, so in practice the change should be safe.
+---
+ src/payload.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/payload.c b/src/payload.c
+index cd77291..1db1a7f 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -681,8 +681,8 @@ static struct sample_fetch_kw_list smp_kws = {ILH, {
+  * Please take care of keeping this list alphabetically sorted.
+  */
+ static struct acl_kw_list acl_kws = {ILH, {
+-	{ "payload",            "req.payload",        pat_parse_str,        pat_match_str     },
+-	{ "payload_lv",         "req.payload_lv",     pat_parse_str,        pat_match_str     },
++	{ "payload",            "req.payload",        pat_parse_bin,        pat_match_bin     },
++	{ "payload_lv",         "req.payload_lv",     pat_parse_bin,        pat_match_bin     },
+ 	{ "req_rdp_cookie",     "req.rdp_cookie",     pat_parse_str,        pat_match_str     },
+ 	{ "req_rdp_cookie_cnt", "req.rdp_cookie_cnt", pat_parse_int,        pat_match_int     },
+ 	{ "req_ssl_sni",        "req.ssl_sni",        pat_parse_str,        pat_match_str     },
+-- 
+1.8.3.2
+

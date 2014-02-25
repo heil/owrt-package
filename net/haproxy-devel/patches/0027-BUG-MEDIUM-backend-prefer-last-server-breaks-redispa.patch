@@ -1,0 +1,34 @@
+From 2481d167efd15708417a1ba68b2de35468a67358 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 19 Feb 2014 18:40:43 +0100
+Subject: [PATCH 27/30] BUG/MEDIUM: backend: prefer-last-server breaks
+ redispatch
+
+Since 1.5-dev20, we have a working server-side keep-alive and an option
+"prefer-last-server" to indicate that we explicitly want to reuse the
+same server as the last one. Unfortunately this breaks the redispatch
+feature because assign_server() insists on reusing the same server as
+the first one attempted even if the connection failed to establish.
+
+A simple solution consists in only considering the last connection if
+it was connected. Otherwise there is no reason for being interested in
+reusing the same server.
+---
+ src/backend.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/backend.c b/src/backend.c
+index e561919..c9fe11e 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -543,6 +543,7 @@ int assign_server(struct session *s)
+ 	conn = objt_conn(s->req->cons->end);
+ 
+ 	if (conn &&
++	    (conn->flags & CO_FL_CONNECTED) &&
+ 	    ((s->be->options & PR_O_PREF_LAST) || (s->txn.flags & TX_PREFER_LAST)) &&
+ 	    objt_server(conn->target) && __objt_server(conn->target)->proxy == s->be &&
+ 	    srv_is_usable(__objt_server(conn->target)->state, __objt_server(conn->target)->eweight)) {
+-- 
+1.8.3.2
+
