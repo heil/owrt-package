@@ -1,0 +1,32 @@
+From 4a4e6bca60ebac272242a972d0603b1fe6ccf3f2 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 11 Mar 2014 16:23:05 +0100
+Subject: [PATCH 33/34] BUG/MEDIUM: compression: fix the output type of the
+ compressor name
+
+smp_fetch_res_comp_algo() returns the name of the compression algorithm
+in use. The output type is set to SMP_T_STR instead of SMP_T_CSTR, which
+causes any transformation to be operated without a cast. Fortunately,
+the current converters do not overwrite a zero-sized area, so the result
+is an empty string. Fix this to have SMP_T_CSTR instead so that the cast
+is always performed using a copy before any transformation is done.
+---
+ src/compression.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/compression.c b/src/compression.c
+index 27ba4b4..f42f771 100644
+--- a/src/compression.c
++++ b/src/compression.c
+@@ -628,7 +628,7 @@ smp_fetch_res_comp_algo(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	if (!l4->comp_algo)
+ 		return 0;
+ 
+-	smp->type = SMP_T_STR;
++	smp->type = SMP_T_CSTR;
+ 	smp->data.str.str = l4->comp_algo->name;
+ 	smp->data.str.len = l4->comp_algo->name_len;
+ 	return 1;
+-- 
+1.8.3.2
+

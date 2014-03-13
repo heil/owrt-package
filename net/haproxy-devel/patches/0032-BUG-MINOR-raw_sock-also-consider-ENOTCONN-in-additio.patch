@@ -1,0 +1,38 @@
+From 0724903143fc3077a587732fdb4b76a12615a35f Mon Sep 17 00:00:00 2001
+From: "Joshua M. Clulow" <josh@sysmgr.org>
+Date: Mon, 3 Mar 2014 13:48:42 -0800
+Subject: [PATCH 32/34] BUG/MINOR: raw_sock: also consider ENOTCONN in addition
+ to EAGAIN for recv()
+
+I was testing haproxy-1.5-dev22 on SmartOS (an illumos-based system)
+and ran into a problem.  There's a small window after non-blocking
+connect() is called, but before the TCP connection is established,
+where recv() may return ENOTCONN.  On Linux, the behaviour here seems
+to be always to return EAGAIN.  The fix is relatively trivial, and
+appears to make haproxy work reliably on current SmartOS (see patch
+below).  It's possible that other UNIX platforms exhibit this
+behaviour as well.
+
+Note: the equivalent was already done for send() in commit 0ea0cf6
+("BUG: raw_sock: also consider ENOTCONN in addition to EAGAIN").
+Both patches should be backported to 1.4.
+---
+ src/raw_sock.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/raw_sock.c b/src/raw_sock.c
+index 3708b19..c093377 100644
+--- a/src/raw_sock.c
++++ b/src/raw_sock.c
+@@ -309,7 +309,7 @@ static int raw_sock_to_buf(struct connection *conn, struct buffer *buf, int coun
+ 		else if (ret == 0) {
+ 			goto read0;
+ 		}
+-		else if (errno == EAGAIN) {
++		else if (errno == EAGAIN || errno == ENOTCONN) {
+ 			fd_cant_recv(conn->t.sock.fd);
+ 			break;
+ 		}
+-- 
+1.8.3.2
+
