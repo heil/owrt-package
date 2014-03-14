@@ -1,0 +1,32 @@
+From da5d4a5560b33d0fc6cfeca684190fdf8e4602e9 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 13 Mar 2014 16:55:01 +0100
+Subject: [PATCH 35/35] BUG/MINOR: log: The log of quotted capture header has
+ been terminated by 2 quotes.
+
+Julien Vehent repport that the log format '%{+Q}hr' display the value
+termnated by two chars '"' like this: '"value""'. This patch just remove
+the second quote.
+
+This bug is old but 1.5-specific but users of older 1.5 versions may be
+interested in a backport.
+---
+ src/log.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/log.c b/src/log.c
+index 046294e..3ab40f9 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -1420,8 +1420,6 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
+ 					if (tmp->options & LOG_OPT_QUOTE)
+ 						LOGCHAR('"');
+ 					last_isspace = 0;
+-					if (tmp->options & LOG_OPT_QUOTE)
+-						LOGCHAR('"');
+ 				}
+ 				break;
+ 
+-- 
+1.8.3.2
+
