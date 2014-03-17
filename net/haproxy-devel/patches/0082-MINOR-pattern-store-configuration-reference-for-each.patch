@@ -1,0 +1,409 @@
+From 0d6ba513a5d90e3e32a7e779d98992de8bfffa58 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 11 Feb 2014 03:31:34 +0100
+Subject: [PATCH 082/103] MINOR: pattern: store configuration reference for
+ each acl or map pattern.
+
+This patch permit to add reference for each pattern reference. This is
+useful to identify the acl listed.
+---
+ include/proto/acl.h     |  7 ++++---
+ include/proto/pattern.h |  6 +++---
+ include/types/pattern.h |  1 +
+ src/acl.c               | 34 +++++++++++++++++++++++-----------
+ src/cfgparse.c          |  2 +-
+ src/dumpstats.c         |  7 ++++---
+ src/map.c               |  4 +++-
+ src/pattern.c           | 29 +++++++++++++++++++++++++----
+ src/proto_tcp.c         | 19 ++++++++++---------
+ 9 files changed, 74 insertions(+), 35 deletions(-)
+
+diff --git a/include/proto/acl.h b/include/proto/acl.h
+index 82782d4..1a7c1f4 100644
+--- a/include/proto/acl.h
++++ b/include/proto/acl.h
+@@ -59,7 +59,7 @@ struct acl_keyword *find_acl_kw(const char *kw);
+  * Right now, the only accepted syntax is :
+  * <subject> [<value>...]
+  */
+-struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *al);
++struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *al, const char *file, int line);
+ 
+ /* Purge everything in the acl <acl>, then return <acl>. */
+ struct acl *prune_acl(struct acl *acl);
+@@ -70,7 +70,7 @@ struct acl *prune_acl(struct acl *acl);
+  *
+  * args syntax: <aclname> <acl_expr>
+  */
+-struct acl *parse_acl(const char **args, struct list *known_acl, char **err, struct arg_list *al);
++struct acl *parse_acl(const char **args, struct list *known_acl, char **err, struct arg_list *al, const char *file, int line);
+ 
+ /* Purge everything in the acl_cond <cond>, then return <cond>. */
+ struct acl_cond *prune_acl_cond(struct acl_cond *cond);
+@@ -80,7 +80,8 @@ struct acl_cond *prune_acl_cond(struct acl_cond *cond);
+  * case of low memory). Supports multiple conditions separated by "or".
+  */
+ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+-                                enum acl_cond_pol pol, char **err, struct arg_list *al);
++                                enum acl_cond_pol pol, char **err, struct arg_list *al,
++                                const char *file, int line);
+ 
+ /* Builds an ACL condition starting at the if/unless keyword. The complete
+  * condition is returned. NULL is returned in case of error or if the first
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index bccac65..e6afa51 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -185,8 +185,8 @@ struct pattern *pat_match_reg(struct sample *smp, struct pattern_expr *expr, int
+  */
+ struct pat_ref *pat_ref_lookup(const char *reference);
+ struct pat_ref *pat_ref_lookupid(int unique_id);
+-struct pat_ref *pat_ref_new(const char *reference, unsigned int flags);
+-struct pat_ref *pat_ref_newid(int unique_id, unsigned int flags);
++struct pat_ref *pat_ref_new(const char *reference, const char *display, unsigned int flags);
++struct pat_ref *pat_ref_newid(int unique_id, const char *display, unsigned int flags);
+ int pat_ref_append(struct pat_ref *ref, char *pattern, char *sample, int line);
+ int pat_ref_add(struct pat_ref *ref, const char *pattern, const char *sample, char **err);
+ int pat_ref_set(struct pat_ref *ref, const char *pattern, const char *sample);
+@@ -199,7 +199,7 @@ int pat_ref_load(struct pat_ref *ref, struct pattern_expr *expr, int patflags, i
+  */
+ void pattern_init_head(struct pattern_head *head);
+ void pattern_prune(struct pattern_head *head);
+-int pattern_read_from_file(struct pattern_head *head, unsigned int refflags, const char *filename, int patflags, char **err);
++int pattern_read_from_file(struct pattern_head *head, unsigned int refflags, const char *filename, int patflags, char **err, const char *display);
+ 
+ /*
+  * pattern_expr manipulation.
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 156e57b..ac76e37 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -98,6 +98,7 @@ struct pat_ref {
+ 	unsigned int flags; /* flags PAT_REF_*. */
+ 	char *reference; /* The reference name. */
+ 	int unique_id; /* Each pattern reference have unique id. */
++	char *display; /* String displayed to identify the pattern origin. */
+ 	struct list head; /* The head of the list of struct pat_ref_elt. */
+ 	struct list pat; /* The head of the list of struct pattern_expr. */
+ };
+diff --git a/src/acl.c b/src/acl.c
+index 4969155..be88e9e 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -131,7 +131,8 @@ static struct acl_expr *prune_acl_expr(struct acl_expr *expr)
+  * Right now, the only accepted syntax is :
+  * <subject> [<value>...]
+  */
+-struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *al)
++struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *al,
++                                const char *file, int line)
+ {
+ 	__label__ out_return, out_free_expr;
+ 	struct acl_expr *expr;
+@@ -450,7 +451,11 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 				goto out_free_expr;
+ 			}
+ 
+-			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags | PAT_F_FROM_FILE, err))
++			/* Create displayed reference */
++			snprintf(trash.str, trash.size, "acl(s) loaded from file '%s'", args[1]);
++			trash.str[trash.size - 1] = '\0';
++
++			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags | PAT_F_FROM_FILE, err, trash.str))
+ 				goto out_free_expr;
+ 			is_loaded = 1;
+ 			args++;
+@@ -497,8 +502,12 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		goto out_free_expr;
+ 	}
+ 
++	/* Create displayed reference */
++	snprintf(trash.str, trash.size, "acl '%s' file '%s' line %d", expr->kw, file, line);
++	trash.str[trash.size - 1] = '\0';
++
+ 	/* Create new patern reference. */
+-	ref = pat_ref_newid(unique_id, PAT_REF_ACL);
++	ref = pat_ref_newid(unique_id, trash.str, PAT_REF_ACL);
+ 	if (!ref) {
+ 		memprintf(err, "memory error");
+ 		goto out_free_expr;
+@@ -677,7 +686,8 @@ struct acl *prune_acl(struct acl *acl) {
+  *
+  * args syntax: <aclname> <acl_expr>
+  */
+-struct acl *parse_acl(const char **args, struct list *known_acl, char **err, struct arg_list *al)
++struct acl *parse_acl(const char **args, struct list *known_acl, char **err, struct arg_list *al,
++                      const char *file, int line)
+ {
+ 	__label__ out_return, out_free_acl_expr, out_free_name;
+ 	struct acl *cur_acl;
+@@ -690,7 +700,7 @@ struct acl *parse_acl(const char **args, struct list *known_acl, char **err, str
+ 		goto out_return;
+ 	}
+ 
+-	acl_expr = parse_acl_expr(args + 1, err, al);
++	acl_expr = parse_acl_expr(args + 1, err, al, file, line);
+ 	if (!acl_expr) {
+ 		/* parse_acl_expr will have filled <err> here */
+ 		goto out_return;
+@@ -785,7 +795,8 @@ const struct {
+  * to report missing dependencies.
+  */
+ static struct acl *find_acl_default(const char *acl_name, struct list *known_acl,
+-                                    char **err, struct arg_list *al)
++                                    char **err, struct arg_list *al,
++                                    const char *file, int line)
+ {
+ 	__label__ out_return, out_free_acl_expr, out_free_name;
+ 	struct acl *cur_acl;
+@@ -803,7 +814,7 @@ static struct acl *find_acl_default(const char *acl_name, struct list *known_acl
+ 		return NULL;
+ 	}
+ 
+-	acl_expr = parse_acl_expr((const char **)default_acl_list[index].expr, err, al);
++	acl_expr = parse_acl_expr((const char **)default_acl_list[index].expr, err, al, file, line);
+ 	if (!acl_expr) {
+ 		/* parse_acl_expr must have filled err here */
+ 		goto out_return;
+@@ -864,7 +875,8 @@ struct acl_cond *prune_acl_cond(struct acl_cond *cond)
+  * for unresolved dependencies.
+  */
+ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+-                                enum acl_cond_pol pol, char **err, struct arg_list *al)
++                                enum acl_cond_pol pol, char **err, struct arg_list *al,
++                                const char *file, int line)
+ {
+ 	__label__ out_return, out_free_suite, out_free_term;
+ 	int arg, neg;
+@@ -937,7 +949,7 @@ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+ 			args_new[0] = "";
+ 			memcpy(args_new + 1, args + arg + 1, (arg_end - arg) * sizeof(*args_new));
+ 			args_new[arg_end - arg] = "";
+-			cur_acl = parse_acl(args_new, known_acl, err, al);
++			cur_acl = parse_acl(args_new, known_acl, err, al, file, line);
+ 			free(args_new);
+ 
+ 			if (!cur_acl) {
+@@ -955,7 +967,7 @@ struct acl_cond *parse_acl_cond(const char **args, struct list *known_acl,
+ 			 */
+ 			cur_acl = find_acl_by_name(word, known_acl);
+ 			if (cur_acl == NULL) {
+-				cur_acl = find_acl_default(word, known_acl, err, al);
++				cur_acl = find_acl_default(word, known_acl, err, al, file, line);
+ 				if (cur_acl == NULL) {
+ 					/* note that find_acl_default() must have filled <err> here */
+ 					goto out_free_suite;
+@@ -1039,7 +1051,7 @@ struct acl_cond *build_acl_cond(const char *file, int line, struct proxy *px, co
+ 		return NULL;
+ 	}
+ 
+-	cond = parse_acl_cond(args, &px->acl, pol, err, &px->conf.args);
++	cond = parse_acl_cond(args, &px->acl, pol, err, &px->conf.args, file, line);
+ 	if (!cond) {
+ 		/* note that parse_acl_cond must have filled <err> here */
+ 		return NULL;
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 10dfa89..2aa2ff9 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2381,7 +2381,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+ 		}
+ 
+-		if (parse_acl((const char **)args + 1, &curproxy->acl, &errmsg, &curproxy->conf.args) == NULL) {
++		if (parse_acl((const char **)args + 1, &curproxy->acl, &errmsg, &curproxy->conf.args, file, linenum) == NULL) {
+ 			Alert("parsing [%s:%d] : error detected while parsing ACL '%s' : %s.\n",
+ 			      file, linenum, args[1], errmsg);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index f6768c9..4007fc4 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4762,7 +4762,7 @@ static int stats_pats_list(struct stream_interface *si)
+ 		 * later and restart at the state "STAT_ST_INIT".
+ 		 */
+ 		chunk_reset(&trash);
+-		chunk_appendf(&trash, "# id (name)\n");
++		chunk_appendf(&trash, "# id (name) description\n");
+ 		if (bi_putchk(si->ib, &trash) == -1)
+ 			return 0;
+ 
+@@ -4784,8 +4784,9 @@ static int stats_pats_list(struct stream_interface *si)
+ 			/* Build messages. If the reference is used by another category than
+ 			 * the listed categorie, display the information in the massage.
+ 			 */
+-			chunk_appendf(&trash, "%d (%s)", appctx->ctx.map.ref->unique_id,
+-			              appctx->ctx.map.ref->reference ? appctx->ctx.map.ref->reference : "");
++			chunk_appendf(&trash, "%d (%s) %s", appctx->ctx.map.ref->unique_id,
++			              appctx->ctx.map.ref->reference ? appctx->ctx.map.ref->reference : "",
++			              appctx->ctx.map.ref->display);
+ 
+ 			if (appctx->ctx.map.display_flags & PAT_REF_MAP) {
+ 				if (appctx->ctx.map.ref->flags & PAT_REF_ACL)
+diff --git a/src/map.c b/src/map.c
+index fced0ed..141cdf4 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -229,7 +229,9 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 	 */
+ 	ref = pat_ref_lookup(arg[0].data.str.str);
+ 	if (!ref) {
+-		ref = pat_ref_new(arg[0].data.str.str, PAT_REF_MAP);
++		snprintf(trash.str, trash.size, "map(s) loaded from file '%s'", arg[0].data.str.str);
++		trash.str[trash.size - 1] = '\0';
++		ref = pat_ref_new(arg[0].data.str.str, trash.str, PAT_REF_MAP);
+ 		if (!ref) {
+ 			memprintf(err, "out of memory");
+ 			return 0;
+diff --git a/src/pattern.c b/src/pattern.c
+index 0850f2f..da50f73 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -1678,7 +1678,7 @@ int pat_ref_set(struct pat_ref *ref, const char *key, const char *value)
+  * before calling this function. If the fucntion fail, it return NULL,
+  * else return new struct pat_ref.
+  */
+-struct pat_ref *pat_ref_new(const char *reference, unsigned int flags)
++struct pat_ref *pat_ref_new(const char *reference, const char *display, unsigned int flags)
+ {
+ 	struct pat_ref *ref;
+ 
+@@ -1686,8 +1686,19 @@ struct pat_ref *pat_ref_new(const char *reference, unsigned int flags)
+ 	if (!ref)
+ 		return NULL;
+ 
++	if (display) {
++		ref->display = strdup(display);
++		if (!ref->display) {
++			free(ref);
++			return NULL;
++		}
++	}
++	else
++		ref->display = NULL;
++
+ 	ref->reference = strdup(reference);
+ 	if (!ref->reference) {
++		free(ref->display);
+ 		free(ref);
+ 		return NULL;
+ 	}
+@@ -1710,7 +1721,7 @@ struct pat_ref *pat_ref_new(const char *reference, unsigned int flags)
+  * or pat_ref_lookupid before calling this function. If the function
+  * fail, it return NULL, else return new struct pat_ref.
+  */
+-struct pat_ref *pat_ref_newid(int unique_id, unsigned int flags)
++struct pat_ref *pat_ref_newid(int unique_id, const char *display, unsigned int flags)
+ {
+ 	struct pat_ref *ref;
+ 
+@@ -1718,6 +1729,16 @@ struct pat_ref *pat_ref_newid(int unique_id, unsigned int flags)
+ 	if (!ref)
+ 		return NULL;
+ 
++	if (display) {
++		ref->display = strdup(display);
++		if (!ref->display) {
++			free(ref);
++			return NULL;
++		}
++	}
++	else
++		ref->display = NULL;
++
+ 	ref->reference = NULL;
+ 	ref->flags = flags;
+ 	ref->unique_id = unique_id;
+@@ -2051,7 +2072,7 @@ int pat_ref_read_from_file(struct pat_ref *ref, const char *filename, char **err
+ 
+ int pattern_read_from_file(struct pattern_head *head, unsigned int refflags,
+                            const char *filename, int patflags,
+-                           char **err)
++                           char **err, const char *display)
+ {
+ 	struct pat_ref *ref;
+ 	struct pattern_expr *expr;
+@@ -2061,7 +2082,7 @@ int pattern_read_from_file(struct pattern_head *head, unsigned int refflags,
+ 
+ 	/* If the reference doesn't exists, create it and load associated file. */
+ 	if (!ref) {
+-		ref = pat_ref_new(filename, refflags);
++		ref = pat_ref_new(filename, display, refflags);
+ 		if (!ref) {
+ 			memprintf(err, "out of memory");
+ 			return 0;
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 2b12ef8..5ede823 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -1218,9 +1218,10 @@ int tcp_exec_req_rules(struct session *s)
+ 
+ /* Parse a tcp-response rule. Return a negative value in case of failure */
+ static int tcp_parse_response_rule(char **args, int arg, int section_type,
+-				  struct proxy *curpx, struct proxy *defpx,
+-				  struct tcp_rule *rule, char **err,
+-                                  unsigned int where)
++                                   struct proxy *curpx, struct proxy *defpx,
++                                   struct tcp_rule *rule, char **err,
++                                   unsigned int where,
++                                   const char *file, int line)
+ {
+ 	if (curpx == defpx || !(curpx->cap & PR_CAP_BE)) {
+ 		memprintf(err, "%s %s is only allowed in 'backend' sections",
+@@ -1248,7 +1249,7 @@ static int tcp_parse_response_rule(char **args, int arg, int section_type,
+ 	}
+ 
+ 	if (strcmp(args[arg], "if") == 0 || strcmp(args[arg], "unless") == 0) {
+-		if ((rule->cond = build_acl_cond(NULL, 0, curpx, (const char **)args+arg, err)) == NULL) {
++		if ((rule->cond = build_acl_cond(file, line, curpx, (const char **)args+arg, err)) == NULL) {
+ 			memprintf(err,
+ 			          "'%s %s %s' : error detected in %s '%s' while parsing '%s' condition : %s",
+ 			          args[0], args[1], args[2], proxy_type_str(curpx), curpx->id, args[arg], *err);
+@@ -1270,7 +1271,7 @@ static int tcp_parse_response_rule(char **args, int arg, int section_type,
+ static int tcp_parse_request_rule(char **args, int arg, int section_type,
+                                   struct proxy *curpx, struct proxy *defpx,
+                                   struct tcp_rule *rule, char **err,
+-                                  unsigned int where)
++                                  unsigned int where, const char *file, int line)
+ {
+ 	if (curpx == defpx) {
+ 		memprintf(err, "%s %s is not allowed in 'defaults' sections",
+@@ -1357,7 +1358,7 @@ static int tcp_parse_request_rule(char **args, int arg, int section_type,
+ 	}
+ 
+ 	if (strcmp(args[arg], "if") == 0 || strcmp(args[arg], "unless") == 0) {
+-		if ((rule->cond = build_acl_cond(NULL, 0, curpx, (const char **)args+arg, err)) == NULL) {
++		if ((rule->cond = build_acl_cond(file, line, curpx, (const char **)args+arg, err)) == NULL) {
+ 			memprintf(err,
+ 			          "'%s %s %s' : error detected in %s '%s' while parsing '%s' condition : %s",
+ 			          args[0], args[1], args[2], proxy_type_str(curpx), curpx->id, args[arg], *err);
+@@ -1433,7 +1434,7 @@ static int tcp_parse_tcp_rep(char **args, int section_type, struct proxy *curpx,
+ 		if (curpx->cap & PR_CAP_BE)
+ 			where |= SMP_VAL_BE_RES_CNT;
+ 
+-		if (tcp_parse_response_rule(args, arg, section_type, curpx, defpx, rule, err, where) < 0)
++		if (tcp_parse_response_rule(args, arg, section_type, curpx, defpx, rule, err, where, file, line) < 0)
+ 			goto error;
+ 
+ 		acl = rule->cond ? acl_cond_conflicts(rule->cond, where) : NULL;
+@@ -1542,7 +1543,7 @@ static int tcp_parse_tcp_req(char **args, int section_type, struct proxy *curpx,
+ 		if (curpx->cap & PR_CAP_BE)
+ 			where |= SMP_VAL_BE_REQ_CNT;
+ 
+-		if (tcp_parse_request_rule(args, arg, section_type, curpx, defpx, rule, err, where) < 0)
++		if (tcp_parse_request_rule(args, arg, section_type, curpx, defpx, rule, err, where, file, line) < 0)
+ 			goto error;
+ 
+ 		acl = rule->cond ? acl_cond_conflicts(rule->cond, where) : NULL;
+@@ -1585,7 +1586,7 @@ static int tcp_parse_tcp_req(char **args, int section_type, struct proxy *curpx,
+ 
+ 		where |= SMP_VAL_FE_CON_ACC;
+ 
+-		if (tcp_parse_request_rule(args, arg, section_type, curpx, defpx, rule, err, where) < 0)
++		if (tcp_parse_request_rule(args, arg, section_type, curpx, defpx, rule, err, where, file, line) < 0)
+ 			goto error;
+ 
+ 		acl = rule->cond ? acl_cond_conflicts(rule->cond, where) : NULL;
+-- 
+1.8.3.2
+

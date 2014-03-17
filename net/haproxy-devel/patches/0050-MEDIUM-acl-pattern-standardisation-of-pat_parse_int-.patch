@@ -1,0 +1,562 @@
+From 511e9475f2295fdd271ff81dbf3c5c56dfbfbae8 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 23 Jan 2014 17:40:34 +0100
+Subject: [PATCH 050/103] MEDIUM: acl/pattern: standardisation "of
+ pat_parse_int()" and "pat_parse_dotted_ver()"
+
+The goal of these patch is to simplify the prototype of
+"pat_pattern_*()" functions. I want to replace the argument "char
+**args" by a simple "char *arg" and remove the "opaque" argument.
+
+"pat_parse_int()" and "pat_parse_dotted_ver()" are the unique pattern
+parser using the "opaque" argument and using more than one string
+argument of the char **args. These specificities are only used with ACL.
+Other systems using this pattern parser (MAP and CLI) just use one
+string for describing a range.
+
+This two functions can read a range, but the min and the max must y
+specified. This patch extends the syntax to describe a range with
+implicit min and max. This is used for operators like "lt", "le", "gt",
+and "ge". the syntax is the following:
+
+   ":x" -> no min to "x"
+   "x:" -> "x" to no max
+
+This patch moves the parsing of the comparison operator from the
+functions "pat_parse_int()" and "pat_parse_dotted_ver()" to the acl
+parser. The acl parser read the operator and the values and build a
+volatile string readable by the functions "pat_parse_int()" and
+"pat_parse_dotted_ver()". The transformation is done with these rules:
+
+If the parser is "pat_parse_int()":
+
+   "eq x" -> "x"
+   "le x" -> ":x"
+   "lt x" -> ":y" (with y = x - 1)
+   "ge x" -> "x:"
+   "gt x" -> "y:" (with y = x + 1)
+
+If the parser is "pat_parse_dotted_ver()":
+
+   "eq x.y" -> "x.y"
+   "le x.y" -> ":x.y"
+   "lt x.y" -> ":w.z" (with w.z = x.y - 1)
+   "ge x.y" -> "x.y:"
+   "gt x.y" -> "w.z:" (with w.z = x.y + 1)
+
+Note that, if "y" is not present, assume that is "0".
+
+Now "pat_parse_int()" and "pat_parse_dotted_ver()" accept only one
+pattern and the variable "opaque" is no longer used. The prototype of
+the pattern parsers can be changed.
+---
+ include/common/standard.h |   4 +
+ src/acl.c                 | 137 ++++++++++++++++++++++++++++-
+ src/pattern.c             | 219 ++++++++++++++++++++--------------------------
+ src/standard.c            |  44 ++++++++++
+ 4 files changed, 278 insertions(+), 126 deletions(-)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index bdb4ef5..cd422cd 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -42,6 +42,9 @@
+ # define ULLONG_MAX	(LLONG_MAX * 2ULL + 1)
+ #endif
+ 
++/* size used for max length of decimal representation of long long int. */
++#define NB_LLMAX_STR (sizeof("-9223372036854775807")-1)
++
+ /* number of itoa_str entries */
+ #define NB_ITOA_STR	10
+ 
+@@ -388,6 +391,7 @@ extern unsigned int strl2uic(const char *s, int len);
+ extern int strl2ic(const char *s, int len);
+ extern int strl2irc(const char *s, int len, int *ret);
+ extern int strl2llrc(const char *s, int len, long long *ret);
++extern int strl2llrc_dotted(const char *text, int len, long long *ret);
+ extern unsigned int read_uint(const char **s, const char *end);
+ unsigned int inetaddr_host(const char *text);
+ unsigned int inetaddr_host_lim(const char *text, const char *stop);
+diff --git a/src/acl.c b/src/acl.c
+index 8ce49a9..1ffc572 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -145,6 +145,14 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 	unsigned long prev_type;
+ 	int cur_type;
+ 	int nbargs;
++	int operator = STD_OP_EQ;
++	int op;
++	int contain_colon, have_dot;
++	const char *dot;
++	signed long long value, minor;
++	/* The following buffer contain two numbers, a ':' separator and the final \0. */
++	char buffer[NB_LLMAX_STR + 1 + NB_LLMAX_STR + 1];
++	const char *text[2];
+ 
+ 	/* First, we look for an ACL keyword. And if we don't find one, then
+ 	 * we look for a sample fetch expression starting with a sample fetch
+@@ -441,8 +449,133 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 
+ 	/* now parse all patterns */
+ 	pattern = NULL;
+-	if (!pattern_register(&expr->pat, args, NULL, &pattern, patflags, err))
+-		goto out_free_pattern;
++	while (**args) {
++		arg = *args;
++
++		/* Compatibility layer. Each pattern can parse only one string per pattern,
++		 * but the pat_parser_int() and pat_parse_dotted_ver() parsers were need
++		 * optionnaly two operators. The first operator is the match method: eq,
++		 * le, lt, ge and gt. pat_parse_int() and pat_parse_dotted_ver() functions
++		 * can have a compatibility syntax based on ranges:
++		 *
++		 * pat_parse_int():
++		 *
++		 *   "eq x" -> "x" or "x:x"
++		 *   "le x" -> ":x"
++		 *   "lt x" -> ":y" (with y = x - 1)
++		 *   "ge x" -> "x:"
++		 *   "gt x" -> "y:" (with y = x + 1)
++		 *
++		 * pat_parse_dotted_ver():
++		 *
++		 *   "eq x.y" -> "x.y" or "x.y:x.y"
++		 *   "le x.y" -> ":x.y"
++		 *   "lt x.y" -> ":w.z" (with w.z = x.y - 1)
++		 *   "ge x.y" -> "x.y:"
++		 *   "gt x.y" -> "w.z:" (with w.z = x.y + 1)
++		 *
++		 * If y is not present, assume that is "0".
++		 *
++		 * The syntax eq, le, lt, ge and gt are proper to the acl syntax. The
++		 * following block of code detect the operator, and rewrite each value
++		 * in parsable string.
++		 */
++		if (expr->pat.parse == pat_parse_int ||
++		    expr->pat.parse == pat_parse_dotted_ver) {
++			/* Check for operator. If the argument is operator, memorise it and
++			 * continue to the next argument.
++			 */
++			op = get_std_op(arg);
++			if (op != -1) {
++				operator = op;
++				args++;
++				continue;
++			}
++
++			/* Check if the pattern contain ':' or '-' character. */
++			contain_colon = (strchr(arg, ':') || strchr(arg, '-'));
++
++			/* If the pattern contain ':' or '-' character, give it to the parser as is.
++			 * If no contain ':' and operator is STD_OP_EQ, give it to the parser as is.
++			 * In other case, try to convert the value according with the operator.
++			 */
++			if (!contain_colon && operator != STD_OP_EQ) {
++				/* Search '.' separator. */
++				dot = strchr(arg, '.');
++				if (!dot) {
++					have_dot = 0;
++					minor = 0;
++					dot = arg + strlen(arg);
++				}
++				else
++					have_dot = 1;
++
++				/* convert the integer minor part for the pat_parse_dotted_ver() function. */
++				if (expr->pat.parse == pat_parse_dotted_ver && have_dot) {
++					if (strl2llrc(dot+1, strlen(dot+1), &minor) != 0) {
++						memprintf(err, "'%s' is neither a number nor a supported operator", arg);
++						goto out_free_pattern;
++					}
++					if (minor >= 65536) {
++						memprintf(err, "'%s' contains too large a minor value", arg);
++						goto out_free_pattern;
++					}
++				}
++
++				/* convert the integer value for the pat_parse_int() function, and the
++				 * integer major part for the pat_parse_dotted_ver() function.
++				 */
++				if (strl2llrc(arg, dot - arg, &value) != 0) {
++					memprintf(err, "'%s' is neither a number nor a supported operator", arg);
++					goto out_free_pattern;
++				}
++				if (expr->pat.parse == pat_parse_dotted_ver)  {
++					if (value >= 65536) {
++						memprintf(err, "'%s' contains too large a major value", arg);
++						goto out_free_pattern;
++					}
++					value = (value << 16) | (minor & 0xffff);
++				}
++
++				switch (operator) {
++
++				case STD_OP_EQ: /* this case is not possible. */
++					memprintf(err, "internal error");
++					goto out_free_pattern;
++
++				case STD_OP_GT:
++					value++; /* gt = ge + 1 */
++
++				case STD_OP_GE:
++					if (expr->pat.parse == pat_parse_int)
++						snprintf(buffer, NB_LLMAX_STR+NB_LLMAX_STR+2, "%lld:", value);
++					else
++						snprintf(buffer, NB_LLMAX_STR+NB_LLMAX_STR+2, "%lld.%lld:",
++						         value >> 16, value & 0xffff);
++					arg = buffer;
++					break;
++
++				case STD_OP_LT:
++					value--; /* lt = le - 1 */
++
++				case STD_OP_LE:
++					if (expr->pat.parse == pat_parse_int)
++						snprintf(buffer, NB_LLMAX_STR+NB_LLMAX_STR+2, ":%lld", value);
++					else
++						snprintf(buffer, NB_LLMAX_STR+NB_LLMAX_STR+2, ":%lld.%lld",
++						         value >> 16, value & 0xffff);
++					arg = buffer;
++					break;
++				}
++			}
++		}
++
++		text[0] = arg;
++		text[1] = "";
++		if (!pattern_register(&expr->pat, text, NULL, &pattern, patflags, err))
++			goto out_free_pattern;
++		args++;
++	}
+ 
+ 	return expr;
+ 
+diff --git a/src/pattern.c b/src/pattern.c
+index 31df937..b681693 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -292,80 +292,74 @@ int pat_parse_reg(const char **text, struct pattern *pattern, enum pat_usage usa
+  * The operator is stored in the 'opaque' argument.
+  *
+  * If err is non-NULL, an error message will be returned there on errors and
+- * the caller will have to free it.
++ * the caller will have to free it. The function returns zero on error, and
++ * non-zero on success.
+  *
+  */
+ int pat_parse_int(const char **text, struct pattern *pattern, enum pat_usage usage, int *opaque, char **err)
+ {
+-	signed long long i;
+-	unsigned int j, last, skip = 0;
+ 	const char *ptr = *text;
+ 
+ 	pattern->type = SMP_T_UINT;
+ 	pattern->expect_type = SMP_T_UINT;
+ 
+-	while (!isdigit((unsigned char)*ptr)) {
+-		switch (get_std_op(ptr)) {
+-		case STD_OP_EQ: *opaque = 0; break;
+-		case STD_OP_GT: *opaque = 1; break;
+-		case STD_OP_GE: *opaque = 2; break;
+-		case STD_OP_LT: *opaque = 3; break;
+-		case STD_OP_LE: *opaque = 4; break;
+-		default:
+-			memprintf(err, "'%s' is neither a number nor a supported operator", ptr);
+-			return 0;
+-		}
++	/* Empty string is not valid */
++	if (!**text)
++		goto not_valid_range;
+ 
+-		skip++;
+-		ptr = text[skip];
+-	}
++	/* Search ':' or '-' separator. */
++	while (*ptr != '\0' && *ptr != ':' && *ptr != '-')
++		ptr++;
+ 
+-	last = i = 0;
+-	while (1) {
+-                j = *ptr++;
+-		if ((j == '-' || j == ':') && !last) {
+-			last++;
+-			pattern->val.range.min = i;
+-			i = 0;
+-			continue;
++	/* If separator not found. */
++	if (!*ptr) {
++		if (strl2llrc(*text, ptr - *text, &pattern->val.range.min) != 0) {
++			memprintf(err, "'%s' is not a number", *text);
++			return 0;
+ 		}
+-		j -= '0';
+-                if (j > 9)
+-			// also catches the terminating zero
+-                        break;
+-                i *= 10;
+-                i += j;
+-        }
+-
+-	if (last && *opaque >= 1 && *opaque <= 4) {
+-		/* having a range with a min or a max is absurd */
+-		memprintf(err, "integer range '%s' specified with a comparison operator", text[skip]);
+-		return 0;
++		pattern->val.range.max = pattern->val.range.min;
++		pattern->val.range.min_set = 1;
++		pattern->val.range.max_set = 1;
++		return 1;
+ 	}
+ 
+-	if (!last)
+-		pattern->val.range.min = i;
+-	pattern->val.range.max = i;
++	/* If the separator is the first character. */
++	if (ptr == *text && *(ptr + 1) != '\0') {
++		if (strl2llrc(ptr + 1, strlen(ptr + 1), &pattern->val.range.max) != 0)
++			goto not_valid_range;
+ 
+-	switch (*opaque) {
+-	case 0: /* eq */
+-		pattern->val.range.min_set = 1;
++		pattern->val.range.min_set = 0;
+ 		pattern->val.range.max_set = 1;
+-		break;
+-	case 1: /* gt */
+-		pattern->val.range.min++; /* gt = ge + 1 */
+-	case 2: /* ge */
++		return 1;
++	}
++
++	/* If separator is the last character. */
++	if (*(ptr + 1) == '\0') {
++		if (strl2llrc(*text, ptr - *text, &pattern->val.range.min) != 0)
++			goto not_valid_range;
++
+ 		pattern->val.range.min_set = 1;
+ 		pattern->val.range.max_set = 0;
+-		break;
+-	case 3: /* lt */
+-		pattern->val.range.max--; /* lt = le - 1 */
+-	case 4: /* le */
+-		pattern->val.range.min_set = 0;
+-		pattern->val.range.max_set = 1;
+-		break;
++		return 1;
+ 	}
+-	return skip + 1;
++
++	/* Else, parse two numbers. */
++	if (strl2llrc(*text, ptr - *text, &pattern->val.range.min) != 0)
++		goto not_valid_range;
++
++	if (strl2llrc(ptr + 1, strlen(ptr + 1), &pattern->val.range.max) != 0)
++		goto not_valid_range;
++
++	if (pattern->val.range.min > pattern->val.range.max)
++		goto not_valid_range;
++
++	pattern->val.range.min_set = 1;
++	pattern->val.range.max_set = 1;
++	return 1;
++
++ not_valid_range:
++	memprintf(err, "'%s' is not a valid number range", *text);
++	return 0;
+ }
+ 
+ int pat_parse_len(const char **text, struct pattern *pattern, enum pat_usage usage, int *opaque, char **err)
+@@ -399,88 +393,65 @@ int pat_parse_len(const char **text, struct pattern *pattern, enum pat_usage usa
+  */
+ int pat_parse_dotted_ver(const char **text, struct pattern *pattern, enum pat_usage usage, int *opaque, char **err)
+ {
+-	signed long long i;
+-	unsigned int j, last, skip = 0;
+ 	const char *ptr = *text;
+ 
++	pattern->type = SMP_T_UINT;
++	pattern->expect_type = SMP_T_UINT;
+ 
+-	while (!isdigit((unsigned char)*ptr)) {
+-		switch (get_std_op(ptr)) {
+-		case STD_OP_EQ: *opaque = 0; break;
+-		case STD_OP_GT: *opaque = 1; break;
+-		case STD_OP_GE: *opaque = 2; break;
+-		case STD_OP_LT: *opaque = 3; break;
+-		case STD_OP_LE: *opaque = 4; break;
+-		default:
+-			memprintf(err, "'%s' is neither a number nor a supported operator", ptr);
++	/* Search ':' or '-' separator. */
++	while (*ptr != '\0' && *ptr != ':' && *ptr != '-')
++		ptr++;
++
++	/* If separator not found. */
++	if (*ptr == '\0' && ptr > *text) {
++		if (strl2llrc_dotted(*text, ptr-*text, &pattern->val.range.min) != 0) {
++			memprintf(err, "'%s' is not a dotted number", *text);
+ 			return 0;
+ 		}
+-
+-		skip++;
+-		ptr = text[skip];
++		pattern->val.range.max = pattern->val.range.min;
++		pattern->val.range.min_set = 1;
++		pattern->val.range.max_set = 1;
++		return 1;
+ 	}
+ 
+-	last = i = 0;
+-	while (1) {
+-                j = *ptr++;
+-		if (j == '.') {
+-			/* minor part */
+-			if (i >= 65536)
+-				return 0;
+-			i <<= 16;
+-			continue;
+-		}
+-		if ((j == '-' || j == ':') && !last) {
+-			last++;
+-			if (i < 65536)
+-				i <<= 16;
+-			pattern->val.range.min = i;
+-			i = 0;
+-			continue;
++	/* If the separator is the first character. */
++	if (ptr == *text && *(ptr+1) != '\0') {
++		if (strl2llrc_dotted(ptr+1, strlen(ptr+1), &pattern->val.range.max) != 0) {
++			memprintf(err, "'%s' is not a valid dotted number range", *text);
++			return 0;
+ 		}
+-		j -= '0';
+-                if (j > 9)
+-			// also catches the terminating zero
+-                        break;
+-                i = (i & 0xFFFF0000) + (i & 0xFFFF) * 10;
+-                i += j;
+-        }
+-
+-	/* if we only got a major version, let's shift it now */
+-	if (i < 65536)
+-		i <<= 16;
+-
+-	if (last && *opaque >= 1 && *opaque <= 4) {
+-		/* having a range with a min or a max is absurd */
+-		memprintf(err, "version range '%s' specified with a comparison operator", text[skip]);
+-		return 0;
++		pattern->val.range.min_set = 0;
++		pattern->val.range.max_set = 1;
++		return 1;
+ 	}
+ 
+-	pattern->expect_type = SMP_T_UINT;
+-
+-	if (!last)
+-		pattern->val.range.min = i;
+-	pattern->val.range.max = i;
+-
+-	switch (*opaque) {
+-	case 0: /* eq */
+-		pattern->val.range.min_set = 1;
+-		pattern->val.range.max_set = 1;
+-		break;
+-	case 1: /* gt */
+-		pattern->val.range.min++; /* gt = ge + 1 */
+-	case 2: /* ge */
++	/* If separator is the last character. */
++	if (ptr == &(*text)[strlen(*text)-1]) {
++		if (strl2llrc_dotted(*text, ptr-*text, &pattern->val.range.min) != 0) {
++			memprintf(err, "'%s' is not a valid dotted number range", *text);
++			return 0;
++		}
+ 		pattern->val.range.min_set = 1;
+ 		pattern->val.range.max_set = 0;
+-		break;
+-	case 3: /* lt */
+-		pattern->val.range.max--; /* lt = le - 1 */
+-	case 4: /* le */
+-		pattern->val.range.min_set = 0;
+-		pattern->val.range.max_set = 1;
+-		break;
++		return 1;
++	}
++
++	/* Else, parse two numbers. */
++	if (strl2llrc_dotted(*text, ptr-*text, &pattern->val.range.min) != 0) {
++		memprintf(err, "'%s' is not a valid dotted number range", *text);
++		return 0;
++	}
++	if (strl2llrc_dotted(ptr+1, strlen(ptr+1), &pattern->val.range.max) != 0) {
++		memprintf(err, "'%s' is not a valid dotted number range", *text);
++		return 0;
+ 	}
+-	return skip + 1;
++	if (pattern->val.range.min > pattern->val.range.max) {
++		memprintf(err, "'%s' is not a valid dotted number range", *text);
++		return 0;
++	}
++	pattern->val.range.min_set = 1;
++	pattern->val.range.max_set = 1;
++	return 1;
+ }
+ 
+ /* Parse an IP address and an optional mask in the form addr[/mask].
+diff --git a/src/standard.c b/src/standard.c
+index 46c940d..81df8b1 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1257,6 +1257,50 @@ int strl2llrc(const char *s, int len, long long *ret)
+ 	return 0;
+ }
+ 
++/* This function is used with pat_parse_dotted_ver(). It converts a string
++ * composed by two number separated by a dot. Each part must contain in 16 bits
++ * because internally they will be represented as a 32-bit quantity stored in
++ * a 64-bit integer. It returns zero when the number has successfully been
++ * converted, non-zero otherwise. When an error is returned, the <ret> value
++ * is left untouched.
++ *
++ *    "1.3"         -> 0x0000000000010003
++ *    "65535.65535" -> 0x00000000ffffffff
++ */
++int strl2llrc_dotted(const char *text, int len, long long *ret)
++{
++	const char *end = &text[len];
++	const char *p;
++	long long major, minor;
++
++	/* Look for dot. */
++	for (p = text; p < end; p++)
++		if (*p == '.')
++			break;
++
++	/* Convert major. */
++	if (strl2llrc(text, p - text, &major) != 0)
++		return 1;
++
++	/* Check major. */
++	if (major >= 65536)
++		return 1;
++
++	/* Convert minor. */
++	minor = 0;
++	if (p < end)
++		if (strl2llrc(p + 1, end - (p + 1), &minor) != 0)
++			return 1;
++
++	/* Check minor. */
++	if (minor >= 65536)
++		return 1;
++
++	/* Compose value. */
++	*ret = (major << 16) | (minor & 0xffff);
++	return 0;
++}
++
+ /* This function parses a time value optionally followed by a unit suffix among
+  * "d", "h", "m", "s", "ms" or "us". It converts the value into the unit
+  * expected by the caller. The computation does its best to avoid overflows.
+-- 
+1.8.3.2
+

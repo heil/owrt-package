@@ -1,0 +1,64 @@
+From 66eb9bf69177f8be3b92c52cae707382affa2060 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 11 Feb 2014 16:19:46 +0100
+Subject: [PATCH 100/103] MINOR: pattern: Remove the flag "PAT_F_FROM_FILE".
+
+This flag is no longer used. The last place using this, are the display
+of the result of pattern matching in the cli command "get map" or "get
+acl".
+
+The first parameter of this command is the reference of the file used to
+perform the lookup.
+---
+ include/types/pattern.h | 3 +--
+ src/acl.c               | 2 +-
+ src/dumpstats.c         | 6 ------
+ 3 files changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index bf13bf7..839eae6 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -64,8 +64,7 @@ enum pat_match_res {
+ /* possible flags for expressions or patterns */
+ enum {
+ 	PAT_F_IGNORE_CASE = 1 << 0,       /* ignore case */
+-	PAT_F_FROM_FILE   = 1 << 1,       /* pattern comes from a file */
+-	PAT_F_TREE        = 1 << 2,       /* some patterns are arranged in a tree */
++	PAT_F_TREE        = 1 << 1,       /* some patterns are arranged in a tree */
+ };
+ 
+ /* ACL match methods */
+diff --git a/src/acl.c b/src/acl.c
+index ca2a5fc..7efd89e 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -449,7 +449,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 				goto out_free_expr;
+ 			}
+ 
+-			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags | PAT_F_FROM_FILE, load_as_map, err, file, line))
++			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags, load_as_map, err, file, line))
+ 				goto out_free_expr;
+ 			is_loaded = 1;
+ 			args++;
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 202bd71..27d440e 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4990,12 +4990,6 @@ static int stats_map_lookup(struct stream_interface *si)
+ 				else
+ 					chunk_appendf(&trash, ", case=sensitive");
+ 
+-				/* display source */
+-				if (pat->flags & PAT_F_FROM_FILE)
+-					chunk_appendf(&trash, ", src=file");
+-				else
+-					chunk_appendf(&trash, ", src=conf");
+-
+ 				/* display pattern */
+ 				if (appctx->ctx.map.display_flags == PAT_REF_MAP) {
+ 					if (pat->ref && pat->ref->pattern)
+-- 
+1.8.3.2
+

@@ -1,0 +1,69 @@
+From e87cac16cc082fa43d5f65dd68e1244add7871c6 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 12 Mar 2014 15:07:59 +0100
+Subject: [PATCH 047/103] MEDIUM: sample: change the behavior of the bin2str
+ cast
+
+The bin2str cast gives the hexadecimal representation of the binary
+content when it is used as string. This was inherited from the
+stick-table casts without realizing that it was a mistake. Indeed,
+it breaks string processing on binary contents, preventing any _reg,
+_beg, etc from working.
+
+For example, with an HTTP GET request, the fetch "req.payload(0,3)"
+returns the 3 bytes "G", "E", and "T" in binary. If this fetch is
+used with regex, it is automatically converted to "474554" and the
+regex is applied on this string, so it never matches.
+
+This commit changes the cast so that bin2str does not convert the
+contents anymore, and returns a string type. The contents can thus
+be matched as is, and the NULL character continues to mark the end
+of the string to avoid any issue with some string-based functions.
+
+This commit could almost have been marked as a bug fix since it
+does what the doc says.
+
+Note that in case someone would rely on the hex encoding, then the
+same behaviour could be achieved by appending ",hex" after the sample
+fetch function (brought by previous patch).
+---
+ src/sample.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index 3812913..8584dbe 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -477,18 +477,24 @@ static int c_str2ipv6(struct sample *smp)
+ 	return 1;
+ }
+ 
++/* The sample is always copied into a new one so that smp->size is always
++ * valid. The NULL char always enforces the end of string if it is met.
++ */
+ static int c_bin2str(struct sample *smp)
+ {
+ 	struct chunk *trash = get_trash_chunk();
+ 	unsigned char c;
+ 	int ptr = 0;
+ 
+-	trash->len = 0;
+-	while (ptr < smp->data.str.len && trash->len <= trash->size - 2) {
+-		c = smp->data.str.str[ptr++];
+-		trash->str[trash->len++] = hextab[(c >> 4) & 0xF];
+-		trash->str[trash->len++] = hextab[c & 0xF];
++	while (ptr < smp->data.str.len) {
++		c = smp->data.str.str[ptr];
++		if (!c)
++			break;
++		trash->str[ptr] = c;
++		ptr++;
+ 	}
++	trash->len = ptr;
++	trash->str[ptr] = 0;
+ 	smp->data.str = *trash;
+ 	smp->type = SMP_T_STR;
+ 	return 1;
+-- 
+1.8.3.2
+

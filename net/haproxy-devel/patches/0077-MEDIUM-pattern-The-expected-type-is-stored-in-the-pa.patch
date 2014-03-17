@@ -1,0 +1,357 @@
+From 5d344087856e9c7b324afeb635835fcbd4f797b4 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 27 Jan 2014 14:19:53 +0100
+Subject: [PATCH 077/103] MEDIUM: pattern: The expected type is stored in the
+ pattern head, and conversion is executed once.
+
+This patch extract the expect_type variable from the "struct pattern" to
+"struct pattern_head". This variable is set during the declaration of
+ACL and MAP. With this change, the function "pat_parse_len()" become
+useless and can be replaced by "pat_parse_int()".
+
+Implicit ACLs by default rely on the fetch's output type, so let's simply do
+the same for all other ones. It has been verified that they all match.
+---
+ include/proto/pattern.h |  3 ---
+ include/types/pattern.h |  2 +-
+ src/acl.c               |  5 ++++
+ src/dumpstats.c         |  3 ++-
+ src/map.c               |  1 +
+ src/pattern.c           | 65 ++++---------------------------------------------
+ src/proto_http.c        |  2 --
+ 7 files changed, 14 insertions(+), 67 deletions(-)
+
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index a019730..9b7c40e 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -125,9 +125,6 @@ int pat_parse_nothing(const char *text, struct pattern *pattern, char **err);
+ /* Parse an integer. It is put both in min and max. */
+ int pat_parse_int(const char *text, struct pattern *pattern, char **err);
+ 
+-/* Parse len like an integer, but specify expected string type */
+-int pat_parse_len(const char *text, struct pattern *pattern, char **err);
+-
+ /* Parse an version. It is put both in min and max. */
+ int pat_parse_dotted_ver(const char *text, struct pattern *pattern, char **err);
+ 
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 7973bce..dfee109 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -135,7 +135,6 @@ struct pattern_tree {
+  */
+ struct pattern {
+ 	int type;                               /* type of the ACL pattern (SMP_T_*) */
+-	int expect_type;                        /* type of the expected sample (SMP_T_*) */
+ 	union {
+ 		int i;                          /* integer value */
+ 		struct {
+@@ -209,6 +208,7 @@ struct pattern_head {
+ 	struct sample_storage **(*find_smp)(struct pattern_expr *, struct pattern *);
+ 	void (*prune)(struct pattern_expr *);
+ 	struct pattern *(*match)(struct sample *, struct pattern_expr *, int);
++	int expect_type; /* type of the expected sample (SMP_T_*) */
+ 
+ 	struct list head; /* This is a list of struct pattern_expr_list. */
+ };
+diff --git a/src/acl.c b/src/acl.c
+index fa54ab9..d4d1cfb 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -358,6 +358,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 	expr->pat.delete = aclkw ? aclkw->delete : NULL;
+ 	expr->pat.prune = aclkw ? aclkw->prune : NULL;
+ 	expr->pat.find_smp = aclkw ? aclkw->find_smp : NULL;
++	expr->pat.expect_type = smp->fetch->out_type;
+ 	expr->smp = smp;
+ 	smp = NULL;
+ 
+@@ -372,6 +373,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_BOOL];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_BOOL];
+ 			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_BOOL];
++			expr->pat.expect_type = pat_match_types[PAT_MATCH_BOOL];
+ 			break;
+ 		case SMP_T_SINT:
+ 		case SMP_T_UINT:
+@@ -381,6 +383,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_INT];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_INT];
+ 			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_INT];
++			expr->pat.expect_type = pat_match_types[PAT_MATCH_INT];
+ 			break;
+ 		case SMP_T_IPV4:
+ 		case SMP_T_IPV6:
+@@ -390,6 +393,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_IP];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_IP];
+ 			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_IP];
++			expr->pat.expect_type = pat_match_types[PAT_MATCH_IP];
+ 			break;
+ 		}
+ 	}
+@@ -455,6 +459,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.delete = pat_delete_fcts[idx];
+ 			expr->pat.prune = pat_prune_fcts[idx];
+ 			expr->pat.find_smp = pat_find_smp_fcts[idx];
++			expr->pat.expect_type = pat_match_types[idx];
+ 			args++;
+ 		}
+ 		else if ((*args)[1] == '-') {
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 13bf201..57a9fc5 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4823,7 +4823,8 @@ static int stats_map_lookup(struct stream_interface *si)
+ 			sample.flags |= SMP_F_CONST;
+ 			sample.data.str.len = appctx->ctx.map.chunk.len;
+ 			sample.data.str.str = appctx->ctx.map.chunk.str;
+-			if (appctx->ctx.map.expr->pat_head->match)
++			if (appctx->ctx.map.expr->pat_head->match &&
++			    sample_convert(&sample, appctx->ctx.map.expr->pat_head->expect_type))
+ 				pat = appctx->ctx.map.expr->pat_head->match(&sample, appctx->ctx.map.expr, 1);
+ 			else
+ 				pat = NULL;
+diff --git a/src/map.c b/src/map.c
+index 064c52e..fced0ed 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -258,6 +258,7 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 	desc->pat.delete = pat_delete_fcts[conv->private];
+ 	desc->pat.prune = pat_prune_fcts[conv->private];
+ 	desc->pat.find_smp = pat_find_smp_fcts[conv->private];
++	desc->pat.expect_type = pat_match_types[conv->private];
+ 
+ 	/* Set the output parse method. */
+ 	switch (desc->conv->out_type) {
+diff --git a/src/pattern.c b/src/pattern.c
+index 3d87a47..e35a59d 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -46,7 +46,7 @@ int (*pat_parse_fcts[PAT_MATCH_NUM])(const char *, struct pattern *, char **) =
+ 	[PAT_MATCH_INT]   = pat_parse_int,
+ 	[PAT_MATCH_IP]    = pat_parse_ip,
+ 	[PAT_MATCH_BIN]   = pat_parse_bin,
+-	[PAT_MATCH_LEN]   = pat_parse_len,
++	[PAT_MATCH_LEN]   = pat_parse_int,
+ 	[PAT_MATCH_STR]   = pat_parse_str,
+ 	[PAT_MATCH_BEG]   = pat_parse_str,
+ 	[PAT_MATCH_SUB]   = pat_parse_str,
+@@ -219,7 +219,6 @@ int pat_parse_nothing(const char *text, struct pattern *pattern, char **err)
+ int pat_parse_str(const char *text, struct pattern *pattern, char **err)
+ {
+ 	pattern->type = SMP_T_STR;
+-	pattern->expect_type = SMP_T_STR;
+ 	pattern->ptr.str = (char *)text;
+ 	pattern->len = strlen(text);
+ 	return 1;
+@@ -231,7 +230,6 @@ int pat_parse_bin(const char *text, struct pattern *pattern, char **err)
+ 	struct chunk *trash;
+ 
+ 	pattern->type = SMP_T_BIN;
+-	pattern->expect_type = SMP_T_BIN;
+ 	trash = get_trash_chunk();
+ 	pattern->len = trash->size;
+ 	pattern->ptr.str = trash->str;
+@@ -253,7 +251,6 @@ int pat_parse_reg(const char *text, struct pattern *pattern, char **err)
+ 	pattern->ptr.reg = (struct my_regex *)trash->str;
+ 	pattern->ptr.reg->regstr = (char *)text;
+ 
+-	pattern->expect_type = SMP_T_STR;
+ 	return 1;
+ }
+ 
+@@ -277,7 +274,6 @@ int pat_parse_int(const char *text, struct pattern *pattern, char **err)
+ 	const char *ptr = text;
+ 
+ 	pattern->type = SMP_T_UINT;
+-	pattern->expect_type = SMP_T_UINT;
+ 
+ 	/* Empty string is not valid */
+ 	if (!*text)
+@@ -338,15 +334,6 @@ int pat_parse_int(const char *text, struct pattern *pattern, char **err)
+ 	return 0;
+ }
+ 
+-int pat_parse_len(const char *text, struct pattern *pattern, char **err)
+-{
+-	int ret;
+-
+-	ret = pat_parse_int(text, pattern, err);
+-	pattern->expect_type = SMP_T_STR;
+-	return ret;
+-}
+-
+ /* Parse a range of positive 2-component versions delimited by either ':' or
+  * '-'. The version consists in a major and a minor, both of which must be
+  * smaller than 65536, because internally they will be represented as a 32-bit
+@@ -372,7 +359,6 @@ int pat_parse_dotted_ver(const char *text, struct pattern *pattern, char **err)
+ 	const char *ptr = text;
+ 
+ 	pattern->type = SMP_T_UINT;
+-	pattern->expect_type = SMP_T_UINT;
+ 
+ 	/* Search ':' or '-' separator. */
+ 	while (*ptr != '\0' && *ptr != ':' && *ptr != '-')
+@@ -437,7 +423,6 @@ int pat_parse_dotted_ver(const char *text, struct pattern *pattern, char **err)
+  */
+ int pat_parse_ip(const char *text, struct pattern *pattern, char **err)
+ {
+-	pattern->expect_type = SMP_T_ADDR;
+ 	if (str2net(text, &pattern->val.ipv4.addr, &pattern->val.ipv4.mask)) {
+ 		pattern->type = SMP_T_IPV4;
+ 		return 1;
+@@ -479,10 +464,6 @@ struct pattern *pat_match_str(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	/* Lookup a string in the expression's pattern tree. */
+ 	if (!eb_is_empty(&expr->pattern_tree)) {
+ 		/* we may have to force a trailing zero on the test pattern */
+@@ -527,10 +508,6 @@ struct pattern *pat_match_bin(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* Convert input to binary. */
+-	if (!sample_convert(smp, SMP_T_BIN))
+-		return NULL;
+-
+ 	/* Look in the list. */
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+@@ -553,10 +530,6 @@ struct pattern *pat_match_reg(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	/* look in the list */
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+@@ -574,10 +547,6 @@ struct pattern *pat_match_beg(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 
+@@ -601,10 +570,6 @@ struct pattern *pat_match_end(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 
+@@ -632,10 +597,6 @@ struct pattern *pat_match_sub(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 
+@@ -727,10 +688,6 @@ struct pattern *pat_match_dir(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 		if (match_word(smp, pattern, make_4delim('/', '?', '?', '?')))
+@@ -748,10 +705,6 @@ struct pattern *pat_match_dom(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 		if (match_word(smp, pattern, make_4delim('/', '?', '.', ':')))
+@@ -766,10 +719,6 @@ struct pattern *pat_match_int(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to integer */
+-	if (!sample_convert(smp, SMP_T_UINT))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 		if ((!pattern->val.range.min_set || pattern->val.range.min <= smp->data.uint) &&
+@@ -785,10 +734,6 @@ struct pattern *pat_match_len(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to string */
+-	if (!sample_convert(smp, SMP_T_STR))
+-		return NULL;
+-
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 		if ((!pattern->val.range.min_set || pattern->val.range.min <= smp->data.str.len) &&
+@@ -808,10 +753,6 @@ struct pattern *pat_match_ip(struct sample *smp, struct pattern_expr *expr, int
+ 	struct pattern_list *lst;
+ 	struct pattern *pattern;
+ 
+-	/* convert input to addr */
+-	if (!sample_convert(smp, SMP_T_ADDR))
+-		return NULL;
+-
+ 	/* The input sample is IPv4. Try to match in the trees. */
+ 	if (smp->type == SMP_T_IPV4) {
+ 		/* Lookup an IPv4 address in the expression's pattern tree using
+@@ -2174,6 +2115,10 @@ struct pattern *pattern_exec_match(struct pattern_head *head, struct sample *smp
+ 		return &static_pattern;
+ 	}
+ 
++	/* convert input to string */
++	if (!sample_convert(smp, head->expect_type))
++		return NULL;
++
+ 	list_for_each_entry(list, &head->head, list) {
+ 		pat = head->match(smp, list->expr, fill);
+ 		if (pat)
+diff --git a/src/proto_http.c b/src/proto_http.c
+index bd7bfff..feaf475 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -9002,13 +9002,11 @@ static int pat_parse_meth(const char *text, struct pattern *pattern, char **err)
+ 			return 0;
+ 		}
+ 		pattern->ptr.str = trash->str;
+-		pattern->expect_type = SMP_T_STR;
+ 		pattern->len = len;
+ 	}
+ 	else {
+ 		pattern->ptr.str = NULL;
+ 		pattern->len = 0;
+-		pattern->expect_type = SMP_T_UINT;
+ 	}
+ 	return 1;
+ }
+-- 
+1.8.3.2
+

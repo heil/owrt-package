@@ -1,0 +1,30 @@
+From 2049092f26efd83508b7d775f948e04ec0e1c532 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 17 Mar 2014 18:04:27 +0100
+Subject: [PATCH 048/103] CLEANUP: acl: remove obsolete test in
+ parse_acl_expr()
+
+The ACL keyword returned by find_acl_kw() is checked for having a
+valid ->parse() function. This dates back 2007 when ACLs were reworked
+in order to differenciate old and new keywords. This check is
+inappropriate and confusing since all keywords have a parser now.
+---
+ src/acl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/acl.c b/src/acl.c
+index b04c9df..abfd04c 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -156,7 +156,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 	al->conv = NULL;
+ 
+ 	aclkw = find_acl_kw(args[0]);
+-	if (aclkw && aclkw->parse) {
++	if (aclkw) {
+ 		/* OK we have a real ACL keyword */
+ 
+ 		/* build new sample expression for this ACL */
+-- 
+1.8.3.2
+

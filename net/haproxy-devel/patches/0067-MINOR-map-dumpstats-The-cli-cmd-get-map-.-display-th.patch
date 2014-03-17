@@ -1,0 +1,43 @@
+From b4be12952afbdab88a657946a8dcb959bfd62eb1 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 17 Jan 2014 15:14:41 +0100
+Subject: [PATCH 067/103] MINOR: map/dumpstats: The cli cmd "get map ..."
+ display the "int" format.
+
+The "get map ..." command display the integer range that match the
+request.
+---
+ src/dumpstats.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 2532472..12bace2 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4941,6 +4941,23 @@ static int stats_map_lookup(struct stream_interface *si)
+ 							chunk_appendf(&trash, ", key=\"%s/%d\"", s_addr6, pat->val.ipv6.mask);
+ 					}
+ 				}
++				else if (appctx->ctx.map.desc->pat->match == pat_match_int) {
++					/* display int */
++					chunk_appendf(&trash, "match=\"");
++					if (pat->val.range.min_set && pat->val.range.max_set &&
++					    pat->val.range.min == pat->val.range.max) {
++						chunk_appendf(&trash, "%lld", pat->val.range.min);
++					}
++					else {
++						if (pat->val.range.min_set)
++							chunk_appendf(&trash, "is >= %lld", pat->val.range.min);
++						if (pat->val.range.min_set && pat->val.range.max_set)
++							chunk_appendf(&trash, " and ");
++						if (pat->val.range.max_set)
++							chunk_appendf(&trash, "is <= %lld", pat->val.range.max);
++					}
++					chunk_appendf(&trash, "\", ");
++				}
+ 			}
+ 
+ 			/* display return value */
+-- 
+1.8.3.2
+

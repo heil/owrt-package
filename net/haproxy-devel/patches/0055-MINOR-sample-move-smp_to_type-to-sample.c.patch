@@ -1,0 +1,85 @@
+From 1cf8f08c1788f6951d5f262f033133441f7577d1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 7 Feb 2014 12:14:54 +0100
+Subject: [PATCH 055/103] MINOR: sample: move smp_to_type to sample.c
+
+This way it can be exported and reused anywhere else to report type names.
+---
+ include/proto/sample.h |  2 ++
+ src/dumpstats.c        | 14 +-------------
+ src/sample.c           | 14 ++++++++++++++
+ 3 files changed, 17 insertions(+), 13 deletions(-)
+
+diff --git a/include/proto/sample.h b/include/proto/sample.h
+index d363e4e..b8a1040 100644
+--- a/include/proto/sample.h
++++ b/include/proto/sample.h
+@@ -26,6 +26,8 @@
+ #include <types/sample.h>
+ #include <types/stick_table.h>
+ 
++extern const char *smp_to_type[SMP_TYPES];
++
+ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err, struct arg_list *al);
+ struct sample_conv *find_sample_conv(const char *kw, int len);
+ struct sample *sample_process(struct proxy *px, struct session *l4,
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 3835f2c..ba0a7a5 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -53,6 +53,7 @@
+ #include <proto/proto_http.h>
+ #include <proto/proto_uxst.h>
+ #include <proto/proxy.h>
++#include <proto/sample.h>
+ #include <proto/session.h>
+ #include <proto/server.h>
+ #include <proto/raw_sock.h>
+@@ -4836,19 +4837,6 @@ static int stats_maps_list(struct stream_interface *si)
+ 	}
+ }
+ 
+-static const char *smp_to_type[SMP_TYPES] = {
+-	[SMP_T_BOOL] = "bool",
+-	[SMP_T_UINT] = "uint",
+-	[SMP_T_SINT] = "sint",
+-	[SMP_T_ADDR] = "addr",
+-	[SMP_T_IPV4] = "ipv4",
+-	[SMP_T_IPV6] = "ipv6",
+-	[SMP_T_STR]  = "str",
+-	[SMP_T_BIN]  = "bin",
+-	[SMP_T_CSTR] = "cstr",
+-	[SMP_T_CBIN] = "cbin",
+-};
+-
+ static int stats_map_lookup(struct stream_interface *si)
+ {
+ 	struct appctx *appctx = __objt_appctx(si->end);
+diff --git a/src/sample.c b/src/sample.c
+index 8584dbe..f57811e 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -28,6 +28,20 @@
+ #include <proto/sample.h>
+ #include <proto/stick_table.h>
+ 
++/* sample type names */
++const char *smp_to_type[SMP_TYPES] = {
++	[SMP_T_BOOL] = "bool",
++	[SMP_T_UINT] = "uint",
++	[SMP_T_SINT] = "sint",
++	[SMP_T_ADDR] = "addr",
++	[SMP_T_IPV4] = "ipv4",
++	[SMP_T_IPV6] = "ipv6",
++	[SMP_T_STR]  = "str",
++	[SMP_T_BIN]  = "bin",
++	[SMP_T_CSTR] = "cstr",
++	[SMP_T_CBIN] = "cbin",
++};
++
+ /* static sample used in sample_process() when <p> is NULL */
+ static struct sample temp_smp;
+ 
+-- 
+1.8.3.2
+

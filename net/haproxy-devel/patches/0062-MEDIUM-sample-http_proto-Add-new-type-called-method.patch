@@ -1,0 +1,320 @@
+From d437314979e275d8aee79f1df53a67632bc407ac Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 17 Dec 2013 01:10:10 +0100
+Subject: [PATCH 062/103] MEDIUM: sample/http_proto: Add new type called method
+
+The method are actuelly stored using two types. Integer if the method is
+known and string if the method is not known. The fetch is declared as
+UINT, but in some case it can provides STR.
+
+This patch create new type called METH. This type contain interge for
+known method and string for the other methods. It can be used with
+automatic converters.
+
+The pattern matching can expect method.
+
+During the free or prune function, http_meth pettern is freed. This
+patch initialise the freed pointer to NULL.
+---
+ include/proto/proto_http.h |  2 ++
+ include/types/proto_http.h |  9 ++++++-
+ include/types/sample.h     |  9 +++++++
+ src/proto_http.c           | 55 +++++++++++++++++++++++----------------
+ src/sample.c               | 65 +++++++++++++++++++++++++++++++++++++++-------
+ 5 files changed, 107 insertions(+), 33 deletions(-)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 2075176..c836eb4 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -120,6 +120,8 @@ struct chunk *http_error_message(struct session *s, int msgnum);
+ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, struct proxy *curproxy,
+                                                const char **args, char **errmsg, int use_fmt);
+ 
++enum http_meth_t find_http_meth(const char *str, const int len);
++
+ /* to be used when contents change in an HTTP message */
+ #define http_msg_move_end(msg, bytes) do { \
+ 		unsigned int _bytes = (bytes);	\
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index c24216a..f3fc1fc 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -227,7 +227,7 @@ enum http_meth_t {
+ 	HTTP_METH_DELETE,
+ 	HTTP_METH_TRACE,
+ 	HTTP_METH_CONNECT,
+-	HTTP_METH_OTHER,
++	HTTP_METH_OTHER, /* Must be the last entry */
+ } __attribute__((packed));
+ 
+ enum ht_auth_m {
+@@ -442,6 +442,13 @@ struct hdr_ctx {
+ 	int  prev; /* index of previous header */
+ };
+ 
++struct http_method_name {
++	char *name;
++	int len;
++};
++
++extern const struct http_method_name http_known_methods[HTTP_METH_OTHER];
++
+ #endif /* _TYPES_PROTO_HTTP_H */
+ 
+ /*
+diff --git a/include/types/sample.h b/include/types/sample.h
+index 0f189fd..ce1bba9 100644
+--- a/include/types/sample.h
++++ b/include/types/sample.h
+@@ -29,6 +29,7 @@
+ #include <common/chunk.h>
+ #include <common/mini-clist.h>
+ #include <types/arg.h>
++#include <types/proto_http.h>
+ 
+ /* input and output sample types */
+ enum {
+@@ -40,6 +41,7 @@ enum {
+ 	SMP_T_IPV6,      /* ipv6 type */
+ 	SMP_T_STR,       /* char string type */
+ 	SMP_T_BIN,       /* buffer type */
++	SMP_T_METH,      /* contain method */
+ 	SMP_TYPES        /* number of types, must always be last */
+ };
+ 
+@@ -220,6 +222,11 @@ union smp_ctx {
+ 	void *a[8];     /* any array of up to 8 pointers */
+ };
+ 
++struct meth {
++	enum http_meth_t meth;
++	struct chunk str;
++};
++
+ /* a sample is a typed data extracted from a stream. It has a type, contents,
+  * validity constraints, a context for use in iterative calls.
+  */
+@@ -232,6 +239,7 @@ struct sample {
+ 		struct in_addr  ipv4;  /* used for ipv4 addresses */
+ 		struct in6_addr ipv6;  /* used for ipv6 addresses */
+ 		struct chunk    str;   /* used for char strings or buffers */
++		struct meth     meth;  /* used for http method */
+ 	} data;                        /* sample data */
+ 	union smp_ctx ctx;
+ };
+@@ -245,6 +253,7 @@ struct sample_storage {
+ 		struct in_addr  ipv4;  /* used for ipv4 addresses */
+ 		struct in6_addr ipv6;  /* used for ipv6 addresses */
+ 		struct chunk    str;   /* used for char strings or buffers */
++		struct meth     meth;  /* used for http method */
+ 	} data;                        /* sample data */
+ };
+ 
+diff --git a/src/proto_http.c b/src/proto_http.c
+index eca5a33..dcf91ed 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -352,6 +352,18 @@ const struct http_method_desc http_methods[26][3] = {
+ 	 */
+ };
+ 
++const struct http_method_name http_known_methods[HTTP_METH_OTHER] = {
++	[HTTP_METH_NONE]    = { "",         0 },
++	[HTTP_METH_OPTIONS] = { "OPTIONS",  7 },
++	[HTTP_METH_GET]     = { "GET",      3 },
++	[HTTP_METH_HEAD]    = { "HEAD",     4 },
++	[HTTP_METH_POST]    = { "POST",     4 },
++	[HTTP_METH_PUT]     = { "PUT",      3 },
++	[HTTP_METH_DELETE]  = { "DELETE",   6 },
++	[HTTP_METH_TRACE]   = { "TRACE",    5 },
++	[HTTP_METH_CONNECT] = { "CONNECT",  7 },
++};
++
+ /* It is about twice as fast on recent architectures to lookup a byte in a
+  * table than to perform a boolean AND or OR between two tests. Refer to
+  * RFC2616 for those chars.
+@@ -795,7 +807,7 @@ struct chunk *http_error_message(struct session *s, int msgnum)
+  * returns HTTP_METH_NONE if there is nothing valid to read (empty or non-text
+  * string), HTTP_METH_OTHER for unknown methods, or the identified method.
+  */
+-static enum http_meth_t find_http_meth(const char *str, const int len)
++enum http_meth_t find_http_meth(const char *str, const int len)
+ {
+ 	unsigned char m;
+ 	const struct http_method_desc *h;
+@@ -8993,8 +9005,11 @@ static int pat_parse_meth(const char *text, struct pattern *pattern, char **err)
+ 		pattern->expect_type = SMP_T_STR;
+ 		pattern->len = len;
+ 	}
+-	else
++	else {
++		pattern->ptr.str = NULL;
++		pattern->len = 0;
+ 		pattern->expect_type = SMP_T_UINT;
++	}
+ 	return 1;
+ }
+ 
+@@ -9016,17 +9031,15 @@ smp_fetch_meth(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+ 	CHECK_HTTP_MESSAGE_FIRST_PERM();
+ 
+ 	meth = txn->meth;
+-	smp->flags = 0;
+-	smp->type = SMP_T_UINT;
+-	smp->data.uint = meth;
++	smp->type = SMP_T_METH;
++	smp->data.meth.meth = meth;
+ 	if (meth == HTTP_METH_OTHER) {
+ 		if (txn->rsp.msg_state != HTTP_MSG_RPBEFORE)
+ 			/* ensure the indexes are not affected */
+ 			return 0;
+-		smp->type = SMP_T_STR;
+ 		smp->flags |= SMP_F_CONST;
+-		smp->data.str.len = txn->req.sl.rq.m_l;
+-		smp->data.str.str = txn->req.chn->buf->p;
++		smp->data.meth.str.len = txn->req.sl.rq.m_l;
++		smp->data.meth.str.str = txn->req.chn->buf->p;
+ 	}
+ 	smp->flags |= SMP_F_VOL_1ST;
+ 	return 1;
+@@ -9037,27 +9050,23 @@ static enum pat_match_res pat_match_meth(struct sample *smp, struct pattern *pat
+ {
+ 	int icase;
+ 
+-
+-	if (smp->type == SMP_T_UINT) {
+-		/* well-known method */
+-		if (smp->data.uint == pattern->val.i)
++	/* well-known method */
++	if (pattern->val.i != HTTP_METH_OTHER) {
++		if (smp->data.meth.meth == pattern->val.i)
+ 			return PAT_MATCH;
+-		return PAT_NOMATCH;
++		else
++			return PAT_NOMATCH;
+ 	}
+ 
+-	/* Uncommon method, only HTTP_METH_OTHER is accepted now */
+-	if (pattern->val.i != HTTP_METH_OTHER)
+-		return PAT_NOMATCH;
+-
+ 	/* Other method, we must compare the strings */
+-	if (pattern->len != smp->data.str.len)
++	if (pattern->len != smp->data.meth.str.len)
+ 		return PAT_NOMATCH;
+ 
+ 	icase = pattern->flags & PAT_F_IGNORE_CASE;
+-	if ((icase && strncasecmp(pattern->ptr.str, smp->data.str.str, smp->data.str.len) != 0) ||
+-	    (!icase && strncmp(pattern->ptr.str, smp->data.str.str, smp->data.str.len) != 0))
+-		return PAT_NOMATCH;
+-	return PAT_MATCH;
++	if ((icase && strncasecmp(pattern->ptr.str, smp->data.meth.str.str, smp->data.meth.str.len) != 0) ||
++	    (!icase && strncmp(pattern->ptr.str, smp->data.meth.str.str, smp->data.meth.str.len) != 0))
++		return PAT_MATCH;
++	return PAT_NOMATCH;
+ }
+ 
+ static int
+@@ -10465,7 +10474,7 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+ 	{ "http_auth",       smp_fetch_http_auth,      ARG1(1,USR),      NULL,    SMP_T_BOOL, SMP_USE_HRQHV },
+ 	{ "http_auth_group", smp_fetch_http_auth_grp,  ARG1(1,USR),      NULL,    SMP_T_STR,  SMP_USE_HRQHV },
+ 	{ "http_first_req",  smp_fetch_http_first_req, 0,                NULL,    SMP_T_BOOL, SMP_USE_HRQHP },
+-	{ "method",          smp_fetch_meth,           0,                NULL,    SMP_T_UINT, SMP_USE_HRQHP },
++	{ "method",          smp_fetch_meth,           0,                NULL,    SMP_T_METH, SMP_USE_HRQHP },
+ 	{ "path",            smp_fetch_path,           0,                NULL,    SMP_T_STR,  SMP_USE_HRQHV },
+ 
+ 	/* HTTP protocol on the request path */
+diff --git a/src/sample.c b/src/sample.c
+index e6653fa..356caf6 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -24,6 +24,7 @@
+ #include <proto/arg.h>
+ #include <proto/auth.h>
+ #include <proto/log.h>
++#include <proto/proto_http.h>
+ #include <proto/proxy.h>
+ #include <proto/sample.h>
+ #include <proto/stick_table.h>
+@@ -607,6 +608,51 @@ static int c_str2int(struct sample *smp)
+ 	return 1;
+ }
+ 
++static int c_str2meth(struct sample *smp)
++{
++	enum http_meth_t meth;
++	int len;
++
++	meth = find_http_meth(smp->data.str.str, smp->data.str.len);
++	if (meth == HTTP_METH_OTHER) {
++		len = smp->data.str.len;
++		smp->data.meth.str.str = smp->data.str.str;
++		smp->data.meth.str.len = len;
++	}
++	else
++		smp->flags &= ~SMP_F_CONST;
++	smp->data.meth.meth = meth;
++	smp->type = SMP_T_METH;
++	return 1;
++}
++
++static int c_meth2str(struct sample *smp)
++{
++	int len;
++	enum http_meth_t meth;
++
++	if (smp->data.meth.meth == HTTP_METH_OTHER) {
++		/* The method is unknown. Copy the original pointer. */
++		len = smp->data.meth.str.len;
++		smp->data.str.str = smp->data.meth.str.str;
++		smp->data.str.len = len;
++		smp->type = SMP_T_STR;
++	}
++	else if (smp->data.meth.meth < HTTP_METH_OTHER) {
++		/* The method is known, copy the pointer containing the string. */
++		meth = smp->data.meth.meth;
++		smp->data.str.str = http_known_methods[meth].name;
++		smp->data.str.len = http_known_methods[meth].len;
++		smp->flags |= SMP_F_CONST;
++		smp->type = SMP_T_STR;
++	}
++	else {
++		/* Unknown method */
++		return 0;
++	}
++	return 1;
++}
++
+ /*****************************************************************/
+ /*      Sample casts matrix:                                     */
+ /*           sample_casts[from type][to type]                    */
+@@ -614,15 +660,16 @@ static int c_str2int(struct sample *smp)
+ /*****************************************************************/
+ 
+ sample_cast_fct sample_casts[SMP_TYPES][SMP_TYPES] = {
+-/*            to:  BOOL       UINT       SINT       ADDR        IPV4      IPV6        STR         BIN     */
+-/* from: BOOL */ { c_none,    c_none,    c_none,    NULL,       NULL,     NULL,       c_int2str,  NULL,   },
+-/*       UINT */ { c_none,    c_none,    c_none,    c_int2ip,   c_int2ip, NULL,       c_int2str,  NULL,   },
+-/*       SINT */ { c_none,    c_none,    c_none,    c_int2ip,   c_int2ip, NULL,       c_int2str,  NULL,   },
+-/*       ADDR */ { NULL,      NULL,      NULL,      NULL,       NULL,     NULL,       NULL,       NULL,   },
+-/*       IPV4 */ { NULL,      c_ip2int,  c_ip2int,  c_none,     c_none,   c_ip2ipv6,  c_ip2str,   NULL,   },
+-/*       IPV6 */ { NULL,      NULL,      NULL,      c_none,     NULL,     c_none,     c_ipv62str, NULL,   },
+-/*        STR */ { c_str2int, c_str2int, c_str2int, c_str2addr, c_str2ip, c_str2ipv6, c_none,     c_none, },
+-/*        BIN */ { NULL,      NULL,      NULL,      NULL,       NULL,     NULL,       c_bin2str,  c_none, },
++/*            to:  BOOL       UINT       SINT       ADDR        IPV4      IPV6        STR         BIN         METH */
++/* from: BOOL */ { c_none,    c_none,    c_none,    NULL,       NULL,     NULL,       c_int2str,  NULL,       NULL,       },
++/*       UINT */ { c_none,    c_none,    c_none,    c_int2ip,   c_int2ip, NULL,       c_int2str,  NULL,       NULL,       },
++/*       SINT */ { c_none,    c_none,    c_none,    c_int2ip,   c_int2ip, NULL,       c_int2str,  NULL,       NULL,       },
++/*       ADDR */ { NULL,      NULL,      NULL,      NULL,       NULL,     NULL,       NULL,       NULL,       NULL,       },
++/*       IPV4 */ { NULL,      c_ip2int,  c_ip2int,  c_none,     c_none,   c_ip2ipv6,  c_ip2str,   NULL,       NULL,       },
++/*       IPV6 */ { NULL,      NULL,      NULL,      c_none,     NULL,     c_none,     c_ipv62str, NULL,       NULL,       },
++/*        STR */ { c_str2int, c_str2int, c_str2int, c_str2addr, c_str2ip, c_str2ipv6, c_none,     c_none,     c_str2meth, },
++/*        BIN */ { NULL,      NULL,      NULL,      NULL,       NULL,     NULL,       c_bin2str,  c_none,     c_str2meth, },
++/*       METH */ { NULL,      NULL,      NULL,      NULL,       NULL,     NULL,       c_meth2str, c_meth2str, c_none,     },
+ };
+ 
+ /*
+-- 
+1.8.3.2
+

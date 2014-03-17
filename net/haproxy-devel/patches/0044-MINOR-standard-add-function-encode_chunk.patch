@@ -1,0 +1,91 @@
+From e059ec9393e3cce431e28ec7980aac9b295f0e05 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 17 Mar 2014 12:01:13 +0100
+Subject: [PATCH 044/103] MINOR: standard: add function "encode_chunk"
+
+This function has the same behavior as encode_string(), except it
+takes a "struct chunk" instead of a "char *" on input.
+---
+ include/common/standard.h |  9 +++++++++
+ src/standard.c            | 31 +++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index 14b0eba..bdb4ef5 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -29,6 +29,7 @@
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <netinet/in.h>
++#include <common/chunk.h>
+ #include <common/config.h>
+ #include <eb32tree.h>
+ 
+@@ -282,6 +283,14 @@ char *encode_string(char *start, char *stop,
+ 		    const char escape, const fd_set *map,
+ 		    const char *string);
+ 
++/*
++ * Same behavior, except that it encodes chunk <chunk> instead of a string.
++ */
++char *encode_chunk(char *start, char *stop,
++                   const char escape, const fd_set *map,
++                   const struct chunk *chunk);
++
++
+ /* Decode an URL-encoded string in-place. The resulting string might
+  * be shorter. If some forbidden characters are found, the conversion is
+  * aborted, the string is truncated before the issue and non-zero is returned,
+diff --git a/src/standard.c b/src/standard.c
+index adaba75..46c940d 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -21,6 +21,7 @@
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ 
++#include <common/chunk.h>
+ #include <common/config.h>
+ #include <common/standard.h>
+ #include <eb32tree.h>
+@@ -1045,6 +1046,36 @@ char *encode_string(char *start, char *stop,
+ 	return start;
+ }
+ 
++/*
++ * Same behavior as encode_string() above, except that it encodes chunk
++ * <chunk> instead of a string.
++ */
++char *encode_chunk(char *start, char *stop,
++		    const char escape, const fd_set *map,
++		    const struct chunk *chunk)
++{
++	char *str = chunk->str;
++	char *end = chunk->str + chunk->len;
++
++	if (start < stop) {
++		stop--; /* reserve one byte for the final '\0' */
++		while (start < stop && str < end) {
++			if (!FD_ISSET((unsigned char)(*str), map))
++				*start++ = *str;
++			else {
++				if (start + 3 >= stop)
++					break;
++				*start++ = escape;
++				*start++ = hextab[(*str >> 4) & 15];
++				*start++ = hextab[*str & 15];
++			}
++			str++;
++		}
++		*start = '\0';
++	}
++	return start;
++}
++
+ /* Decode an URL-encoded string in-place. The resulting string might
+  * be shorter. If some forbidden characters are found, the conversion is
+  * aborted, the string is truncated before the issue and a negative value is
+-- 
+1.8.3.2
+

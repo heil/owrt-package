@@ -1,0 +1,285 @@
+From eeaa951726e64d40eedcb43c83ebac087f3952fd Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 11 Feb 2014 14:00:19 +0100
+Subject: [PATCH 097/103] MINOR: configuration: File and line propagation
+
+This patch permits to communicate file and line of the
+configuration file at the configuration parser.
+---
+ include/proto/log.h     | 2 +-
+ include/proto/pattern.h | 2 +-
+ include/proto/sample.h  | 2 +-
+ include/types/sample.h  | 1 +
+ src/acl.c               | 6 +++---
+ src/cfgparse.c          | 7 ++++---
+ src/log.c               | 8 ++++----
+ src/map.c               | 5 +++--
+ src/pattern.c           | 3 ++-
+ src/proto_http.c        | 9 ++++++---
+ src/proto_tcp.c         | 2 +-
+ src/sample.c            | 4 ++--
+ 12 files changed, 29 insertions(+), 22 deletions(-)
+
+diff --git a/include/proto/log.h b/include/proto/log.h
+index 86b4185..e3c1a75 100644
+--- a/include/proto/log.h
++++ b/include/proto/log.h
+@@ -70,7 +70,7 @@ void add_to_logformat_list(char *start, char *end, int type, struct list *list_f
+  * Variable name are preceded by % and composed by characters [a-zA-Z0-9]* : %varname
+  * You can set arguments using { } : %{many arguments}varname
+  */
+-void parse_logformat_string(const char *str, struct proxy *curproxy, struct list *list_format, int options, int cap);
++void parse_logformat_string(const char *str, struct proxy *curproxy, struct list *list_format, int options, int cap, const char *file, int line);
+ /*
+  * Displays the message on stderr with the date and pid. Overrides the quiet
+  * mode during startup.
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index e9269e4..4b5afe1 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -186,7 +186,7 @@ int pat_ref_load(struct pat_ref *ref, struct pattern_expr *expr, int patflags, i
+  */
+ void pattern_init_head(struct pattern_head *head);
+ void pattern_prune(struct pattern_head *head);
+-int pattern_read_from_file(struct pattern_head *head, unsigned int refflags, const char *filename, int patflags, int load_smp, char **err, const char *display);
++int pattern_read_from_file(struct pattern_head *head, unsigned int refflags, const char *filename, int patflags, int load_smp, char **err, const char *display, const char *file, int line);
+ 
+ /*
+  * pattern_expr manipulation.
+diff --git a/include/proto/sample.h b/include/proto/sample.h
+index d78e82d..6b76662 100644
+--- a/include/proto/sample.h
++++ b/include/proto/sample.h
+@@ -28,7 +28,7 @@
+ 
+ extern const char *smp_to_type[SMP_TYPES];
+ 
+-struct sample_expr *sample_parse_expr(char **str, int *idx, char **err, struct arg_list *al);
++struct sample_expr *sample_parse_expr(char **str, int *idx, const char *file, int line, char **err, struct arg_list *al);
+ struct sample_conv *find_sample_conv(const char *kw, int len);
+ struct sample *sample_process(struct proxy *px, struct session *l4,
+                                void *l7, unsigned int dir, struct sample_expr *expr,
+diff --git a/include/types/sample.h b/include/types/sample.h
+index ce1bba9..a5140d6 100644
+--- a/include/types/sample.h
++++ b/include/types/sample.h
+@@ -265,6 +265,7 @@ struct sample_conv {
+ 	unsigned int arg_mask;                    /* arguments (ARG*()) */
+ 	int (*val_args)(struct arg *arg_p,
+ 	                struct sample_conv *smp_conv,
++	                const char *file, int line,
+ 			char **err_msg);          /* argument validation function */
+ 	unsigned int in_type;                     /* expected input sample type */
+ 	unsigned int out_type;                    /* output sample type */
+diff --git a/src/acl.c b/src/acl.c
+index 0e3f2bf..2a7435d 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -323,7 +323,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 				if (!conv_expr->arg_p)
+ 					conv_expr->arg_p = empty_arg_list;
+ 
+-				if (conv->val_args && !conv->val_args(conv_expr->arg_p, conv, err)) {
++				if (conv->val_args && !conv->val_args(conv_expr->arg_p, conv, file, line, err)) {
+ 					memprintf(err, "ACL keyword '%s' : invalid args in conv method '%s' : %s.",
+ 						  aclkw->kw, ckw, *err);
+ 					goto out_free_smp;
+@@ -342,7 +342,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 		 * so, we retrieve a completely parsed expression with args and
+ 		 * convs already done.
+ 		 */
+-		smp = sample_parse_expr((char **)args, &idx, err, al);
++		smp = sample_parse_expr((char **)args, &idx, file, line, err, al);
+ 		if (!smp) {
+ 			memprintf(err, "%s in ACL expression '%s'", *err, *args);
+ 			goto out_return;
+@@ -453,7 +453,7 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			snprintf(trash.str, trash.size, "acl(s) loaded from file '%s'", args[1]);
+ 			trash.str[trash.size - 1] = '\0';
+ 
+-			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags | PAT_F_FROM_FILE, load_as_map, err, trash.str))
++			if (!pattern_read_from_file(&expr->pat, PAT_REF_ACL, args[1], patflags | PAT_F_FROM_FILE, load_as_map, err, trash.str, file, line))
+ 				goto out_free_expr;
+ 			is_loaded = 1;
+ 			args++;
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 2aa2ff9..6611d6c 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -3212,7 +3212,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 		}
+ 
+ 		curproxy->conf.args.ctx = ARGC_STK;
+-		expr = sample_parse_expr(args, &myidx, &errmsg, &curproxy->conf.args);
++		expr = sample_parse_expr(args, &myidx, file, linenum, &errmsg, &curproxy->conf.args);
+ 		if (!expr) {
+ 			Alert("parsing [%s:%d] : '%s': %s\n", file, linenum, args[0], errmsg);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+@@ -7088,7 +7088,7 @@ out_uri_auth_compat:
+ 			curproxy->conf.args.file = curproxy->conf.lfs_file;
+ 			curproxy->conf.args.line = curproxy->conf.lfs_line;
+ 			parse_logformat_string(curproxy->conf.logformat_string, curproxy, &curproxy->logformat, LOG_OPT_MANDATORY,
+-					       SMP_VAL_FE_LOG_END);
++					       SMP_VAL_FE_LOG_END, curproxy->conf.lfs_file, curproxy->conf.lfs_line);
+ 			curproxy->conf.args.file = NULL;
+ 			curproxy->conf.args.line = 0;
+ 		}
+@@ -7098,7 +7098,8 @@ out_uri_auth_compat:
+ 			curproxy->conf.args.file = curproxy->conf.uif_file;
+ 			curproxy->conf.args.line = curproxy->conf.uif_line;
+ 			parse_logformat_string(curproxy->conf.uniqueid_format_string, curproxy, &curproxy->format_unique_id, LOG_OPT_HTTP,
+-					       (proxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++					       (proxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR,
++					       curproxy->conf.uif_file, curproxy->conf.uif_line);
+ 			curproxy->conf.args.file = NULL;
+ 			curproxy->conf.args.line = 0;
+ 		}
+diff --git a/src/log.c b/src/log.c
+index f39168a..176a725 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -338,7 +338,7 @@ void add_to_logformat_list(char *start, char *end, int type, struct list *list_f
+  * success. At the moment, sample converters are not yet supported but fetch arguments
+  * should work. The curpx->conf.args.ctx must be set by the caller.
+  */
+-void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct proxy *curpx, struct list *list_format, int options, int cap)
++void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct proxy *curpx, struct list *list_format, int options, int cap, const char *file, int line)
+ {
+ 	char *cmd[2];
+ 	struct sample_expr *expr;
+@@ -350,7 +350,7 @@ void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct pro
+ 	cmd[1] = "";
+ 	cmd_arg = 0;
+ 
+-	expr = sample_parse_expr(cmd, &cmd_arg, &errmsg, &curpx->conf.args);
++	expr = sample_parse_expr(cmd, &cmd_arg, file, line, &errmsg, &curpx->conf.args);
+ 	if (!expr) {
+ 		Warning("parsing [%s:%d] : '%s' : sample fetch <%s> failed with : %s\n",
+ 		        curpx->conf.args.file, curpx->conf.args.line, fmt_directive(curpx),
+@@ -403,7 +403,7 @@ void add_sample_to_logformat_list(char *text, char *arg, int arg_len, struct pro
+  *  options: LOG_OPT_* to force on every node
+  *  cap: all SMP_VAL_* flags supported by the consumer
+  */
+-void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list *list_format, int options, int cap)
++void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list *list_format, int options, int cap, const char *file, int line)
+ {
+ 	char *sp, *str, *backfmt; /* start pointer for text parts */
+ 	char *arg = NULL; /* start pointer for args */
+@@ -522,7 +522,7 @@ void parse_logformat_string(const char *fmt, struct proxy *curproxy, struct list
+ 				parse_logformat_var(arg, arg_len, var, var_len, curproxy, list_format, &options);
+ 				break;
+ 			case LF_STEXPR:
+-				add_sample_to_logformat_list(var, arg, arg_len, curproxy, list_format, options, cap);
++				add_sample_to_logformat_list(var, arg, arg_len, curproxy, list_format, options, cap, file, line);
+ 				break;
+ 			case LF_TEXT:
+ 			case LF_SEPARATOR:
+diff --git a/src/map.c b/src/map.c
+index ea67151..16f86bb 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -114,7 +114,8 @@ static struct map_descriptor *map_create_descriptor(struct sample_conv *conv)
+  * This function choose the indexation type (ebtree or list) according with
+  * the type of match needed.
+  */
+-static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err)
++static int sample_load_map(struct arg *arg, struct sample_conv *conv,
++                           const char *file, int line, char **err)
+ {
+ 	struct map_descriptor *desc;
+ 
+@@ -157,7 +158,7 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 
+ 	/* Load map. */
+ 	if (!pattern_read_from_file(&desc->pat, PAT_REF_MAP, arg[0].data.str.str, 0,
+-	                            1, err, trash.str))
++	                            1, err, trash.str, file, line))
+ 		return 0;
+ 
+ 	/* The second argument is the default value */
+diff --git a/src/pattern.c b/src/pattern.c
+index 10931a7..da79c9f 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -1972,7 +1972,8 @@ int pat_ref_read_from_file(struct pat_ref *ref, const char *filename, char **err
+ 
+ int pattern_read_from_file(struct pattern_head *head, unsigned int refflags,
+                            const char *filename, int patflags, int load_smp,
+-                           char **err, const char *display)
++                           char **err, const char *display, const char *file,
++                           int line)
+ {
+ 	struct pat_ref *ref;
+ 	struct pattern_expr *expr;
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 661e469..105b9a8 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8503,7 +8503,8 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 
+ 		proxy->conf.args.ctx = ARGC_HRQ;
+ 		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, LOG_OPT_HTTP,
+-				       (proxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++				       (proxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR,
++				       file, linenum);
+ 		free(proxy->conf.lfs_file);
+ 		proxy->conf.lfs_file = strdup(proxy->conf.args.file);
+ 		proxy->conf.lfs_line = proxy->conf.args.line;
+@@ -8674,7 +8675,8 @@ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, i
+ 
+ 		proxy->conf.args.ctx = ARGC_HRS;
+ 		parse_logformat_string(args[cur_arg + 1], proxy, &rule->arg.hdr_add.fmt, LOG_OPT_HTTP,
+-				       (proxy->cap & PR_CAP_BE) ? SMP_VAL_BE_HRS_HDR : SMP_VAL_FE_HRS_HDR);
++				       (proxy->cap & PR_CAP_BE) ? SMP_VAL_BE_HRS_HDR : SMP_VAL_FE_HRS_HDR,
++				       file, linenum);
+ 		free(proxy->conf.lfs_file);
+ 		proxy->conf.lfs_file = strdup(proxy->conf.args.file);
+ 		proxy->conf.lfs_line = proxy->conf.args.line;
+@@ -8830,7 +8832,8 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+ 		proxy->conf.args.ctx = ARGC_RDR;
+ 		if (!(type == REDIRECT_TYPE_PREFIX && destination[0] == '/' && destination[1] == '\0')) {
+ 			parse_logformat_string(destination, curproxy, &rule->rdr_fmt, LOG_OPT_HTTP,
+-			                       (curproxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR);
++			                       (curproxy->cap & PR_CAP_FE) ? SMP_VAL_FE_HRQ_HDR : SMP_VAL_BE_HRQ_HDR,
++					       file, linenum);
+ 			free(curproxy->conf.lfs_file);
+ 			curproxy->conf.lfs_file = strdup(curproxy->conf.args.file);
+ 			curproxy->conf.lfs_line = curproxy->conf.args.line;
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 5ede823..f77203a 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -1296,7 +1296,7 @@ static int tcp_parse_request_rule(char **args, int arg, int section_type,
+ 		arg++;
+ 
+ 		curpx->conf.args.ctx = ARGC_TRK;
+-		expr = sample_parse_expr(args, &arg, err, &curpx->conf.args);
++		expr = sample_parse_expr(args, &arg, file, line, err, &curpx->conf.args);
+ 		if (!expr) {
+ 			memprintf(err,
+ 			          "'%s %s %s' : %s",
+diff --git a/src/sample.c b/src/sample.c
+index 356caf6..7001f36 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -678,7 +678,7 @@ sample_cast_fct sample_casts[SMP_TYPES][SMP_TYPES] = {
+  * Returns a pointer on allocated sample expression structure.
+  * The caller must have set al->ctx.
+  */
+-struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, struct arg_list *al)
++struct sample_expr *sample_parse_expr(char **str, int *idx, const char *file, int line, char **err_msg, struct arg_list *al)
+ {
+ 	const char *begw; /* beginning of word */
+ 	const char *endw; /* end of word */
+@@ -862,7 +862,7 @@ struct sample_expr *sample_parse_expr(char **str, int *idx, char **err_msg, stru
+ 			if (!conv_expr->arg_p)
+ 				conv_expr->arg_p = empty_arg_list;
+ 
+-			if (conv->val_args && !conv->val_args(conv_expr->arg_p, conv, err_msg)) {
++			if (conv->val_args && !conv->val_args(conv_expr->arg_p, conv, file, line, err_msg)) {
+ 				memprintf(err_msg, "invalid args in conv method '%s' : %s", ckw, *err_msg);
+ 				goto out_error;
+ 			}
+-- 
+1.8.3.2
+

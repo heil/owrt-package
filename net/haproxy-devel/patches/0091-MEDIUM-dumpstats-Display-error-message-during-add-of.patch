@@ -1,0 +1,253 @@
+From 364cfdff7af8dbb7d0e2ab10f92f86bae7a6c7a5 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 29 Jan 2014 19:08:49 +0100
+Subject: [PATCH 091/103] MEDIUM: dumpstats: Display error message during add
+ of values.
+
+This patch adds new display type. This display returns allocated string,
+when the string is flush into buffers, it is freed. This permit to
+return the content of "memprintf(err, ...)" messages.
+
+The pat_ref_add functions has changed to return error.
+---
+ include/proto/pattern.h          |  4 ++--
+ include/types/stream_interface.h |  1 +
+ src/dumpstats.c                  | 42 +++++++++++++++++++++++++++---------
+ src/pattern.c                    | 46 ++++++++++++++++++++++++++++++++--------
+ 4 files changed, 72 insertions(+), 21 deletions(-)
+
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index 450a8db..e9269e4 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -174,8 +174,8 @@ struct pat_ref *pat_ref_new(const char *reference, const char *display, unsigned
+ struct pat_ref *pat_ref_newid(int unique_id, const char *display, unsigned int flags);
+ int pat_ref_append(struct pat_ref *ref, char *pattern, char *sample, int line);
+ int pat_ref_add(struct pat_ref *ref, const char *pattern, const char *sample, char **err);
+-int pat_ref_set(struct pat_ref *ref, const char *pattern, const char *sample);
+-int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value);
++int pat_ref_set(struct pat_ref *ref, const char *pattern, const char *sample, char **err);
++int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value, char **err);
+ int pat_ref_delete(struct pat_ref *ref, const char *key);
+ int pat_ref_delete_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt);
+ void pat_ref_prune(struct pat_ref *ref);
+diff --git a/include/types/stream_interface.h b/include/types/stream_interface.h
+index 8049fcc..e060634 100644
+--- a/include/types/stream_interface.h
++++ b/include/types/stream_interface.h
+@@ -137,6 +137,7 @@ struct appctx {
+ 		} table;
+ 		struct {
+ 			const char *msg;	/* pointer to a persistent message to be returned in PRINT state */
++			char *err;        /* pointer to a 'must free' message to be returned in PRINT_FREE state */
+ 		} cli;
+ 		struct {
+ 			void *ptr;              /* multi-purpose pointer for peers */
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index d9632b7..a796cd7 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -72,6 +72,7 @@ enum {
+ 	STAT_CLI_OUTPUT,     /* all states after this one are responses */
+ 	STAT_CLI_PROMPT,     /* display the prompt (first output, same code) */
+ 	STAT_CLI_PRINT,      /* display message in cli->msg */
++	STAT_CLI_PRINT_FREE, /* display message in cli->msg. After the display, free the pointer */
+ 	STAT_CLI_O_INFO,     /* dump info */
+ 	STAT_CLI_O_SESS,     /* dump sessions */
+ 	STAT_CLI_O_ERR,      /* dump errors */
+@@ -1615,6 +1616,8 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			stats_sock_table_request(si, args, STAT_CLI_O_SET);
+ 		}
+ 		else if (strcmp(args[1], "map") == 0) {
++			char *err;
++
+ 			/* Set flags. */
+ 			appctx->ctx.map.display_flags = PAT_REF_MAP;
+ 
+@@ -1658,9 +1661,12 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 				}
+ 
+ 				/* Try to delete the entry. */
+-				if (!pat_ref_set_by_id(appctx->ctx.map.ref, ref, args[4])) {
+-					appctx->ctx.cli.msg = "Pattern not found.\n";
+-					appctx->st0 = STAT_CLI_PRINT;
++				err = NULL;
++				if (!pat_ref_set_by_id(appctx->ctx.map.ref, ref, args[4], &err)) {
++					if (err)
++						memprintf(&err, "%s.\n", err);
++					appctx->ctx.cli.err = err;
++					appctx->st0 = STAT_CLI_PRINT_FREE;
+ 					return 1;
+ 				}
+ 			}
+@@ -1668,9 +1674,12 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 				/* Else, use the entry identifier as pattern
+ 				 * string, and update the value.
+ 				 */
+-				if (!pat_ref_set(appctx->ctx.map.ref, args[3], args[4])) {
+-					appctx->ctx.cli.msg = "Pattern not found.\n";
+-					appctx->st0 = STAT_CLI_PRINT;
++				err = NULL;
++				if (!pat_ref_set(appctx->ctx.map.ref, args[3], args[4], &err)) {
++					if (err)
++						memprintf(&err, "%s.\n", err);
++					appctx->ctx.cli.err = err;
++					appctx->st0 = STAT_CLI_PRINT_FREE;
+ 					return 1;
+ 				}
+ 			}
+@@ -1995,6 +2004,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 		if (strcmp(args[1], "map") == 0 ||
+ 		    strcmp(args[1], "acl") == 0) {
+ 			int ret;
++			char *err;
+ 
+ 			/* Set flags. */
+ 			if (args[1][0] == 'm')
+@@ -2032,13 +2042,16 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			}
+ 
+ 			/* Add value. */
++			err = NULL;
+ 			if (appctx->ctx.map.display_flags == PAT_REF_MAP)
+-				ret = pat_ref_add(appctx->ctx.map.ref, args[3], args[4], NULL);
++				ret = pat_ref_add(appctx->ctx.map.ref, args[3], args[4], &err);
+ 			else
+-				ret = pat_ref_add(appctx->ctx.map.ref, args[3], NULL, NULL);
++				ret = pat_ref_add(appctx->ctx.map.ref, args[3], NULL, &err);
+ 			if (!ret) {
+-				appctx->ctx.cli.msg = "Out of memory error.\n";
+-				appctx->st0 = STAT_CLI_PRINT;
++				if (err)
++					memprintf(&err, "%s.\n", err);
++				appctx->ctx.cli.err = err;
++				appctx->st0 = STAT_CLI_PRINT_FREE;
+ 				return 1;
+ 			}
+ 
+@@ -2174,6 +2187,12 @@ static void cli_io_handler(struct stream_interface *si)
+ 				if (bi_putstr(si->ib, appctx->ctx.cli.msg) != -1)
+ 					appctx->st0 = STAT_CLI_PROMPT;
+ 				break;
++			case STAT_CLI_PRINT_FREE:
++				if (bi_putstr(si->ib, appctx->ctx.cli.err) != -1) {
++					free(appctx->ctx.cli.err);
++					appctx->st0 = STAT_CLI_PROMPT;
++				}
++				break;
+ 			case STAT_CLI_O_INFO:
+ 				if (stats_dump_info_to_buffer(si))
+ 					appctx->st0 = STAT_CLI_PROMPT;
+@@ -5295,6 +5314,9 @@ static void cli_release_handler(struct stream_interface *si)
+ 		if (!LIST_ISEMPTY(&appctx->ctx.sess.bref.users))
+ 			LIST_DEL(&appctx->ctx.sess.bref.users);
+ 	}
++	else if (appctx->st0 == STAT_CLI_PRINT_FREE) {
++		free(appctx->ctx.cli.err);
++	}
+ 	else if (appctx->st0 == STAT_CLI_O_MLOOK) {
+ 		free(appctx->ctx.map.chunk.str);
+ 	}
+diff --git a/src/pattern.c b/src/pattern.c
+index 4a3b05a..306193e 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -1397,7 +1397,7 @@ int pat_ref_delete(struct pat_ref *ref, const char *key)
+ 
+   /* This function modify the sample of the first pattern that match the <key>. */
+ static inline int pat_ref_set_elt(struct pat_ref *ref, struct pat_ref_elt *elt,
+-                                  const char *value)
++                                  const char *value, char **err)
+ {
+ 	struct pattern_expr *expr;
+ 	struct sample_storage **smp;
+@@ -1406,8 +1406,10 @@ static inline int pat_ref_set_elt(struct pat_ref *ref, struct pat_ref_elt *elt,
+ 
+ 	/* Modify pattern from reference. */
+ 	sample = strdup(value);
+-	if (!sample)
++	if (!sample) {
++		memprintf(err, "out of memory error");
+ 		return 0;
++	}
+ 	free(elt->sample);
+ 	elt->sample = sample;
+ 
+@@ -1419,6 +1421,7 @@ static inline int pat_ref_set_elt(struct pat_ref *ref, struct pat_ref_elt *elt,
+ 		smp = pattern_find_smp(expr, elt);
+ 		if (smp && *smp) {
+ 			if (!expr->pat_head->parse_smp(sample, *smp)) {
++				memprintf(err, "failed to parse sample");
+ 				*smp = NULL;
+ 				ret = 0;
+ 			}
+@@ -1429,34 +1432,59 @@ static inline int pat_ref_set_elt(struct pat_ref *ref, struct pat_ref_elt *elt,
+ }
+ 
+ /* This function modify the sample of the first pattern that match the <key>. */
+-int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value)
++int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value, char **err)
+ {
+ 	struct pat_ref_elt *elt;
+ 
+ 	/* Look for pattern in the reference. */
+ 	list_for_each_entry(elt, &ref->head, list) {
+ 		if (elt == refelt) {
+-			pat_ref_set_elt(ref, elt, value);
++			if (!pat_ref_set_elt(ref, elt, value, err))
++				return 0;
+ 			return 1;
+ 		}
+ 	}
++
++	memprintf(err, "key or pattern not found");
+ 	return 0;
+ }
+ 
+ /* This function modify the sample of the first pattern that match the <key>. */
+-int pat_ref_set(struct pat_ref *ref, const char *key, const char *value)
++int pat_ref_set(struct pat_ref *ref, const char *key, const char *value, char **err)
+ {
+ 	struct pat_ref_elt *elt;
+-	int ret = 0;
++	int found = 0;
++	char *_merr;
++	char **merr;
++
++	if (err) {
++		merr = &_merr;
++		*merr = NULL;
++	}
++	else
++		merr = NULL;
+ 
+ 	/* Look for pattern in the reference. */
+ 	list_for_each_entry(elt, &ref->head, list) {
+ 		if (strcmp(key, elt->pattern) == 0) {
+-			pat_ref_set_elt(ref, elt, value);
+-			ret = 1;
++			if (!pat_ref_set_elt(ref, elt, value, merr)) {
++				if (!found)
++					*err = *merr;
++				else {
++					memprintf(err, "%s, %s", *err, *merr);
++					free(*merr);
++					*merr = NULL;
++				}
++			}
++			found = 1;
+ 		}
+ 	}
+-	return ret;
++
++	if (!found) {
++		memprintf(err, "entry not found");
++		return 0;
++	}
++	return 1;
+ }
+ 
+ /* This function create new reference. <ref> is the reference name.
+-- 
+1.8.3.2
+

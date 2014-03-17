@@ -1,0 +1,752 @@
+From e369ca2e666fcd8c18a4d94e59dc2d8d14cbd585 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 29 Jan 2014 16:24:55 +0100
+Subject: [PATCH 086/103] MEDIUM: pattern_find_smp: functions find_smp uses the
+ pat_ref_elt to find the element to be removed
+
+The find_smp search the smp using the value of the pat_ref_elt pointer.
+
+The pat_find_smp_* are no longer used. The function pattern_find_smp()
+known all pattern indexation, and can be found
+---
+ include/proto/pattern.h |  17 +--
+ include/types/acl.h     |   1 -
+ include/types/pattern.h |   2 -
+ src/acl.c               |   5 -
+ src/map.c               |   1 -
+ src/pattern.c           | 303 ++++++++++++------------------------------------
+ src/payload.c           |  14 +--
+ src/proto_http.c        | 156 ++++++++++++-------------
+ src/ssl_sock.c          |  42 +++----
+ 9 files changed, 184 insertions(+), 357 deletions(-)
+
+diff --git a/include/proto/pattern.h b/include/proto/pattern.h
+index be9975e..c04daeb 100644
+--- a/include/proto/pattern.h
++++ b/include/proto/pattern.h
+@@ -76,20 +76,6 @@ void pat_del_list_reg(struct pattern_expr *expr, struct pat_ref_elt *ref);
+ 
+ /*
+  *
+- * The following function lookup the pattern and return a pointer on the
+- * pointer containing the sample expression. This is useful to replace
+- * the sample.
+- *
+- */
+-struct sample_storage **pat_find_smp_list_val(struct pattern_expr *expr, struct pattern *pattern);
+-struct sample_storage **pat_find_smp_tree_ip(struct pattern_expr *expr, struct pattern *pattern);
+-struct sample_storage **pat_find_smp_list_ptr(struct pattern_expr *expr, struct pattern *pattern);
+-struct sample_storage **pat_find_smp_tree_str(struct pattern_expr *expr, struct pattern *pattern);
+-struct sample_storage **pat_find_smp_list_str(struct pattern_expr *expr, struct pattern *pattern);
+-struct sample_storage **pat_find_smp_list_reg(struct pattern_expr *expr, struct pattern *pattern);
+-
+-/*
+- *
+  * The following functions clean all entries of a pattern expression and
+  * reset the tree and list root.
+  *
+@@ -189,6 +175,7 @@ struct pat_ref *pat_ref_newid(int unique_id, const char *display, unsigned int f
+ int pat_ref_append(struct pat_ref *ref, char *pattern, char *sample, int line);
+ int pat_ref_add(struct pat_ref *ref, const char *pattern, const char *sample, char **err);
+ int pat_ref_set(struct pat_ref *ref, const char *pattern, const char *sample);
++int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value);
+ int pat_ref_delete(struct pat_ref *ref, const char *key);
+ int pat_ref_delete_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt);
+ void pat_ref_prune(struct pat_ref *ref);
+@@ -207,7 +194,7 @@ int pattern_read_from_file(struct pattern_head *head, unsigned int refflags, con
+ void pattern_init_expr(struct pattern_expr *expr);
+ struct pattern_expr *pattern_lookup_expr(struct pattern_head *head, struct pat_ref *ref);
+ struct pattern_expr *pattern_new_expr(struct pattern_head *head, struct pat_ref *ref, char **err);
+-struct sample_storage **pattern_find_smp(const char *key, struct pattern_expr *expr, char **err);
++struct sample_storage **pattern_find_smp(struct pattern_expr *expr, struct pat_ref_elt *elt);
+ int pattern_delete(struct pattern_expr *expr, struct pat_ref_elt *ref);
+ 
+ 
+diff --git a/include/types/acl.h b/include/types/acl.h
+index 1956ec3..908b0e5 100644
+--- a/include/types/acl.h
++++ b/include/types/acl.h
+@@ -95,7 +95,6 @@ struct acl_keyword {
+ 	int (*parse)(const char *text, struct pattern *pattern, char **err);
+ 	int (*index)(struct pattern_expr *expr, struct pattern *pattern, char **err);
+ 	void (*delete)(struct pattern_expr *expr, struct pat_ref_elt *);
+-	struct sample_storage **(*find_smp)(struct pattern_expr *, struct pattern *);
+ 	void (*prune)(struct pattern_expr *expr);
+ 	struct pattern *(*match)(struct sample *smp, struct pattern_expr *expr, int fill);
+ 	/* must be after the config params */
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index a9dd033..99f68cd 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -208,7 +208,6 @@ struct pattern_head {
+ 	int (*parse_smp)(const char *text, struct sample_storage *smp);
+ 	int (*index)(struct pattern_expr *, struct pattern *, char **);
+ 	void (*delete)(struct pattern_expr *, struct pat_ref_elt *);
+-	struct sample_storage **(*find_smp)(struct pattern_expr *, struct pattern *);
+ 	void (*prune)(struct pattern_expr *);
+ 	struct pattern *(*match)(struct sample *, struct pattern_expr *, int);
+ 	int expect_type; /* type of the expected sample (SMP_T_*) */
+@@ -220,7 +219,6 @@ extern char *pat_match_names[PAT_MATCH_NUM];
+ extern int (*pat_parse_fcts[PAT_MATCH_NUM])(const char *, struct pattern *, char **);
+ extern int (*pat_index_fcts[PAT_MATCH_NUM])(struct pattern_expr *, struct pattern *, char **);
+ extern void (*pat_delete_fcts[PAT_MATCH_NUM])(struct pattern_expr *, struct pat_ref_elt *);
+-extern struct sample_storage **(*pat_find_smp_fcts[PAT_MATCH_NUM])(struct pattern_expr *, struct pattern *);
+ void (*pat_prune_fcts[PAT_MATCH_NUM])(struct pattern_expr *);
+ extern struct pattern *(*pat_match_fcts[PAT_MATCH_NUM])(struct sample *, struct pattern_expr *, int);
+ extern int pat_match_types[PAT_MATCH_NUM];
+diff --git a/src/acl.c b/src/acl.c
+index be88e9e..b4bb536 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -362,7 +362,6 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 	expr->pat.match = aclkw ? aclkw->match : NULL;
+ 	expr->pat.delete = aclkw ? aclkw->delete : NULL;
+ 	expr->pat.prune = aclkw ? aclkw->prune : NULL;
+-	expr->pat.find_smp = aclkw ? aclkw->find_smp : NULL;
+ 	expr->pat.expect_type = smp->fetch->out_type;
+ 	expr->smp = smp;
+ 	smp = NULL;
+@@ -377,7 +376,6 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.match = pat_match_fcts[PAT_MATCH_BOOL];
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_BOOL];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_BOOL];
+-			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_BOOL];
+ 			expr->pat.expect_type = pat_match_types[PAT_MATCH_BOOL];
+ 			break;
+ 		case SMP_T_SINT:
+@@ -387,7 +385,6 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.match = pat_match_fcts[PAT_MATCH_INT];
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_INT];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_INT];
+-			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_INT];
+ 			expr->pat.expect_type = pat_match_types[PAT_MATCH_INT];
+ 			break;
+ 		case SMP_T_IPV4:
+@@ -397,7 +394,6 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.match = pat_match_fcts[PAT_MATCH_IP];
+ 			expr->pat.delete = pat_delete_fcts[PAT_MATCH_IP];
+ 			expr->pat.prune = pat_prune_fcts[PAT_MATCH_IP];
+-			expr->pat.find_smp = pat_find_smp_fcts[PAT_MATCH_IP];
+ 			expr->pat.expect_type = pat_match_types[PAT_MATCH_IP];
+ 			break;
+ 		}
+@@ -484,7 +480,6 @@ struct acl_expr *parse_acl_expr(const char **args, char **err, struct arg_list *
+ 			expr->pat.match = pat_match_fcts[idx];
+ 			expr->pat.delete = pat_delete_fcts[idx];
+ 			expr->pat.prune = pat_prune_fcts[idx];
+-			expr->pat.find_smp = pat_find_smp_fcts[idx];
+ 			expr->pat.expect_type = pat_match_types[idx];
+ 			args++;
+ 		}
+diff --git a/src/map.c b/src/map.c
+index 141cdf4..f5cbee4 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -259,7 +259,6 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 	desc->pat.index = pat_index_fcts[conv->private];
+ 	desc->pat.delete = pat_delete_fcts[conv->private];
+ 	desc->pat.prune = pat_prune_fcts[conv->private];
+-	desc->pat.find_smp = pat_find_smp_fcts[conv->private];
+ 	desc->pat.expect_type = pat_match_types[conv->private];
+ 
+ 	/* Set the output parse method. */
+diff --git a/src/pattern.c b/src/pattern.c
+index 8ea102f..806ad3f 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -88,23 +88,6 @@ void (*pat_delete_fcts[PAT_MATCH_NUM])(struct pattern_expr *, struct pat_ref_elt
+ 	[PAT_MATCH_REG]   = pat_del_list_reg,
+ };
+ 
+-struct sample_storage **(*pat_find_smp_fcts[PAT_MATCH_NUM])(struct pattern_expr *,
+-                                                            struct pattern *) = {
+-	[PAT_MATCH_FOUND] = pat_find_smp_list_val,
+-	[PAT_MATCH_BOOL]  = pat_find_smp_list_val,
+-	[PAT_MATCH_INT]   = pat_find_smp_list_val,
+-	[PAT_MATCH_IP]    = pat_find_smp_tree_ip,
+-	[PAT_MATCH_BIN]   = pat_find_smp_list_ptr,
+-	[PAT_MATCH_LEN]   = pat_find_smp_list_val,
+-	[PAT_MATCH_STR]   = pat_find_smp_tree_str,
+-	[PAT_MATCH_BEG]   = pat_find_smp_list_str,
+-	[PAT_MATCH_SUB]   = pat_find_smp_list_str,
+-	[PAT_MATCH_DIR]   = pat_find_smp_list_str,
+-	[PAT_MATCH_DOM]   = pat_find_smp_list_str,
+-	[PAT_MATCH_END]   = pat_find_smp_list_str,
+-	[PAT_MATCH_REG]   = pat_find_smp_list_reg,
+-};
+-
+ void (*pat_prune_fcts[PAT_MATCH_NUM])(struct pattern_expr *) = {
+ 	[PAT_MATCH_FOUND] = pat_prune_val,
+ 	[PAT_MATCH_BOOL]  = pat_prune_val,
+@@ -1174,189 +1157,6 @@ int pat_idx_tree_str(struct pattern_expr *expr, struct pattern *pat, char **err)
+ 	return 1;
+ }
+ 
+-struct sample_storage **pat_find_smp_list_val(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct pattern_list *pat;
+-	struct pattern_list *safe;
+-
+-	list_for_each_entry_safe(pat, safe, &expr->patterns, list) {
+-
+-		/* Check equality. */
+-		if (pattern->val.range.min_set != pat->pat.val.range.min_set)
+-			continue;
+-		if (pattern->val.range.max_set != pat->pat.val.range.max_set)
+-			continue;
+-		if (pattern->val.range.min_set &&
+-		    pattern->val.range.min != pat->pat.val.range.min)
+-			continue;
+-		if (pattern->val.range.max_set &&
+-		    pattern->val.range.max != pat->pat.val.range.max)
+-			continue;
+-
+-		/* Return the pointer on the sample pointer. */
+-		return &pat->pat.smp;
+-	}
+-
+-	return NULL;
+-}
+-
+-struct sample_storage **pat_find_smp_tree_ip(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct ebmb_node *node, *next_node;
+-	struct pattern_tree *elt;
+-	struct pattern_list *pat;
+-	struct pattern_list *safe;
+-	unsigned int mask;
+-
+-	/* browse each node of the tree for IPv4 addresses. */
+-	if (pattern->type == SMP_T_IPV4) {
+-		/* Convert mask. If the mask is contiguous, browse each node
+-		 * of the tree for IPv4 addresses.
+-		 */
+-		mask = ntohl(pattern->val.ipv4.mask.s_addr);
+-		if (mask + (mask & -mask) == 0) {
+-			mask = mask ? 33 - flsnz(mask & -mask) : 0; /* equals cidr value */
+-
+-			for (node = ebmb_first(&expr->pattern_tree), next_node = ebmb_next(node);
+-			     node;
+-			     node = next_node, next_node = next_node ? ebmb_next(next_node) : NULL) {
+-				/* Extract container of the tree node. */
+-				elt = container_of(node, struct pattern_tree, node);
+-
+-				/* Check equality. */
+-				if (strcmp(pattern->ptr.str, (char *)elt->node.key) != 0)
+-					continue;
+-
+-				/* Return the pointer on the sample pointer. */
+-				return &elt->smp;
+-			}
+-		}
+-		else {
+-			/* Browse each node of the list for IPv4 addresses. */
+-			list_for_each_entry_safe(pat, safe, &expr->patterns, list) {
+-				/* Check equality. */
+-				if (memcmp(&pattern->val.ipv4.addr, &pat->pat.val.ipv4.addr,
+-				           sizeof(pat->pat.val.ipv4.addr)) != 0)
+-					continue;
+-				if (memcmp(&pattern->val.ipv4.mask, &pat->pat.val.ipv4.mask,
+-				           sizeof(pat->pat.val.ipv4.addr)) != 0)
+-					continue;
+-
+-				/* Return the pointer on the sample pointer. */
+-				return &pat->pat.smp;
+-			}
+-		}
+-	}
+-	else if (pattern->type == SMP_T_IPV6) {
+-		/* browse each node of the tree for IPv4 addresses. */
+-		for (node = ebmb_first(&expr->pattern_tree_2), next_node = ebmb_next(node);
+-		     node;
+-		     node = next_node, next_node = next_node ? ebmb_next(next_node) : NULL) {
+-			/* Extract container of the tree node. */
+-			elt = container_of(node, struct pattern_tree, node);
+-
+-			/* Check equality. */
+-			if (strcmp(pattern->ptr.str, (char *)elt->node.key) != 0)
+-				continue;
+-
+-			/* Return the pointer on the sample pointer. */
+-			return &elt->smp;
+-		}
+-	}
+-
+-	return NULL;
+-}
+-
+-struct sample_storage **pat_find_smp_list_ptr(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct pattern_list *pat;
+-	struct pattern_list *safe;
+-
+-	list_for_each_entry_safe(pat, safe, &expr->patterns, list) {
+-		/* Check equality. */
+-		if (pattern->len != pat->pat.len)
+-			continue;
+-		if (memcmp(pattern->ptr.ptr, pat->pat.ptr.ptr, pat->pat.len) != 0)
+-			continue;
+-
+-		/* Return the pointer on the sample pointer. */
+-		return &pat->pat.smp;
+-	}
+-
+-	return NULL;
+-}
+-
+-struct sample_storage **pat_find_smp_tree_str(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct ebmb_node *node, *next_node;
+-	struct pattern_tree *elt;
+-
+-	/* browse each node of the tree. */
+-	for (node = ebmb_first(&expr->pattern_tree), next_node = ebmb_next(node);
+-	     node;
+-	     node = next_node, next_node = next_node ? ebmb_next(next_node) : NULL) {
+-		/* Extract container of the tree node. */
+-		elt = container_of(node, struct pattern_tree, node);
+-
+-		/* Check equality. */
+-		if (strcmp(pattern->ptr.str, (char *)elt->node.key) != 0)
+-			continue;
+-
+-		/* Return the pointer on the sample pointer. */
+-		return &elt->smp;
+-	}
+-
+-	return NULL;
+-}
+-
+-struct sample_storage **pat_find_smp_list_str(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct pattern_list *pat;
+-	struct pattern_list *safe;
+-
+-	list_for_each_entry_safe(pat, safe, &expr->patterns, list) {
+-		/* Check equality. */
+-		if (pattern->len != pat->pat.len)
+-			continue;
+-		if (pat->pat.flags & PAT_F_IGNORE_CASE) {
+-			if (strncasecmp(pattern->ptr.str, pat->pat.ptr.str, pat->pat.len) != 0)
+-				continue;
+-		}
+-		else {
+-			if (strncmp(pattern->ptr.str, pat->pat.ptr.str, pat->pat.len) != 0)
+-				continue;
+-		}
+-
+-		/* Return the pointer on the sample pointer. */
+-		return &pat->pat.smp;
+-	}
+-
+-	return NULL;
+-}
+-
+-struct sample_storage **pat_find_smp_list_reg(struct pattern_expr *expr, struct pattern *pattern)
+-{
+-	struct pattern_list *pat;
+-	struct pattern_list *safe;
+-
+-	list_for_each_entry_safe(pat, safe, &expr->patterns, list) {
+-		/* Check equality. */
+-		if (pat->pat.flags & PAT_F_IGNORE_CASE) {
+-			if (strcasecmp(pattern->ptr.reg->regstr, pat->pat.ptr.reg->regstr) != 0)
+-				continue;
+-		}
+-		else {
+-			if (strcmp(pattern->ptr.reg->regstr, pat->pat.ptr.reg->regstr) != 0)
+-				continue;
+-		}
+-
+-		/* Return the pointer on the sample pointer. */
+-		return &pat->pat.smp;
+-	}
+-
+-	return NULL;
+-}
+-
+ void pat_del_list_val(struct pattern_expr *expr, struct pat_ref_elt *ref)
+ {
+ 	struct pattern_list *pat;
+@@ -1595,39 +1395,68 @@ int pat_ref_delete(struct pat_ref *ref, const char *key)
+ 	return 1;
+ }
+ 
+-/* This function modify the sample of the first pattern that match the <key>. */
+-int pat_ref_set(struct pat_ref *ref, const char *key, const char *value)
++  /* This function modify the sample of the first pattern that match the <key>. */
++static inline int pat_ref_set_elt(struct pat_ref *ref, struct pat_ref_elt *elt,
++                                  const char *value)
+ {
+ 	struct pattern_expr *expr;
+-	struct pat_ref_elt *elt;
+ 	struct sample_storage **smp;
+ 	char *sample;
+-	int found = 0;
+-
+-	/* modify pattern from reference */
+-	list_for_each_entry(elt, &ref->head, list) {
+-		if (strcmp(key, elt->pattern) == 0) {
+-			sample = strdup(value);
+-			if (!sample)
+-				return 0;
+-			free(elt->sample);
+-			elt->sample = sample;
+-			found = 1;
+-			break;
+-		}
+-	}
++	int ret = 1;
+ 
+-	if (!found)
++	/* Modify pattern from reference. */
++	sample = strdup(value);
++	if (!sample)
+ 		return 0;
++	free(elt->sample);
++	elt->sample = sample;
+ 
++	/* Load sample in each reference. */
+ 	list_for_each_entry(expr, &ref->pat, list) {
+-		smp = pattern_find_smp(key, expr, NULL);
+-		if (smp && expr->pat_head->parse_smp)
+-			if (!expr->pat_head->parse_smp(value, *smp))
++		if (!expr->pat_head->parse_smp)
++			continue;
++
++		smp = pattern_find_smp(expr, elt);
++		if (smp && *smp) {
++			if (!expr->pat_head->parse_smp(sample, *smp)) {
+ 				*smp = NULL;
++				ret = 0;
++			}
++		}
+ 	}
+ 
+-	return 1;
++	return ret;
++}
++
++/* This function modify the sample of the first pattern that match the <key>. */
++int pat_ref_set_by_id(struct pat_ref *ref, struct pat_ref_elt *refelt, const char *value)
++{
++	struct pat_ref_elt *elt;
++
++	/* Look for pattern in the reference. */
++	list_for_each_entry(elt, &ref->head, list) {
++		if (elt == refelt) {
++			pat_ref_set_elt(ref, elt, value);
++			return 1;
++		}
++	}
++	return 0;
++}
++
++/* This function modify the sample of the first pattern that match the <key>. */
++int pat_ref_set(struct pat_ref *ref, const char *key, const char *value)
++{
++	struct pat_ref_elt *elt;
++	int ret = 0;
++
++	/* Look for pattern in the reference. */
++	list_for_each_entry(elt, &ref->head, list) {
++		if (strcmp(key, elt->pattern) == 0) {
++			pat_ref_set_elt(ref, elt, value);
++			ret = 1;
++		}
++	}
++	return ret;
+ }
+ 
+ /* This function create new reference. <ref> is the reference name.
+@@ -2125,13 +1954,33 @@ void pattern_prune(struct pattern_head *head)
+  * the function returns NULL. If the key cannot be parsed, the function
+  * fill <err>.
+  */
+-struct sample_storage **pattern_find_smp(const char *key, struct pattern_expr *expr, char **err)
++struct sample_storage **pattern_find_smp(struct pattern_expr *expr, struct pat_ref_elt *ref)
+ {
+-	struct pattern pattern;
++	struct ebmb_node *node;
++	struct pattern_tree *elt;
++	struct pattern_list *pat;
+ 
+-	if (!expr->pat_head->parse(key, &pattern, err))
+-		return NULL;
+-	return expr->pat_head->find_smp(expr, &pattern);
++	for (node = ebmb_first(&expr->pattern_tree);
++	     node;
++	     node = ebmb_next(node)) {
++		elt = container_of(node, struct pattern_tree, node);
++		if (elt->ref == ref)
++			return &elt->smp;
++	}
++
++	for (node = ebmb_first(&expr->pattern_tree_2);
++	     node;
++	     node = ebmb_next(node)) {
++		elt = container_of(node, struct pattern_tree, node);
++		if (elt->ref == ref)
++			return &elt->smp;
++	}
++
++	list_for_each_entry(pat, &expr->patterns, list)
++		if (pat->pat.ref == ref)
++			return &pat->pat.smp;
++
++	return NULL;
+ }
+ 
+ /* This function search all the pattern matching the <key> and delete it.
+diff --git a/src/payload.c b/src/payload.c
+index 2042341..82efe95 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -681,13 +681,13 @@ static struct sample_fetch_kw_list smp_kws = {ILH, {
+  * Please take care of keeping this list alphabetically sorted.
+  */
+ static struct acl_kw_list acl_kws = {ILH, {
+-	{ "payload",            "req.payload",        pat_parse_bin,        pat_idx_list_ptr, pat_del_list_ptr, pat_find_smp_list_ptr, pat_prune_ptr, pat_match_bin },
+-	{ "payload_lv",         "req.payload_lv",     pat_parse_bin,        pat_idx_list_ptr, pat_del_list_ptr, pat_find_smp_list_ptr, pat_prune_ptr, pat_match_bin },
+-	{ "req_rdp_cookie",     "req.rdp_cookie",     pat_parse_str,        pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str },
+-	{ "req_rdp_cookie_cnt", "req.rdp_cookie_cnt", pat_parse_int,        pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_int },
+-	{ "req_ssl_sni",        "req.ssl_sni",        pat_parse_str,        pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str },
+-	{ "req_ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_int },
+-	{ "req.ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_int },
++	{ "payload",            "req.payload",        pat_parse_bin,        pat_idx_list_ptr, pat_del_list_ptr, pat_prune_ptr, pat_match_bin },
++	{ "payload_lv",         "req.payload_lv",     pat_parse_bin,        pat_idx_list_ptr, pat_del_list_ptr, pat_prune_ptr, pat_match_bin },
++	{ "req_rdp_cookie",     "req.rdp_cookie",     pat_parse_str,        pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str },
++	{ "req_rdp_cookie_cnt", "req.rdp_cookie_cnt", pat_parse_int,        pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_int },
++	{ "req_ssl_sni",        "req.ssl_sni",        pat_parse_str,        pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str },
++	{ "req_ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_int },
++	{ "req.ssl_ver",        "req.ssl_ver",        pat_parse_dotted_ver, pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_int },
+ 	{ /* END */ },
+ }};
+ 
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 742b27b..661e469 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -10359,84 +10359,84 @@ static int sample_conv_http_date(const struct arg *args, struct sample *smp)
+  * Please take care of keeping this list alphabetically sorted.
+  */
+ static struct acl_kw_list acl_kws = {ILH, {
+-	{ "base",            "base",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "base_beg",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "base_dir",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "base_dom",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "base_end",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "base_len",        "base",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "base_reg",        "base",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "base_sub",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "cook",            "req.cook", pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "cook_beg",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "cook_dir",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "cook_dom",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "cook_end",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "cook_len",        "req.cook", pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "cook_reg",        "req.cook", pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "cook_sub",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "hdr",             "req.hdr",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "hdr_beg",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "hdr_dir",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "hdr_dom",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "hdr_end",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "hdr_len",         "req.hdr",  pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "hdr_reg",         "req.hdr",  pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "hdr_sub",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "http_auth_group", NULL,       pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_auth },
+-
+-	{ "method",          NULL,       pat_parse_meth, pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_meth },
+-
+-	{ "path",            "path",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "path_beg",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "path_dir",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "path_dom",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "path_end",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "path_len",        "path",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "path_reg",        "path",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "path_sub",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "req_ver",         "req.ver",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "resp_ver",        "res.ver",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-
+-	{ "scook",           "res.cook", pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "scook_beg",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "scook_dir",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "scook_dom",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "scook_end",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "scook_len",       "res.cook", pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "scook_reg",       "res.cook", pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "scook_sub",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "shdr",            "res.hdr",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "shdr_beg",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "shdr_dir",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "shdr_dom",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "shdr_end",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "shdr_len",        "res.hdr",  pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "shdr_reg",        "res.hdr",  pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "shdr_sub",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "url",             "url",      pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "url_beg",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "url_dir",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "url_dom",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "url_end",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "url_len",         "url",      pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "url_reg",         "url",      pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "url_sub",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
+-
+-	{ "urlp",            "urlp",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str  },
+-	{ "urlp_beg",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_beg  },
+-	{ "urlp_dir",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dir  },
+-	{ "urlp_dom",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_dom  },
+-	{ "urlp_end",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end  },
+-	{ "urlp_len",        "urlp",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_find_smp_list_val, pat_prune_val, pat_match_len  },
+-	{ "urlp_reg",        "urlp",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg  },
+-	{ "urlp_sub",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_sub  },
++	{ "base",            "base",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "base_beg",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "base_dir",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "base_dom",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "base_end",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "base_len",        "base",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "base_reg",        "base",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "base_sub",        "base",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "cook",            "req.cook", pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "cook_beg",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "cook_dir",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "cook_dom",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "cook_end",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "cook_len",        "req.cook", pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "cook_reg",        "req.cook", pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "cook_sub",        "req.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "hdr",             "req.hdr",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "hdr_beg",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "hdr_dir",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "hdr_dom",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "hdr_end",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "hdr_len",         "req.hdr",  pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "hdr_reg",         "req.hdr",  pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "hdr_sub",         "req.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "http_auth_group", NULL,       pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_auth },
++
++	{ "method",          NULL,       pat_parse_meth, pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_meth },
++
++	{ "path",            "path",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "path_beg",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "path_dir",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "path_dom",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "path_end",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "path_len",        "path",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "path_reg",        "path",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "path_sub",        "path",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "req_ver",         "req.ver",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "resp_ver",        "res.ver",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++
++	{ "scook",           "res.cook", pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "scook_beg",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "scook_dir",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "scook_dom",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "scook_end",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "scook_len",       "res.cook", pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "scook_reg",       "res.cook", pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "scook_sub",       "res.cook", pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "shdr",            "res.hdr",  pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "shdr_beg",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "shdr_dir",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "shdr_dom",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "shdr_end",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "shdr_len",        "res.hdr",  pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "shdr_reg",        "res.hdr",  pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "shdr_sub",        "res.hdr",  pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "url",             "url",      pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "url_beg",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "url_dir",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "url_dom",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "url_end",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "url_len",         "url",      pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "url_reg",         "url",      pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "url_sub",         "url",      pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
++
++	{ "urlp",            "urlp",     pat_parse_str,  pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str  },
++	{ "urlp_beg",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_beg  },
++	{ "urlp_dir",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dir  },
++	{ "urlp_dom",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_dom  },
++	{ "urlp_end",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end  },
++	{ "urlp_len",        "urlp",     pat_parse_int,  pat_idx_list_val, pat_del_list_val, pat_prune_val, pat_match_len  },
++	{ "urlp_reg",        "urlp",     pat_parse_reg,  pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg  },
++	{ "urlp_sub",        "urlp",     pat_parse_str,  pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_sub  },
+ 
+ 	{ /* END */ },
+ }};
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 65be9e2..b3f051d 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -3546,31 +3546,31 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+  * Please take care of keeping this list alphabetically sorted.
+  */
+ static struct acl_kw_list acl_kws = {ILH, {
+-	{ "ssl_c_i_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_key_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_notafter",         NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_notbefore",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_sig_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_s_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_c_serial",           NULL,         pat_parse_bin, pat_idx_list_ptr, pat_del_list_ptr, pat_find_smp_list_ptr, pat_prune_ptr, pat_match_bin     },
+-	{ "ssl_f_i_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_key_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_notafter",         NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_notbefore",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_sig_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_s_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_f_serial",           NULL,         pat_parse_bin, pat_idx_list_ptr, pat_del_list_ptr, pat_find_smp_list_ptr, pat_prune_ptr, pat_match_bin     },
+-	{ "ssl_fc_cipher",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_i_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_key_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_notafter",         NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_notbefore",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_sig_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_s_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_c_serial",           NULL,         pat_parse_bin, pat_idx_list_ptr, pat_del_list_ptr, pat_prune_ptr, pat_match_bin     },
++	{ "ssl_f_i_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_key_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_notafter",         NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_notbefore",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_sig_alg",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_s_dn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_f_serial",           NULL,         pat_parse_bin, pat_idx_list_ptr, pat_del_list_ptr, pat_prune_ptr, pat_match_bin     },
++	{ "ssl_fc_cipher",          NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
+ #ifdef OPENSSL_NPN_NEGOTIATED
+-	{ "ssl_fc_npn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_fc_npn",             NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
+ #endif
+ #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
+-	{ "ssl_fc_alpn",            NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_fc_alpn",            NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
+ #endif
+-	{ "ssl_fc_protocol",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_fc_sni",             "ssl_fc_sni", pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_find_smp_tree_str, pat_prune_ptr, pat_match_str     },
+-	{ "ssl_fc_sni_end",         "ssl_fc_sni", pat_parse_str, pat_idx_list_str, pat_del_list_ptr, pat_find_smp_list_str, pat_prune_ptr, pat_match_end     },
+-	{ "ssl_fc_sni_reg",         "ssl_fc_sni", pat_parse_reg, pat_idx_list_reg, pat_del_list_reg, pat_find_smp_list_reg, pat_prune_reg, pat_match_reg     },
++	{ "ssl_fc_protocol",        NULL,         pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_fc_sni",             "ssl_fc_sni", pat_parse_str, pat_idx_tree_str, pat_del_tree_str, pat_prune_ptr, pat_match_str     },
++	{ "ssl_fc_sni_end",         "ssl_fc_sni", pat_parse_str, pat_idx_list_str, pat_del_list_ptr, pat_prune_ptr, pat_match_end     },
++	{ "ssl_fc_sni_reg",         "ssl_fc_sni", pat_parse_reg, pat_idx_list_reg, pat_del_list_reg, pat_prune_reg, pat_match_reg     },
+ 	{ /* END */ },
+ }};
+ 
+-- 
+1.8.3.2
+

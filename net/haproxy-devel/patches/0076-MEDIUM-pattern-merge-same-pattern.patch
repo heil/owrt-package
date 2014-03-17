@@ -1,0 +1,302 @@
+From c5959fd5d4f9bc5b1700fe9acb6fa3af72700c15 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 20 Jan 2014 14:29:33 +0100
+Subject: [PATCH 076/103] MEDIUM: pattern: merge same pattern
+
+Sometimes the same pattern file is used with the same index, parse and
+parse_smp functions. If this two condition are true, these two pattern
+are identical and the same struct can be used.
+---
+ include/types/pattern.h |  21 ++++++++--
+ src/acl.c               |   9 +++--
+ src/dumpstats.c         |   6 +--
+ src/pattern.c           | 105 ++++++++++++++++++++++++++++++++++--------------
+ 4 files changed, 100 insertions(+), 41 deletions(-)
+
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index d19bcc1..7973bce 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -178,15 +178,28 @@ struct pattern_list {
+  * are grouped together in order to optimize caching.
+  */
+ struct pattern_expr {
+-	struct list listh; /* Used for chaining pattern_expr in pattern_head. */
+-	struct list listr; /* Used for chaining pattern_expr in pat_ref. */
++	struct list list; /* Used for chaining pattern_expr in pat_ref. */
+ 	struct pat_ref *ref; /* The pattern reference if exists. */
+-	struct pattern_head *pat_head; /* Point to the pattern_head that contain manipulation functions. */
++	struct pattern_head *pat_head; /* Point to the pattern_head that contain manipulation functions.
++	                                * Note that this link point on compatible head but not on the real
++	                                * head. You can use only the function, and you must not use the
++	                                * "head". Dont write "(struct pattern_expr *)any->pat_head->expr".
++	                                */
+ 	struct list patterns;         /* list of acl_patterns */
+ 	struct eb_root pattern_tree;  /* may be used for lookup in large datasets */
+ 	struct eb_root pattern_tree_2;  /* may be used for different types */
+ };
+ 
++/* This is a list of expression. A struct pattern_expr can be used by
++ * more than one "struct pattern_head". this intermediate struct
++ * permit more than one list.
++ */
++struct pattern_expr_list {
++	struct list list; /* Used for chaining pattern_expr in pattern_head. */
++	int do_free;
++	struct pattern_expr *expr; /* The used expr. */
++};
++
+ /* This struct contain a list of pattern expr */
+ struct pattern_head {
+ 	int (*parse)(const char *text, struct pattern *pattern, char **err);
+@@ -197,7 +210,7 @@ struct pattern_head {
+ 	void (*prune)(struct pattern_expr *);
+ 	struct pattern *(*match)(struct sample *, struct pattern_expr *, int);
+ 
+-	struct list head;
++	struct list head; /* This is a list of struct pattern_expr_list. */
+ };
+ 
+ extern char *pat_match_names[PAT_MATCH_NUM];
+diff --git a/src/acl.c b/src/acl.c
+index 9a962d3..fa54ab9 100644
+--- a/src/acl.c
++++ b/src/acl.c
+@@ -1184,7 +1184,7 @@ int acl_find_targets(struct proxy *p)
+ 	struct acl_expr *expr;
+ 	struct pattern_list *pattern;
+ 	int cfgerr = 0;
+-	struct pattern_expr *pexp;
++	struct pattern_expr_list *pexp;
+ 
+ 	list_for_each_entry(acl, &p->acl, list) {
+ 		list_for_each_entry(expr, &acl->expr, list) {
+@@ -1207,15 +1207,16 @@ int acl_find_targets(struct proxy *p)
+ 				}
+ 
+ 				/* For each pattern, check if the group exists. */
+-				list_for_each_entry(pexp, &expr->pat.head, listh) {
+-					if (LIST_ISEMPTY(&pexp->patterns)) {
++				list_for_each_entry(pexp, &expr->pat.head, list) {
++					if (LIST_ISEMPTY(&pexp->expr->patterns)) {
+ 						Alert("proxy %s: acl %s %s(): no groups specified.\n",
+ 							p->id, acl->name, expr->kw);
+ 						cfgerr++;
+ 						continue;
+ 					}
+ 
+-					list_for_each_entry(pattern, &pexp->patterns, list) {
++					list_for_each_entry(pattern, &pexp->expr->patterns, list) {
++						/* this keyword only has one argument */
+ 						if (!check_group(expr->smp->arg_p->data.usr, pattern->pat.ptr.str)) {
+ 							Alert("proxy %s: acl %s %s(): invalid group '%s'.\n",
+ 							      p->id, acl->name, expr->kw, pattern->pat.ptr.str);
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index cc549d3..13bf201 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -989,8 +989,8 @@ static inline
+ struct pattern_expr *pat_expr_get_next(struct pattern_expr *getnext, struct list *end)
+ {
+ 	struct pattern_expr *expr;
+-	expr = LIST_NEXT(&getnext->listr, struct pattern_expr *, listr);
+-	if (&expr->listr == end)
++	expr = LIST_NEXT(&getnext->list, struct pattern_expr *, list);
++	if (&expr->list == end)
+ 		return NULL;
+ 	return expr;
+ }
+@@ -4807,7 +4807,7 @@ static int stats_map_lookup(struct stream_interface *si)
+ 	switch (appctx->st2) {
+ 	case STAT_ST_INIT:
+ 		/* Init to the first entry. The list cannot be change */
+-		appctx->ctx.map.expr = LIST_ELEM(&appctx->ctx.map.ref->pat, struct pattern_expr *, listr);
++		appctx->ctx.map.expr = LIST_ELEM(&appctx->ctx.map.ref->pat, struct pattern_expr *, list);
+ 		appctx->ctx.map.expr = pat_expr_get_next(appctx->ctx.map.expr, &appctx->ctx.map.ref->pat);
+ 		appctx->st2 = STAT_ST_LIST;
+ 		/* fall through */
+diff --git a/src/pattern.c b/src/pattern.c
+index f03c8fc..3d87a47 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -1660,7 +1660,7 @@ int pat_ref_delete(struct pat_ref *ref, const char *key)
+ 	if (!found)
+ 		return 0;
+ 
+-	list_for_each_entry(expr, &ref->pat, listr)
++	list_for_each_entry(expr, &ref->pat, list)
+ 		pattern_delete(key, expr, NULL);
+ 
+ 	return 1;
+@@ -1691,7 +1691,7 @@ int pat_ref_set(struct pat_ref *ref, const char *key, const char *value)
+ 	if (!found)
+ 		return 0;
+ 
+-	list_for_each_entry(expr, &ref->pat, listr) {
++	list_for_each_entry(expr, &ref->pat, list) {
+ 		smp = pattern_find_smp(key, expr, NULL);
+ 		if (smp && expr->pat_head->parse_smp)
+ 			if (!expr->pat_head->parse_smp(value, *smp))
+@@ -1879,7 +1879,7 @@ int pat_ref_add(struct pat_ref *ref,
+ 
+ 	LIST_ADDQ(&ref->head, &elt->list);
+ 
+-	list_for_each_entry(expr, &ref->pat, listr) {
++	list_for_each_entry(expr, &ref->pat, list) {
+ 		if (!pat_ref_push(elt, expr, 0, err)) {
+ 			/* Try to delete all the added entries. */
+ 			pat_ref_delete(ref, pattern);
+@@ -1905,7 +1905,7 @@ void pat_ref_prune(struct pat_ref *ref)
+ 		free(elt);
+ 	}
+ 
+-	list_for_each_entry(expr, &ref->pat, listr)
++	list_for_each_entry(expr, &ref->pat, list)
+ 		expr->pat_head->prune(expr);
+ }
+ 
+@@ -1933,11 +1933,11 @@ int pat_ref_load(struct pat_ref *ref, struct pattern_expr *expr,
+ /* This function lookup for existing reference <ref> in pattern_head <head>. */
+ struct pattern_expr *pattern_lookup_expr(struct pattern_head *head, struct pat_ref *ref)
+ {
+-	struct pattern_expr *expr;
++	struct pattern_expr_list *expr;
+ 
+-	list_for_each_entry(expr, &head->head, listh)
+-		if (expr->ref == ref)
+-			return expr;
++	list_for_each_entry(expr, &head->head, list)
++		if (expr->expr->ref == ref)
++			return expr->expr;
+ 	return NULL;
+ }
+ 
+@@ -1949,27 +1949,69 @@ struct pattern_expr *pattern_lookup_expr(struct pattern_head *head, struct pat_r
+ struct pattern_expr *pattern_new_expr(struct pattern_head *head, struct pat_ref *ref, char **err)
+ {
+ 	struct pattern_expr *expr;
++	struct pattern_expr_list *list;
+ 
+-	/* A lot of memory. */
+-	expr = malloc(sizeof(*expr));
+-	if (!expr) {
++	/* Memory and initialization of the chain element. */
++	list = malloc(sizeof(*list));
++	if (!list) {
+ 		memprintf(err, "out of memory");
+ 		return NULL;
+ 	}
+ 
+-	pattern_init_expr(expr);
++	/* Look for existing similar expr. No that only the index, parse and
++	 * parse_smp function must be identical for having similar pattern.
++	 * The other function depends of theses first.
++	 */
++	if (ref) {
++		list_for_each_entry(expr, &ref->pat, list)
++			if (expr->pat_head->index     == head->index &&
++			    expr->pat_head->parse     == head->parse &&
++			    expr->pat_head->parse_smp == head->parse_smp)
++				break;
++		if (&expr->list == &ref->pat)
++			expr = NULL;
++	}
++	else
++		expr = NULL;
++
++	/* If no similar expr was found, we create new expr. */
++	if (!expr) {
++		/* Get a lot of memory for the expr struct. */
++		expr = malloc(sizeof(*expr));
++		if (!expr) {
++			memprintf(err, "out of memory");
++			return NULL;
++		}
+ 
+-	/* Link with the pattern_head. */
+-	LIST_ADDQ(&head->head, &expr->listh);
+-	expr->pat_head = head;
++		/* Initialize this new expr. */
++		pattern_init_expr(expr);
+ 
+-	/* Link with ref, or to self to facilitate LIST_DEL() */
+-	if (ref)
+-		LIST_ADDQ(&ref->pat, &expr->listr);
+-	else
+-		LIST_INIT(&expr->listr);
++		/* This new pattern expression reference one of his heads. */
++		expr->pat_head = head;
+ 
+-	expr->ref = ref;
++		/* Link with ref, or to self to facilitate LIST_DEL() */
++		if (ref)
++			LIST_ADDQ(&ref->pat, &expr->list);
++		else
++			LIST_INIT(&expr->list);
++
++		expr->ref = ref;
++
++		/* We must free this pattern if it is no more used. */
++		list->do_free = 1;
++	}
++	else {
++		/* If the pattern used already exists, it is already linked
++		 * with ref and we must not free it.
++		 */
++		list->do_free = 0;
++	}
++
++	/* The new list element reference the pattern_expr. */
++	list->expr = expr;
++
++	/* Link the list element with the pattern_head. */
++	LIST_ADDQ(&head->head, &list->list);
+ 	return expr;
+ }
+ 
+@@ -2119,7 +2161,7 @@ int pattern_read_from_file(struct pattern_head *head, unsigned int refflags,
+  */
+ struct pattern *pattern_exec_match(struct pattern_head *head, struct sample *smp, int fill)
+ {
+-	struct pattern_expr *expr;
++	struct pattern_expr_list *list;
+ 	struct pattern *pat;
+ 
+ 	if (!head->match) {
+@@ -2132,8 +2174,8 @@ struct pattern *pattern_exec_match(struct pattern_head *head, struct sample *smp
+ 		return &static_pattern;
+ 	}
+ 
+-	list_for_each_entry(expr, &head->head, listh) {
+-		pat = head->match(smp, expr, fill);
++	list_for_each_entry(list, &head->head, list) {
++		pat = head->match(smp, list->expr, fill);
+ 		if (pat)
+ 			return pat;
+ 	}
+@@ -2143,13 +2185,16 @@ struct pattern *pattern_exec_match(struct pattern_head *head, struct sample *smp
+ /* This function prune the pattern expression. */
+ void pattern_prune(struct pattern_head *head)
+ {
+-	struct pattern_expr *expr, *safe;
++	struct pattern_expr_list *list, *safe;
+ 
+-	list_for_each_entry_safe(expr, safe, &head->head, listh) {
+-		LIST_DEL(&expr->listh);
+-		LIST_DEL(&expr->listr);
+-		head->prune(expr);
+-		free(expr);
++	list_for_each_entry_safe(list, safe, &head->head, list) {
++		LIST_DEL(&list->list);
++		if (list->do_free) {
++			LIST_DEL(&list->expr->list);
++			head->prune(list->expr);
++			free(list->expr);
++		}
++		free(list);
+ 	}
+ }
+ 
+-- 
+1.8.3.2
+

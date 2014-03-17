@@ -1,0 +1,102 @@
+From 888863534ca48b2aa1b61c583a0a8f7940c5bd48 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 15 Jan 2014 15:17:23 +0100
+Subject: [PATCH 074/103] MINOR: map/pattern: The sample parser is stored in
+ the pattern
+
+We cannot separe the pattern and the value. Now, the patern known the
+value and the pattern is able to parsehis associated sample staroage.
+---
+ include/types/map.h     |  2 --
+ include/types/pattern.h |  1 +
+ src/dumpstats.c         |  4 ++--
+ src/map.c               | 12 ++++++------
+ 4 files changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/include/types/map.h b/include/types/map.h
+index 4463541..59c1a22 100644
+--- a/include/types/map.h
++++ b/include/types/map.h
+@@ -57,8 +57,6 @@ struct map_descriptor {
+ 	struct list list;              /* used for listing */
+ 	struct map_reference *ref;     /* the reference used for unindexed entries */
+ 	struct sample_conv *conv;      /* original converter descriptor */
+-	int (*parse)(const char *text, /* The function that can parse the output value */
+-	             struct sample_storage *smp);
+ 	struct pattern_expr *pat;      /* the pattern matching associated to the map */
+ 	int do_free;                   /* set if <pat> is the orignal pat and must be freed */
+ 	char *default_value;           /* a copy of default value. This copy is
+diff --git a/include/types/pattern.h b/include/types/pattern.h
+index 7b9f8fd..72022e3 100644
+--- a/include/types/pattern.h
++++ b/include/types/pattern.h
+@@ -155,6 +155,7 @@ struct pattern_list {
+  */
+ struct pattern_expr {
+ 	int (*parse)(const char *text, struct pattern *pattern, char **err);
++	int (*parse_smp)(const char *text, struct sample_storage *smp);
+ 	int (*index)(struct pattern_expr *, struct pattern *, char **);
+ 	void (*delete)(struct pattern_expr *, struct pattern *);
+ 	struct sample_storage **(*find_smp)(struct pattern_expr *, struct pattern *);
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index aecce5f..8b7782e 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -1613,7 +1613,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			     stats_map_lookup_next(si)) {
+ 				smp = pattern_find_smp(args[3], appctx->ctx.map.desc->pat, NULL);
+ 				if (smp)
+-					appctx->ctx.map.desc->parse(value, *smp);
++					appctx->ctx.map.desc->pat->parse_smp(value, *smp);
+ 			}
+ 
+ 			/* The set is done, send message. */
+@@ -1974,7 +1974,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 				 * is canceled for this 'descriptor', but continue, for
+ 				 * the other descriptors.
+ 				 */
+-				if (!appctx->ctx.map.desc->parse(ent->value, smp)) {
++				if (!appctx->ctx.map.desc->pat->parse_smp(ent->value, smp)) {
+ 					free(smp);
+ 					continue;
+ 				}
+diff --git a/src/map.c b/src/map.c
+index b595b02..b266614 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -314,7 +314,7 @@ static int map_parse_and_index(struct map_descriptor *desc,
+ 		return 0;
+ 
+ 	/* first read and convert value */
+-	if (!desc->parse(ent->value, smp)) {
++	if (!desc->pat->parse_smp(ent->value, smp)) {
+ 		memprintf(err, "parse value failed at line %d of file <%s>",
+ 		          ent->line, desc->ref->reference);
+ 		return 0;
+@@ -384,10 +384,10 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 
+ 	/* check the output parse method */
+ 	switch (desc->conv->out_type) {
+-	case SMP_T_STR:  desc->parse = map_parse_str;  break;
+-	case SMP_T_UINT: desc->parse = map_parse_int;  break;
+-	case SMP_T_IPV4: desc->parse = map_parse_ip;   break;
+-	case SMP_T_IPV6: desc->parse = map_parse_ip6;  break;
++	case SMP_T_STR:  desc->pat->parse_smp = map_parse_str;  break;
++	case SMP_T_UINT: desc->pat->parse_smp = map_parse_int;  break;
++	case SMP_T_IPV4: desc->pat->parse_smp = map_parse_ip;   break;
++	case SMP_T_IPV6: desc->pat->parse_smp = map_parse_ip6;  break;
+ 	default:
+ 		memprintf(err, "map: internal haproxy error: no default parse case for the input type <%d>.",
+ 		          conv->out_type);
+@@ -442,7 +442,7 @@ static int sample_load_map(struct arg *arg, struct sample_conv *conv, char **err
+ 			memprintf(err, "out of memory");
+ 			return 0;
+ 		}
+-		if (!desc->parse(desc->default_value, desc->def)) {
++		if (!desc->pat->parse_smp(desc->default_value, desc->def)) {
+ 			memprintf(err, "Cannot parse default value");
+ 			return 0;
+ 		}
+-- 
+1.8.3.2
+

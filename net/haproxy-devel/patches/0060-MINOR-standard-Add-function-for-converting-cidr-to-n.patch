@@ -1,0 +1,53 @@
+From b0504633754d71217a1247156229cc34cc4b5a31 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Sat, 14 Dec 2013 15:39:02 +0100
+Subject: [PATCH 060/103] MINOR: standard: Add function for converting cidr to
+ network mask.
+
+---
+ include/common/standard.h |  5 +++++
+ src/standard.c            | 12 ++++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index cd422cd..9ed0668 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -237,6 +237,11 @@ struct sockaddr_storage *str2sa_range(const char *str, int *low, int *high, char
+  */
+ int str2mask(const char *str, struct in_addr *mask);
+ 
++/* convert <cidr> to struct in_addr <mask>. It returns 1 if the conversion
++ * succeeds otherwise non-zero.
++ */
++int cidr2dotted(int cidr, struct in_addr *mask);
++
+ /*
+  * converts <str> to two struct in_addr* which must be pre-allocated.
+  * The format is "addr[/mask]", where "addr" cannot be empty, and mask
+diff --git a/src/standard.c b/src/standard.c
+index 81df8b1..89af08f 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -791,6 +791,18 @@ int str2mask(const char *str, struct in_addr *mask)
+ 	return 1;
+ }
+ 
++/* convert <cidr> to struct in_addr <mask>. It returns 1 if the conversion
++ * succeeds otherwise zero.
++ */
++int cidr2dotted(int cidr, struct in_addr *mask) {
++
++	if (cidr < 0 || cidr > 32)
++		return 0;
++
++	mask->s_addr = cidr ? htonl(~0UL << (32 - cidr)) : 0;
++	return 1;
++}
++
+ /*
+  * converts <str> to two struct in_addr* which must be pre-allocated.
+  * The format is "addr[/mask]", where "addr" cannot be empty, and mask
+-- 
+1.8.3.2
+
