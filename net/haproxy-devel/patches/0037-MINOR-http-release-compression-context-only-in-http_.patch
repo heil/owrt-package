@@ -1,0 +1,64 @@
+From 7519560767dcca3794d9559ca355b7ebda829ab6 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 11 Mar 2014 15:48:55 +0100
+Subject: [PATCH 37/43] MINOR: http: release compression context only in
+ http_end_txn()
+
+Currently there are two places where the compression context is released,
+one in session_free() and another one in http_end_txn_clean_session().
+Both of them call http_end_txn(), either directly or via http_reset_txn(),
+and this function is made for this exact purpose. So let's centralize the
+call there instead.
+---
+ src/proto_http.c | 11 ++++++-----
+ src/session.c    |  5 -----
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 06a0372..c0be289 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -4448,11 +4448,6 @@ void http_end_txn_clean_session(struct session *s)
+ 	s->flags &= ~(SN_DIRECT|SN_ASSIGNED|SN_ADDR_SET|SN_BE_ASSIGNED|SN_FORCE_PRST|SN_IGNORE_PRST);
+ 	s->flags &= ~(SN_CURR_SESS|SN_REDIRECTABLE|SN_SRV_REUSED);
+ 
+-	if (s->flags & SN_COMP_READY)
+-		s->comp_algo->end(&s->comp_ctx);
+-	s->comp_algo = NULL;
+-	s->flags &= ~SN_COMP_READY;
+-
+ 	s->txn.meth = 0;
+ 	http_reset_txn(s);
+ 	s->txn.flags |= TX_NOT_FIRST | TX_WAIT_NEXT_RQ;
+@@ -8243,6 +8238,12 @@ void http_end_txn(struct session *s)
+ {
+ 	struct http_txn *txn = &s->txn;
+ 
++	/* release any possible compression context */
++	if (s->flags & SN_COMP_READY)
++		s->comp_algo->end(&s->comp_ctx);
++	s->comp_algo = NULL;
++	s->flags &= ~SN_COMP_READY;
++
+ 	/* these ones will have been dynamically allocated */
+ 	pool_free2(pool2_requri, txn->uri);
+ 	pool_free2(pool2_capture, txn->cli_cookie);
+diff --git a/src/session.c b/src/session.c
+index b3da759..7eeb6aa 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -602,11 +602,6 @@ static void session_free(struct session *s)
+ 		sess_change_server(s, NULL);
+ 	}
+ 
+-	if (s->flags & SN_COMP_READY)
+-		s->comp_algo->end(&s->comp_ctx);
+-	s->comp_algo = NULL;
+-	s->flags &= ~SN_COMP_READY;
+-
+ 	if (s->req->pipe)
+ 		put_pipe(s->req->pipe);
+ 
+-- 
+1.8.3.2
+
