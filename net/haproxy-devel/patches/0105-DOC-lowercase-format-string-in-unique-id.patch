@@ -1,0 +1,36 @@
+From f21be328e807acfde4b9959644fa346b7d890ca5 Mon Sep 17 00:00:00 2001
+From: Julien Vehent <julien@linuxwall.info>
+Date: Fri, 7 Mar 2014 08:27:34 -0500
+Subject: [PATCH 105/106] DOC: lowercase format string in unique-id
+
+Update configuration.txt to use the correct format string in the
+unique-id documentation.
+---
+ doc/configuration.txt | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index a3b7479..f566d2f 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -7676,7 +7676,7 @@ unique-id-format <string>
+ 
+   Example:
+ 
+-        unique-id-format %{+X}o\ %Ci:%Cp_%Fi:%Fp_%Ts_%rt:%pid
++        unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+ 
+         will generate:
+ 
+@@ -7696,7 +7696,7 @@ unique-id-header <name>
+ 
+   Example:
+ 
+-        unique-id-format %{+X}o\ %Ci:%Cp_%Fi:%Fp_%Ts_%rt:%pid
++        unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+         unique-id-header X-Unique-ID
+ 
+         will generate:
+-- 
+1.8.3.2
+
