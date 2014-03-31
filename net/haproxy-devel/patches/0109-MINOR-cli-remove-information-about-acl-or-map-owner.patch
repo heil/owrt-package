@@ -1,0 +1,41 @@
+From f7e04e9c2fd7c0d199cd01e8763b5010ee1132c9 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Thu, 20 Mar 2014 11:45:47 +0100
+Subject: [PATCH 109/111] MINOR: cli: remove information about acl or map
+ owner.
+
+The string <display> contain all the owners of the displayed pattern.
+The message " - also used by an ACL/map" is useless.
+---
+ src/dumpstats.c | 12 +-----------
+ 1 file changed, 1 insertion(+), 11 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 6a4de8c..d20682e 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4885,20 +4885,10 @@ static int stats_pats_list(struct stream_interface *si)
+ 			/* Build messages. If the reference is used by another category than
+ 			 * the listed categorie, display the information in the massage.
+ 			 */
+-			chunk_appendf(&trash, "%d (%s) %s", appctx->ctx.map.ref->unique_id,
++			chunk_appendf(&trash, "%d (%s) %s\n", appctx->ctx.map.ref->unique_id,
+ 			              appctx->ctx.map.ref->reference ? appctx->ctx.map.ref->reference : "",
+ 			              appctx->ctx.map.ref->display);
+ 
+-			if (appctx->ctx.map.display_flags & PAT_REF_MAP) {
+-				if (appctx->ctx.map.ref->flags & PAT_REF_ACL)
+-					chunk_appendf(&trash, " - also used by an ACL");
+-			}
+-			else {
+-				if (appctx->ctx.map.ref->flags & PAT_REF_MAP)
+-					chunk_appendf(&trash, " - also used by a map");
+-			}
+-			chunk_appendf(&trash, "\n");
+-
+ 			if (bi_putchk(si->ib, &trash) == -1) {
+ 				/* let's try again later from this session. We add ourselves into
+ 				 * this session's users so that it can remove us upon termination.
+-- 
+1.8.3.2
+
