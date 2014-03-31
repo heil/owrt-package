@@ -1,0 +1,194 @@
+From 702d44f2ff98def1c8ebcc5c3de6293919a390d0 Mon Sep 17 00:00:00 2001
+From: Bertrand Jacquin <bjacquin@exosec.fr>
+Date: Tue, 19 Nov 2013 11:43:06 +0100
+Subject: [PATCH 114/115] MEDIUM: proxy: support use_backend with dynamic names
+
+We have a use case where we look up a customer ID in an HTTP header
+and direct it to the corresponding server. This can easily be done
+using ACLs and use_backend rules, but the configuration becomes
+painful to maintain when the number of customers grows to a few
+tens or even a several hundreds.
+
+We realized it would be nice if we could make the use_backend
+resolve its name at run time instead of config parsing time, and
+use a similar expression as http-request add-header to decide on
+the proper backend to use. This permits the use of prefixes or
+even complex names in backend expressions. If no name matches,
+then the default backend is used. Doing so allowed us to get rid
+of all the use_backend rules.
+
+Since there are some config checks on the use_backend rules to see
+if the referenced backend exists, we want to keep them to detect
+config errors in normal config. So this patch does not modify the
+default behaviour and proceeds this way :
+
+  - if the backend name in the use_backend directive parses as a log
+    format rule, it's used as-is and is resolved at run time ;
+
+  - otherwise it's a static name which must be valid at config time.
+
+There was the possibility of doing this with the use-server directive
+instead of use_backend, but it seems like use_backend is more suited
+to this task, as it can be used for other purposes. For example, it
+becomes easy to serve a customer-specific proxy.pac file based on the
+customer ID by abusing the errorfile primitive :
+
+     use_backend bk_cust_%[hdr(X-Cust-Id)] if { hdr(X-Cust-Id) -m found }
+     default_backend bk_err_404
+
+     backend bk_cust_1
+         errorfile 200 /etc/haproxy/static/proxy.pac.cust1
+
+Signed-off-by: Bertrand Jacquin <bjacquin@exosec.fr>
+---
+ doc/configuration.txt | 24 +++++++++++++++++++++---
+ include/types/proxy.h |  2 ++
+ src/cfgparse.c        | 29 ++++++++++++++++++++++++++++-
+ src/session.c         | 19 ++++++++++++++++++-
+ 4 files changed, 69 insertions(+), 5 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index babcefc..bc582c2 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -2578,7 +2578,9 @@ fullconn <conns>
+ 
+   Since it's hard to get this value right, haproxy automatically sets it to
+   10% of the sum of the maxconns of all frontends that may branch to this
+-  backend. That way it's safe to leave it unset.
++  backend (based on "use_backend" and "default_backend" rules). That way it's
++  safe to leave it unset. However, "use_backend" involving dynamic names are
++  not counted since there is no way to know if they could match or not.
+ 
+   Example :
+      # The servers will accept between 100 and 1000 concurrent connections each
+@@ -7711,7 +7713,8 @@ use_backend <backend> unless <condition>
+   May be used in sections :   defaults | frontend | listen | backend
+                                   no   |    yes   |   yes  |   no
+   Arguments :
+-    <backend>   is the name of a valid backend or "listen" section.
++    <backend>   is the name of a valid backend or "listen" section, or a
++                "log-format" string resolving to a backend name.
+ 
+     <condition> is a condition composed of ACLs, as described in section 7.
+ 
+@@ -7740,7 +7743,22 @@ use_backend <backend> unless <condition>
+   a complete HTTP request to get in. This feature is useful when a frontend
+   must decode several protocols on a unique port, one of them being HTTP.
+ 
+-  See also: "default_backend", "tcp-request", and section 7 about ACLs.
++  When <backend> is a simple name, it is resolved at configuration time, and an
++  error is reported if the specified backend does not exist. If <backend> is
++  a log-format string instead, no check may be done at configuration time, so
++  the backend name is resolved dynamically at run time. If the resulting
++  backend name does not correspond to any valid backend, no other rule is
++  evaluated, and the default_backend directive is applied instead. Note that
++  when using dynamic backend names, it is highly recommended to use a prefix
++  that no other backend uses in order to ensure that an unauthorized backend
++  cannot be forced from the request.
++
++  It is worth mentionning that "use_backend" rules with an explicit name are
++  used to detect the association between frontends and backends to compute the
++  backend's "fullconn" setting. This cannot be done for dynamic names.
++
++  See also: "default_backend", "tcp-request", "fullconn", "log-format", and
++            section 7 about ACLs.
+ 
+ 
+ use-server <server> if <condition>
+diff --git a/include/types/proxy.h b/include/types/proxy.h
+index 1a778bd..dc75f63 100644
+--- a/include/types/proxy.h
++++ b/include/types/proxy.h
+@@ -379,9 +379,11 @@ struct proxy {
+ struct switching_rule {
+ 	struct list list;			/* list linked to from the proxy */
+ 	struct acl_cond *cond;			/* acl condition to meet */
++	int dynamic;				/* this is a dynamic rule using the logformat expression */
+ 	union {
+ 		struct proxy *backend;		/* target backend */
+ 		char *name;			/* target backend name during config parsing */
++		struct list expr;		/* logformat expression to use for dynamic rules */
+ 	} be;
+ };
+ 
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 9f91f28..e433c2c 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6813,6 +6813,33 @@ int check_config_validity()
+ 		/* find the target proxy for 'use_backend' rules */
+ 		list_for_each_entry(rule, &curproxy->switching_rules, list) {
+ 			struct proxy *target;
++			struct logformat_node *node;
++			char *pxname;
++
++			/* Try to parse the string as a log format expression. If the result
++			 * of the parsing is only one entry containing a simple string, then
++			 * it's a standard string corresponding to a static rule, thus the
++			 * parsing is cancelled and be.name is restored to be resolved.
++			 */
++			pxname = rule->be.name;
++			LIST_INIT(&rule->be.expr);
++			parse_logformat_string(pxname, curproxy, &rule->be.expr, 0, SMP_VAL_FE_HRQ_HDR,
++			                       curproxy->conf.args.file, curproxy->conf.args.line);
++			node = LIST_NEXT(&rule->be.expr, struct logformat_node *, list);
++
++			if (!LIST_ISEMPTY(&rule->be.expr)) {
++				if (node->type != LOG_FMT_TEXT || node->list.n != &rule->be.expr) {
++					rule->dynamic = 1;
++					free(pxname);
++					continue;
++				}
++				/* simple string: free the expression and fall back to static rule */
++				free(node->arg);
++				free(node);
++			}
++
++			rule->dynamic = 0;
++			rule->be.name = pxname;
+ 
+ 			target = findproxy_mode(rule->be.name, curproxy->mode, PR_CAP_BE);
+ 
+@@ -7722,7 +7749,7 @@ out_uri_auth_compat:
+ 				/* check if a "use_backend" rule matches */
+ 				if (!found) {
+ 					list_for_each_entry(rule, &fe->switching_rules, list) {
+-						if (rule->be.backend == curproxy) {
++						if (!rule->dynamic && rule->be.backend == curproxy) {
+ 							found = 1;
+ 							break;
+ 						}
+diff --git a/src/session.c b/src/session.c
+index a8f68a2..efc0736 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -1244,7 +1244,24 @@ static int process_switching_rules(struct session *s, struct channel *req, int a
+ 				ret = !ret;
+ 
+ 			if (ret) {
+-				if (!session_set_backend(s, rule->be.backend))
++				/* If the backend name is dynamic, try to resolve the name.
++				 * If we can't resolve the name, or if any error occurs, break
++				 * the loop and fallback to the default backend.
++				 */
++				struct proxy *backend;
++
++				if (rule->dynamic) {
++					struct chunk *tmp = get_trash_chunk();
++					if (!build_logline(s, tmp->str, tmp->size, &rule->be.expr))
++						break;
++					backend = findproxy(tmp->str, PR_CAP_BE);
++					if (!backend)
++						break;
++				}
++				else
++					backend = rule->be.backend;
++
++				if (!session_set_backend(s, backend))
+ 					goto sw_failed;
+ 				break;
+ 			}
+-- 
+1.8.3.2
+

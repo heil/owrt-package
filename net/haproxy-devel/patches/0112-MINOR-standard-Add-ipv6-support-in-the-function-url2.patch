@@ -1,0 +1,290 @@
+From 9f95e4084c1ace3c01fa7a892278ac13df477a1c Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 21 Mar 2014 14:51:46 +0100
+Subject: [PATCH 112/115] MINOR: standard: Add ipv6 support in the function
+ url2sa().
+
+The function url2sa() converts faster url like http://<ip>:<port> in a
+struct sockaddr_storage. This patch add:
+ - the https support
+ - permit to return the length parsed
+ - support IPv6
+ - support DNS synchronous resolution only during start of haproxy.
+
+The faster IPv4 convertion way is keeped. IPv6 is slower, because I use
+the standard IPv6 parser function.
+---
+ include/common/standard.h |  13 +++-
+ src/proto_http.c          |   6 +-
+ src/standard.c            | 170 ++++++++++++++++++++++++++++++++++++++--------
+ 3 files changed, 158 insertions(+), 31 deletions(-)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index 1a3020d..0beb2c9 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -68,6 +68,17 @@ enum {
+ 	STD_OP_GE = 4, STD_OP_LT = 5,
+ };
+ 
++enum http_scheme {
++	SCH_HTTP,
++	SCH_HTTPS,
++};
++
++struct split_url {
++	enum http_scheme scheme;
++	const char *host;
++	int host_len;
++};
++
+ extern int itoa_idx; /* index of next itoa_str to use */
+ 
+ /*
+@@ -266,7 +277,7 @@ int url2ipv4(const char *addr, struct in_addr *dst);
+ /*
+  * Resolve destination server from URL. Convert <str> to a sockaddr_storage*.
+  */
+-int url2sa(const char *url, int ulen, struct sockaddr_storage *addr);
++int url2sa(const char *url, int ulen, struct sockaddr_storage *addr, struct split_url *out);
+ 
+ /* Tries to convert a sockaddr_storage address to text form. Upon success, the
+  * address family is returned so that it's easy for the caller to adapt to the
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 0bca45c..df33991 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3943,7 +3943,7 @@ int http_process_request(struct session *s, struct channel *req, int an_bit)
+ 		path = http_get_path(txn);
+ 		url2sa(req->buf->p + msg->sl.rq.u,
+ 		       path ? path - (req->buf->p + msg->sl.rq.u) : msg->sl.rq.u_l,
+-		       &conn->addr.to);
++		       &conn->addr.to, NULL);
+ 		/* if the path was found, we have to remove everything between
+ 		 * req->buf->p + msg->sl.rq.u and path (excluded). If it was not
+ 		 * found, we need to replace from req->buf->p + msg->sl.rq.u for
+@@ -9254,7 +9254,7 @@ smp_fetch_url_ip(struct proxy *px, struct session *l4, void *l7, unsigned int op
+ 
+ 	CHECK_HTTP_MESSAGE_FIRST();
+ 
+-	url2sa(txn->req.chn->buf->p + txn->req.sl.rq.u, txn->req.sl.rq.u_l, &addr);
++	url2sa(txn->req.chn->buf->p + txn->req.sl.rq.u, txn->req.sl.rq.u_l, &addr, NULL);
+ 	if (((struct sockaddr_in *)&addr)->sin_family != AF_INET)
+ 		return 0;
+ 
+@@ -9273,7 +9273,7 @@ smp_fetch_url_port(struct proxy *px, struct session *l4, void *l7, unsigned int
+ 
+ 	CHECK_HTTP_MESSAGE_FIRST();
+ 
+-	url2sa(txn->req.chn->buf->p + txn->req.sl.rq.u, txn->req.sl.rq.u_l, &addr);
++	url2sa(txn->req.chn->buf->p + txn->req.sl.rq.u, txn->req.sl.rq.u_l, &addr, NULL);
+ 	if (((struct sockaddr_in *)&addr)->sin_family != AF_INET)
+ 		return 0;
+ 
+diff --git a/src/standard.c b/src/standard.c
+index d435c3c..569ecaa 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -24,6 +24,7 @@
+ #include <common/chunk.h>
+ #include <common/config.h>
+ #include <common/standard.h>
++#include <types/global.h>
+ #include <eb32tree.h>
+ 
+ /* enough to store NB_ITOA_STR integers of :
+@@ -939,20 +940,25 @@ int url2ipv4(const char *addr, struct in_addr *dst)
+ }
+ 
+ /*
+- * Resolve destination server from URL. Convert <str> to a sockaddr_storage*.
++ * Resolve destination server from URL. Convert <str> to a sockaddr_storage.
++ * <out> contain the code of the dectected scheme, the start and length of
++ * the hostname. Actually only http and https are supported. <out> can be NULL.
++ * This function returns the consumed length. It is useful if you parse complete
++ * url like http://host:port/path, because the consumed length corresponds to
++ * the first character of the path. If the conversion fails, it returns -1.
++ *
++ * This function tries to resolve the DNS name if haproxy is in starting mode.
++ * So, this function may be used during the configuration parsing.
+  */
+-int url2sa(const char *url, int ulen, struct sockaddr_storage *addr)
++int url2sa(const char *url, int ulen, struct sockaddr_storage *addr, struct split_url *out)
+ {
+ 	const char *curr = url, *cp = url;
++	const char *end;
+ 	int ret, url_code = 0;
+-	unsigned int http_code = 0;
+-
+-	/* Cleanup the room */
+-
+-	/* FIXME: assume IPv4 only for now */
+-	((struct sockaddr_in *)addr)->sin_family = AF_INET;
+-	((struct sockaddr_in *)addr)->sin_addr.s_addr = 0;
+-	((struct sockaddr_in *)addr)->sin_port = 0;
++	unsigned long long int http_code = 0;
++	int default_port;
++	struct hostent *he;
++	char *p;
+ 
+ 	/* Firstly, try to find :// pattern */
+ 	while (curr < url+ulen && url_code != 0x3a2f2f) {
+@@ -966,28 +972,138 @@ int url2sa(const char *url, int ulen, struct sockaddr_storage *addr)
+ 	 * 
+ 	 * WARNING: Current code doesn't support dynamic async dns resolver.
+ 	 */
+-	if (url_code == 0x3a2f2f) {
+-		while (cp < curr - 3)
+-			http_code = (http_code << 8) + *cp++;
+-		http_code |= 0x20202020;			/* Turn everything to lower case */
++	if (url_code != 0x3a2f2f)
++		return -1;
++
++	/* Copy scheme, and utrn to lower case. */
++	while (cp < curr - 3)
++		http_code = (http_code << 8) + *cp++;
++	http_code |= 0x2020202020202020ULL;			/* Turn everything to lower case */
+ 		
+-		/* HTTP url matching */
+-		if (http_code == 0x68747470) {
+-			/* We are looking for IP address. If you want to parse and
+-			 * resolve hostname found in url, you can use str2sa_range(), but
+-			 * be warned this can slow down global daemon performances
+-			 * while handling lagging dns responses.
++	/* HTTP or HTTPS url matching */
++	if (http_code == 0x2020202068747470ULL) {
++		default_port = 80;
++		if (out)
++			out->scheme = SCH_HTTP;
++	}
++	else if (http_code == 0x2020206874747073ULL) {
++		default_port = 443;
++		if (out)
++			out->scheme = SCH_HTTPS;
++	}
++	else
++		return -1;
++
++	/* If the next char is '[', the host address is IPv6. */
++	if (*curr == '[') {
++		curr++;
++
++		/* Check trash size */
++		if (trash.size < ulen)
++			return -1;
++
++		/* Look for ']' and copy the address in a trash buffer. */
++		p = trash.str;
++		for (end = curr;
++		     end < url + ulen && *end != ']';
++		     end++, p++)
++			*p = *end;
++		if (*end != ']')
++			return -1;
++		*p = '\0';
++
++		/* Update out. */
++		if (out) {
++			out->host = curr;
++			out->host_len = end - curr;
++		}
++
++		/* Try IPv6 decoding. */
++		if (!inet_pton(AF_INET6, trash.str, &((struct sockaddr_in6 *)addr)->sin6_addr))
++			return -1;
++		end++;
++
++		/* Decode port. */
++		if (*end == ':') {
++			end++;
++			default_port = read_uint(&end, url + ulen);
++		}
++		((struct sockaddr_in6 *)addr)->sin6_port = htons(default_port);
++		((struct sockaddr_in6 *)addr)->sin6_family = AF_INET6;
++		return end - url;
++	}
++	else {
++		/* We are looking for IP address. If you want to parse and
++		 * resolve hostname found in url, you can use str2sa_range(), but
++		 * be warned this can slow down global daemon performances
++		 * while handling lagging dns responses.
++		 */
++		ret = url2ipv4(curr, &((struct sockaddr_in *)addr)->sin_addr);
++		if (ret) {
++			/* Update out. */
++			if (out) {
++				out->host = curr;
++				out->host_len = ret;
++			}
++
++			curr += ret;
++
++			/* Decode port. */
++			if (*curr == ':') {
++				curr++;
++				default_port = read_uint(&curr, url + ulen);
++			}
++			((struct sockaddr_in *)addr)->sin_port = htons(default_port);
++
++			/* Set family. */
++			((struct sockaddr_in *)addr)->sin_family = AF_INET;
++			return curr - url;
++		}
++		else if (global.mode & MODE_STARTING) {
++			/* The IPv4 and IPv6 decoding fails, maybe the url contain name. Try to execute
++			 * synchronous DNS request only if HAProxy is in the start state.
+ 			 */
+-			ret = url2ipv4(curr, &((struct sockaddr_in *)addr)->sin_addr);
+-			if (!ret)
++
++			/* look for : or / or end */
++			for (end = curr;
++			     end < url + ulen && *end != '/' && *end != ':';
++			     end++);
++			memcpy(trash.str, curr, end - curr);
++			trash.str[end - curr] = '\0';
++
++			/* try to resolve an IPv4/IPv6 hostname */
++			he = gethostbyname(trash.str);
++			if (!he)
+ 				return -1;
+-			curr += ret;
+-			((struct sockaddr_in *)addr)->sin_port = (*curr == ':') ? str2uic(++curr) : 80;
+-			((struct sockaddr_in *)addr)->sin_port = htons(((struct sockaddr_in *)addr)->sin_port);
++
++			/* Update out. */
++			if (out) {
++				out->host = curr;
++				out->host_len = end - curr;
++			}
++
++			/* Decode port. */
++			if (*end == ':') {
++				end++;
++				default_port = read_uint(&end, url + ulen);
++			}
++
++			/* Copy IP address, set port and family. */
++			switch (he->h_addrtype) {
++			case AF_INET:
++				((struct sockaddr_in *)addr)->sin_addr = *(struct in_addr *) *(he->h_addr_list);
++				((struct sockaddr_in *)addr)->sin_port = htons(default_port);
++				((struct sockaddr_in *)addr)->sin_family = AF_INET;
++				return end - url;
++
++			case AF_INET6:
++				((struct sockaddr_in6 *)addr)->sin6_addr = *(struct in6_addr *) *(he->h_addr_list);
++				((struct sockaddr_in6 *)addr)->sin6_port = htons(default_port);
++				((struct sockaddr_in6 *)addr)->sin6_family = AF_INET6;
++				return end - url;
++			}
+ 		}
+-		return 0;
+ 	}
+-
+ 	return -1;
+ }
+ 
+-- 
+1.8.3.2
+
