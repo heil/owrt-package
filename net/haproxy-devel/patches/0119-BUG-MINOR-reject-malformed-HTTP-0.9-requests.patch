@@ -1,0 +1,55 @@
+From 25a15227f5d3e335202591e1b6c6bc6d99b1ec51 Mon Sep 17 00:00:00 2001
+From: Apollon Oikonomopoulos <apoikos@debian.org>
+Date: Sun, 6 Apr 2014 02:46:00 +0300
+Subject: [PATCH 119/119] BUG/MINOR: reject malformed HTTP/0.9 requests
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RFC 1945 (§4.1) defines an HTTP/0.9 request ("Simple-Request") as:
+
+  Simple-Request  = "GET" SP Request-URI CRLF
+
+HAProxy tries to automatically upgrade HTTP/0.9 requests to
+to HTTP/1.0, by appending "HTTP/1.0" to the request and setting the
+Request-URI to "/" if it was not present. The latter however is
+RFC-incompatible, as HTTP/0.9 requests must already have a Request-URI
+according to the definition above. Additionally,
+http_upgrade_v09_to_v10() does not check whether the request method is
+indeed GET (the mandatory method for HTTP/0.9).
+
+As a result, any single- or double-word request line is regarded as a
+valid HTTP request. We fix this by failing in http_upgrade_v09_to_v10()
+if the request method is not GET or the request URI is not present.
+---
+ src/proto_http.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index df33991..c23fa54 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -1777,14 +1777,16 @@ static int http_upgrade_v09_to_v10(struct http_txn *txn)
+ 	if (msg->sl.rq.v_l != 0)
+ 		return 1;
+ 
++	/* RFC 1945 allows only GET for HTTP/0.9 requests */
++	if (txn->meth != HTTP_METH_GET)
++		return 0;
++
+ 	cur_end = msg->chn->buf->p + msg->sl.rq.l;
+ 	delta = 0;
+ 
+ 	if (msg->sl.rq.u_l == 0) {
+-		/* if no URI was set, add "/" */
+-		delta = buffer_replace2(msg->chn->buf, cur_end, cur_end, " /", 2);
+-		cur_end += delta;
+-		http_msg_move_end(msg, delta);
++		/* HTTP/0.9 requests *must* have a request URI, per RFC 1945 */
++		return 0;
+ 	}
+ 	/* add HTTP version */
+ 	delta = buffer_replace2(msg->chn->buf, cur_end, cur_end, " HTTP/1.0\r\n", 11);
+-- 
+1.8.3.2
+
