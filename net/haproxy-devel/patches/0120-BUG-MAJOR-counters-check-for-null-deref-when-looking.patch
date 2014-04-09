@@ -1,0 +1,55 @@
+From 6a0b6bd648592e73f42fb8e7341bf984d26ba8dc Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 9 Apr 2014 13:25:42 +0200
+Subject: [PATCH 120/122] BUG/MAJOR: counters: check for null-deref when
+ looking up an alternate table
+
+Constructions such as sc0_get_gpc0(foo) allow to look up the same key as
+the current key but in an alternate table. A check was missing to ensure
+we already have a key, resulting in a crash if this lookup is performed
+before the associated track-sc rule.
+
+This bug was reported on the mailing list by Neil@iamafreeman and
+narrowed down further by Lukas Tribus and Thierry Fournier.
+
+This bug was introduced in 1.5-dev20 by commit "0f791d4 MEDIUM: counters:
+support looking up a key in an alternate table".
+---
+ src/session.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/session.c b/src/session.c
+index efc0736..cada0ab 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -2639,6 +2639,7 @@ static struct stkctr *
+ smp_fetch_sc_stkctr(struct session *l4, const struct arg *args, const char *kw)
+ {
+ 	static struct stkctr stkctr;
++	struct stksess *stksess;
+ 	unsigned int num = kw[2] - '0';
+ 	int arg = 0;
+ 
+@@ -2668,13 +2669,17 @@ smp_fetch_sc_stkctr(struct session *l4, const struct arg *args, const char *kw)
+ 	 * the sc[0-9]_ form, or even higher using sc_(num) if needed.
+ 	 * args[arg] is the first optional argument.
+ 	 */
++	stksess = stkctr_entry(&l4->stkctr[num]);
++	if (!stksess)
++		return NULL;
++
+ 	if (unlikely(args[arg].type == ARGT_TAB)) {
+ 		/* an alternate table was specified, let's look up the same key there */
+ 		stkctr.table = &args[arg].data.prx->table;
+-		stkctr_set_entry(&stkctr, stktable_lookup(stkctr.table, stkctr_entry(&l4->stkctr[num])));
++		stkctr_set_entry(&stkctr, stktable_lookup(stkctr.table, stksess));
+ 		return &stkctr;
+ 	}
+-	return stkctr_entry(&l4->stkctr[num]) ? &l4->stkctr[num] : NULL;
++	return &l4->stkctr[num];
+ }
+ 
+ /* set return a boolean indicating if the requested session counter is
+-- 
+1.8.3.2
+

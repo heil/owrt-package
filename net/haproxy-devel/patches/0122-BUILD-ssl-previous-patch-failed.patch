@@ -1,0 +1,36 @@
+From 073edf3311aa963ca7e0496f70b848b5f1fe9ec3 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 9 Apr 2014 15:40:42 +0200
+Subject: [PATCH 122/122] BUILD: ssl: previous patch failed
+
+This is a minor error, s/SMP_T_CSTR/SMP_T_STR + SMP_F_CONST.
+---
+ src/ssl_sock.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index a40b445..a11aed2 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -2851,7 +2851,8 @@ smp_fetch_ssl_fc_unique_id(struct proxy *px, struct session *l4, void *l7, unsig
+ 		return 0;
+ 
+ 	smp->data.str.str = smp_trash->str;
+-	smp->type = SMP_T_CSTR;
++	smp->type = SMP_T_STR;
++	smp->flags |= SMP_F_CONST;
+ 	smp->data.str.len = b64_len;
+ 
+ 	return 1;
+@@ -3586,7 +3587,7 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+ 	{ "ssl_fc_alpn",            smp_fetch_ssl_fc_alpn,        0,                   NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+ #endif
+ 	{ "ssl_fc_protocol",        smp_fetch_ssl_fc_protocol,    0,                   NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+-	{ "ssl_fc_unique_id",       smp_fetch_ssl_fc_unique_id,   0,                   NULL,    SMP_T_CSTR, SMP_USE_L5CLI },
++	{ "ssl_fc_unique_id",       smp_fetch_ssl_fc_unique_id,   0,                   NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+ 	{ "ssl_fc_use_keysize",     smp_fetch_ssl_fc_use_keysize, 0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+ 	{ "ssl_fc_session_id",      smp_fetch_ssl_fc_session_id,  0,                   NULL,    SMP_T_BIN,  SMP_USE_L5CLI },
+ 	{ "ssl_fc_sni",             smp_fetch_ssl_fc_sni,         0,                   NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+-- 
+1.8.3.2
+
