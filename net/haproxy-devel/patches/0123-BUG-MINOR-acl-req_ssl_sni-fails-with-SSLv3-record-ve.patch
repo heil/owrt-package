@@ -1,0 +1,40 @@
+From 57d2297473bdc1b61a589a73797eb25e0a00a8bd Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Thu, 10 Apr 2014 21:36:22 +0200
+Subject: [PATCH 123/123] BUG/MINOR: acl: req_ssl_sni fails with SSLv3 record
+ version
+
+SNI is a TLS extension and requires at least TLSv1.0 or later, however
+the version in the record layer may be SSLv3, not necessarily TLSv1.0.
+
+GnuTLS for example does this.
+
+Relax the record layer version check in smp_fetch_ssl_hello_sni() to
+allow fetching SNI values from clients indicating SSLv3 in the record
+layer (maintaining the TLSv1.0+ check in the actual handshake version).
+
+This was reported and analyzed by Pravin Tatti.
+---
+ src/payload.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/payload.c b/src/payload.c
+index b806e08..4057f6f 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -285,10 +285,10 @@ smp_fetch_ssl_hello_sni(struct proxy *px, struct session *s, void *l7, unsigned
+ 	if (*data != 0x16)
+ 		goto not_ssl_hello;
+ 
+-	/* Check for TLSv1 or later (SSL version >= 3.1) */
++	/* Check for SSLv3 or later (SSL version >= 3.0) in the record layer*/
+ 	if (bleft < 3)
+ 		goto too_short;
+-	if (data[1] < 0x03 || data[2] < 0x01)
++	if (data[1] < 0x03)
+ 		goto not_ssl_hello;
+ 
+ 	if (bleft < 5)
+-- 
+1.8.3.2
+
