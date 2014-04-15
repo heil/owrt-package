@@ -1,0 +1,307 @@
+From ad9035186e3dce0458a76c7f6eb323475ad9c57d Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Fri, 11 Apr 2014 17:51:01 +0200
+Subject: [PATCH 137/139] MINOR: http: Add the "language" converter to for use
+ with accept-language
+
+language(<value[;value[;value[;...]]]>[,<default>])
+
+	 Returns the value with the highest q-factor from a list as
+	 extracted from the "accept-language" header using "req.fhdr".
+	 Values with no q-factor have a q-factor of 1. Values with a
+	 q-factor of 0 are dropped. Only values which belong to the
+	 list of semi-colon delimited <values> will be considered. If
+	 no value matches the given list and a default value is
+	 provided, it is returned. Note that language names may have
+	 a variant after a dash ('-'). If this variant is present in
+	 the list, it will be matched, but if it is not, only the base
+	 language is checked. The match is case-sensitive, and the
+	 output string is always one of those provided in arguments.
+	 The ordering of arguments is meaningless, only the ordering
+	 of the values in the request counts, as the first value among
+	 multiple sharing the same q-factor is used.
+
+	 Example :
+
+	     # this configuration switches to the backend matching a
+	     # given language based on the request :
+
+	     acl de req.fhdr(accept-language),language(de;es;fr;en) de
+	     acl es req.fhdr(accept-language),language(de;es;fr;en) es
+	     acl fr req.fhdr(accept-language),language(de;es;fr;en) fr
+	     acl en req.fhdr(accept-language),language(de;es;fr;en) en
+	     use_backend german  if de
+	     use_backend spanish if es
+	     use_backend french  if fr
+	     use_backend english if en
+	     default_backend choose_your_language
+---
+ doc/configuration.txt |  31 +++++++++
+ src/proto_http.c      | 181 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 209 insertions(+), 3 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index fcd58ef..a6a391a 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -9409,6 +9409,37 @@ The currently available list of transformation keywords include :
+                  with a positive offset, or Last-Modified values when the
+                  offset is negative.
+ 
++  language(<value[;value[;value[;...]]]>[,<default>])
++                 Returns the value with the highest q-factor from a list as
++                 extracted from the "accept-language" header using "req.fhdr".
++                 Values with no q-factor have a q-factor of 1. Values with a
++                 q-factor of 0 are dropped. Only values which belong to the
++                 list of semi-colon delimited <values> will be considered. If
++                 no value matches the given list and a default value is
++                 provided, it is returned. Note that language names may have
++                 a variant after a dash ('-'). If this variant is present in
++                 the list, it will be matched, but if it is not, only the base
++                 language is checked. The match is case-sensitive, and the
++                 output string is always one of those provided in arguments.
++                 The ordering of arguments is meaningless, only the ordering
++                 of the values in the request counts, as the first value among
++                 multiple sharing the same q-factor is used.
++
++                 Example :
++
++                     # this configuration switches to the backend matching a
++                     # given language based on the request :
++
++                     acl de req.fhdr(accept-language),language(de;es;fr;en) de
++                     acl es req.fhdr(accept-language),language(de;es;fr;en) es
++                     acl fr req.fhdr(accept-language),language(de;es;fr;en) fr
++                     acl en req.fhdr(accept-language),language(de;es;fr;en) en
++                     use_backend german  if de
++                     use_backend spanish if es
++                     use_backend french  if fr
++                     use_backend english if en
++                     default_backend choose_your_language
++
+   map(<map_file>[,<default_value>])
+   map_<match_type>(<map_file>[,<default_value>])
+   map_<match_type>_<output_type>(<map_file>[,<default_value>])
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 1a8a6d9..546b59e 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -2151,7 +2151,7 @@ static inline int http_skip_chunk_crlf(struct http_msg *msg)
+  * 1 digit, one dot and 3 digits and stops on the first invalid character.
+  * Unparsable qvalues return 1000 as "q=1.000".
+  */
+-int parse_qvalue(const char *qvalue)
++int parse_qvalue(const char *qvalue, const char **end)
+ {
+ 	int q = 1000;
+ 
+@@ -2176,6 +2176,8 @@ int parse_qvalue(const char *qvalue)
+  out:
+ 	if (q > 1000)
+ 		q = 1000;
++	if (*end)
++		*end = qvalue;
+ 	return q;
+ }
+ 
+@@ -2248,7 +2250,7 @@ int select_compression_request_header(struct session *s, struct buffer *req)
+ 			}
+ 
+ 			/* here we have qval pointing to the first "q=" attribute or NULL if not found */
+-			q = qval ? parse_qvalue(qval + 2) : 1000;
++			q = qval ? parse_qvalue(qval + 2, NULL) : 1000;
+ 
+ 			if (q <= best_q)
+ 				continue;
+@@ -10433,6 +10435,178 @@ static int sample_conv_http_date(const struct arg *args, struct sample *smp)
+ 	return 1;
+ }
+ 
++/* Match language range with language tag. RFC2616 14.4:
++ *
++ *    A language-range matches a language-tag if it exactly equals
++ *    the tag, or if it exactly equals a prefix of the tag such
++ *    that the first tag character following the prefix is "-".
++ *
++ * Return 1 if the strings match, else return 0.
++ */
++static inline int language_range_match(const char *range, int range_len,
++                                       const char *tag, int tag_len)
++{
++	const char *end = range + range_len;
++	const char *tend = tag + tag_len;
++	while (range < end) {
++		if (*range == '-' && tag == tend)
++			return 1;
++		if (*range != *tag || tag == tend)
++			return 0;
++		range++;
++		tag++;
++	}
++	/* Return true only if the last char of the tag is matched. */
++	return tag == tend;
++}
++
++/* Arguments: The list of expected value, the number of parts returned and the separator */
++static int sample_conv_q_prefered(const struct arg *args, struct sample *smp)
++{
++	const char *al = smp->data.str.str;
++	const char *end = al + smp->data.str.len;
++	const char *token;
++	int toklen;
++	int qvalue;
++	const char *str;
++	const char *w;
++	int best_q = 0;
++
++	/* Set the constant to the sample, because the output of the
++	 * function will be peek in the constant configuration string.
++	 */
++	smp->flags |= SMP_F_CONST;
++	smp->data.str.size = 0;
++	smp->data.str.str = "";
++	smp->data.str.len = 0;
++
++	/* Parse the accept language */
++	while (1) {
++
++		/* Jump spaces, quit if the end is detected. */
++		while (al < end && isspace(*al))
++			al++;
++		if (al >= end)
++			break;
++
++		/* Start of the fisrt word. */
++		token = al;
++
++		/* Look for separator: isspace(), ',' or ';'. Next value if 0 length word. */
++		while (al < end && *al != ';' && *al != ',' && !isspace(*al))
++			al++;
++		if (al == token)
++			goto expect_comma;
++
++		/* Length of the token. */
++		toklen = al - token;
++		qvalue = 1000;
++
++		/* Check if the token exists in the list. If the token not exists,
++		 * jump to the next token.
++		 */
++		str = args[0].data.str.str;
++		w = str;
++		while (1) {
++			if (*str == ';' || *str == '\0') {
++				if (language_range_match(token, toklen, w, str-w))
++					goto look_for_q;
++				if (*str == '\0')
++					goto expect_comma;
++				w = str + 1;
++			}
++			str++;
++		}
++		goto expect_comma;
++
++look_for_q:
++
++		/* Jump spaces, quit if the end is detected. */
++		while (al < end && isspace(*al))
++			al++;
++		if (al >= end)
++			goto process_value;
++
++		/* If ',' is found, process the result */
++		if (*al == ',')
++			goto process_value;
++
++		/* If the character is different from ';', look
++		 * for the end of the header part in best effort.
++		 */
++		if (*al != ';')
++			goto expect_comma;
++
++		/* Assumes that the char is ';', now expect "q=". */
++		al++;
++
++		/* Jump spaces, process value if the end is detected. */
++		while (al < end && isspace(*al))
++			al++;
++		if (al >= end)
++			goto process_value;
++
++		/* Expect 'q'. If no 'q', continue in best effort */
++		if (*al != 'q')
++			goto process_value;
++		al++;
++
++		/* Jump spaces, process value if the end is detected. */
++		while (al < end && isspace(*al))
++			al++;
++		if (al >= end)
++			goto process_value;
++
++		/* Expect '='. If no '=', continue in best effort */
++		if (*al != '=')
++			goto process_value;
++		al++;
++
++		/* Jump spaces, process value if the end is detected. */
++		while (al < end && isspace(*al))
++			al++;
++		if (al >= end)
++			goto process_value;
++
++		/* Parse the q value. */
++		qvalue = parse_qvalue(al, &al);
++
++process_value:
++
++		/* If the new q value is the best q value, then store the associated
++		 * language in the response. If qvalue is the biggest value (1000),
++		 * break the process.
++		 */
++		if (qvalue > best_q) {
++			smp->data.str.str = (char *)w;
++			smp->data.str.len = str - w;
++			if (qvalue >= 1000)
++				break;
++			best_q = qvalue;
++		}
++
++expect_comma:
++
++		/* Expect comma or end. If the end is detected, quit the loop. */
++		while (al < end && *al != ',')
++			al++;
++		if (al >= end)
++			break;
++
++		/* Comma is found, jump it and restart the analyzer. */
++		al++;
++	}
++
++	/* Set default value if required. */
++	if (smp->data.str.len == 0 && args[1].type == ARGT_STR) {
++		smp->data.str.str = args[1].data.str.str;
++		smp->data.str.len = args[1].data.str.len;
++	}
++
++	/* Return true only if a matching language was found. */
++	return smp->data.str.len != 0;
++}
++
+ /************************************************************************/
+ /*          All supported ACL keywords must be declared here.           */
+ /************************************************************************/
+@@ -10631,7 +10805,8 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+ 
+ /* Note: must not be declared <const> as its list will be overwritten */
+ static struct sample_conv_kw_list sample_conv_kws = {ILH, {
+-	{ "http_date", sample_conv_http_date, ARG1(0,SINT), NULL, SMP_T_UINT, SMP_T_STR  },
++	{ "http_date", sample_conv_http_date,  ARG1(0,SINT),     NULL, SMP_T_UINT, SMP_T_STR},
++	{ "language",  sample_conv_q_prefered, ARG2(1,STR,STR),  NULL, SMP_T_STR,  SMP_T_STR},
+ 	{ NULL, NULL, 0, 0, 0 },
+ }};
+ 
+-- 
+1.8.3.2
+

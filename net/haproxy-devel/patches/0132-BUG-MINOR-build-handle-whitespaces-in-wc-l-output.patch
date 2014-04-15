@@ -1,0 +1,35 @@
+From 914c0d67b21d338ae332a4e75325513abbaa81fe Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Mon, 14 Apr 2014 15:38:26 +0200
+Subject: [PATCH 132/139] BUG/MINOR: build: handle whitespaces in wc -l output
+
+Certain implementations (for example ksh/OpenBSD) prefix the
+'wc -l' output with whitespaces. This breaks the build since
+689e4d733 ("BUILD: simplify the date and version retrieval in
+the makefile").
+
+Fix this by piping the wc output into tr -dc '0-9'.
+
+Workaround is to build with IGNOREGIT=1.
+
+HAProxy-1.4 is affected as well.
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index d47e676..f95ba03 100644
+--- a/Makefile
++++ b/Makefile
+@@ -354,7 +354,7 @@ ifeq ($(IGNOREGIT),)
+ VERSION := $(shell [ -d .git/. ] && ref=`(git describe --tags --match 'v*' --abbrev=0) 2>/dev/null` && ref=$${ref%-g*} && echo "$${ref\#v}")
+ ifneq ($(VERSION),)
+ # OK git is there and works.
+-SUBVERS := $(shell comms=`git log --format=oneline --no-merges v$(VERSION).. 2>/dev/null | wc -l`; [ $$comms -gt 0 ] && echo "-$$comms")
++SUBVERS := $(shell comms=`git log --format=oneline --no-merges v$(VERSION).. 2>/dev/null | wc -l | tr -dc '0-9'`; [ $$comms -gt 0 ] && echo "-$$comms")
+ VERDATE := $(shell git log -1 --pretty=format:%ci | cut -f1 -d' ' | tr '-' '/')
+ endif
+ endif
+-- 
+1.8.3.2
+

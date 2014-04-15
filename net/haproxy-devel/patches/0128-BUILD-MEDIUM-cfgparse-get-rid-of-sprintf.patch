@@ -1,0 +1,104 @@
+From 348acfe272e099ffaf7d1c6022eaaf19f1d211a7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 14 Apr 2014 15:00:39 +0200
+Subject: [PATCH 128/139] BUILD/MEDIUM: cfgparse: get rid of sprintf()
+
+A few occurrences of sprintf() were causing harmless warnings on OpenBSD :
+
+src/cfgparse.o(.text+0x259e): In function `cfg_parse_global':
+src/cfgparse.c:1044: warning: sprintf() is often misused, please use snprintf()
+
+These ones were easy to get rid of, so better do it.
+---
+ src/cfgparse.c | 40 +++++++++++++++++++++-------------------
+ 1 file changed, 21 insertions(+), 19 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 344bde1..611ea8d 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1033,17 +1033,17 @@ int cfg_parse_global(const char *file, int linenum, char **args, int kwm)
+ 			goto out;
+ 		}
+ 
+-		for(i=1; *args[i]; i++)
+-			len += strlen(args[i])+1;
++		for (i = 1; *args[i]; i++)
++			len += strlen(args[i]) + 1;
+ 
+ 		if (global.desc)
+ 			free(global.desc);
+ 
+ 		global.desc = d = (char *)calloc(1, len);
+ 
+-		d += sprintf(d, "%s", args[1]);
+-		for(i=2; *args[i]; i++)
+-			d += sprintf(d, " %s", args[i]);
++		d += snprintf(d, global.desc + len - d, "%s", args[1]);
++		for (i = 2; *args[i]; i++)
++			d += snprintf(d, global.desc + len - d, " %s", args[i]);
+ 	}
+ 	else if (!strcmp(args[0], "node")) {
+ 		int i;
+@@ -2255,15 +2255,15 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			return -1;
+ 		}
+ 
+-		for(i=1; *args[i]; i++)
+-			len += strlen(args[i])+1;
++		for (i = 1; *args[i]; i++)
++			len += strlen(args[i]) + 1;
+ 
+ 		d = (char *)calloc(1, len);
+ 		curproxy->desc = d;
+ 
+-		d += sprintf(d, "%s", args[1]);
+-		for(i=2; *args[i]; i++)
+-			d += sprintf(d, " %s", args[i]);
++		d += snprintf(d, curproxy->desc + len - d, "%s", args[1]);
++		for (i = 2; *args[i]; i++)
++			d += snprintf(d, curproxy->desc + len - d, " %s", args[i]);
+ 
+ 	}
+ 	else if (!strcmp(args[0], "disabled")) {  /* disables this proxy */
+@@ -3422,14 +3422,14 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 				int i, len=0;
+ 				char *d;
+ 
+-				for(i=2; *args[i]; i++)
+-					len += strlen(args[i])+1;
++				for (i = 2; *args[i]; i++)
++					len += strlen(args[i]) + 1;
+ 
+ 				desc = d = (char *)calloc(1, len);
+ 
+-				d += sprintf(d, "%s", args[2]);
+-				for(i=3; *args[i]; i++)
+-					d += sprintf(d, " %s", args[i]);
++				d += snprintf(d, desc + len - d, "%s", args[2]);
++				for (i = 3; *args[i]; i++)
++					d += snprintf(d, desc + len - d, " %s", args[i]);
+ 			}
+ 
+ 			if (!*args[2] && !global.desc)
+@@ -5138,11 +5138,13 @@ stats_error_parsing:
+ 
+ 		errnum = atol(args[1]);
+ 		if (!strcmp(args[0], "errorloc303")) {
+-			err = malloc(strlen(HTTP_303) + strlen(args[2]) + 5);
+-			errlen = sprintf(err, "%s%s\r\n\r\n", HTTP_303, args[2]);
++			errlen = strlen(HTTP_303) + strlen(args[2]) + 5;
++			err = malloc(errlen);
++			errlen = snprintf(err, errlen, "%s%s\r\n\r\n", HTTP_303, args[2]);
+ 		} else {
+-			err = malloc(strlen(HTTP_302) + strlen(args[2]) + 5);
+-			errlen = sprintf(err, "%s%s\r\n\r\n", HTTP_302, args[2]);
++			errlen = strlen(HTTP_302) + strlen(args[2]) + 5;
++			err = malloc(errlen);
++			errlen = snprintf(err, errlen, "%s%s\r\n\r\n", HTTP_302, args[2]);
+ 		}
+ 
+ 		for (rc = 0; rc < HTTP_ERR_SIZE; rc++) {
+-- 
+1.8.3.2
+

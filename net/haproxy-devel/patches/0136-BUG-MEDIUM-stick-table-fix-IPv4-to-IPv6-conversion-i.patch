@@ -1,0 +1,103 @@
+From 74c219dc0494e127bf73e1fdbfd5dd7c48332c59 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Mon, 14 Apr 2014 14:35:40 +0200
+Subject: [PATCH 136/139] BUG/MEDIUM: stick-table: fix IPv4-to-IPv6 conversion
+ in src_* fetches
+
+The function addr_to_stktable_key doesn't consider the expected
+type of key. If the stick table key is based on IPv6 addresses
+and the input is IPv4, the returned key is IPv4 adddress and his
+length is 4 bytes, while is expected 16 bytes key.
+
+This patch considers the expected key and try to convert IPv4 to
+IPv6 and IPv6 to IPv4 according with the expected key.
+
+This fixes the bug reported by Apollon Oikonomopoulos.
+
+This bug was introduced somewhere in the 1.5-dev process.
+---
+ include/proto/proto_tcp.h | 40 ++++++++++++++++++++++++++++++++--------
+ src/session.c             |  4 ++--
+ 2 files changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/include/proto/proto_tcp.h b/include/proto/proto_tcp.h
+index af7e28a..4adf4d2 100644
+--- a/include/proto/proto_tcp.h
++++ b/include/proto/proto_tcp.h
+@@ -40,19 +40,43 @@ int tcp_inspect_response(struct session *s, struct channel *rep, int an_bit);
+ int tcp_exec_req_rules(struct session *s);
+ 
+ /* Converts the INET/INET6 source address to a stick_table key usable for table
+- * lookups. Returns either NULL if the source cannot be converted (eg: not
+- * IPv4) or a pointer to the converted result in static_table_key in the
+- * appropriate format (IP).
++ * lookups. <type> can be STKTABLE_TYPE_IP or STKTABLE_TYPE_IPV6. The function
++ * try to convert the incoming IP to the type expected by the sticktable.
++ * Returns either NULL if the source cannot be converted (eg: not IPv4) or a
++ * pointer to the converted result in static_table_key in the appropriate format
++ * (IP).
+  */
+-static inline struct stktable_key *addr_to_stktable_key(struct sockaddr_storage *addr)
++static inline struct stktable_key *addr_to_stktable_key(struct sockaddr_storage *addr, long type)
+ {
+ 	switch (addr->ss_family) {
+ 	case AF_INET:
+-		static_table_key->key = (void *)&((struct sockaddr_in *)addr)->sin_addr;
+-		break;
++		/* Convert IPv4 to IPv4 key. */
++		if (type == STKTABLE_TYPE_IP) {
++			static_table_key->key = (void *)&((struct sockaddr_in *)addr)->sin_addr;
++			break;
++		}
++		/* Convert IPv4 to IPv6 key. */
++		if (type == STKTABLE_TYPE_IPV6) {
++			v4tov6(&static_table_key->data.ipv6, &((struct sockaddr_in *)addr)->sin_addr);
++			static_table_key->key = &static_table_key->data.ipv6;
++			break;
++		}
++		return NULL;
++
+ 	case AF_INET6:
+-		static_table_key->key = (void *)&((struct sockaddr_in6 *)addr)->sin6_addr;
+-		break;
++		/* Convert IPv6 to IPv4 key. This conversion can be failed. */
++		if (type == STKTABLE_TYPE_IP) {
++			if (!v6tov4(&static_table_key->data.ip, &((struct sockaddr_in6 *)addr)->sin6_addr))
++				return NULL;
++			static_table_key->key = &static_table_key->data.ip;
++			break;
++		}
++		/* Convert IPv6 to IPv6 key. */
++		if (type == STKTABLE_TYPE_IPV6) {
++			static_table_key->key = (void *)&((struct sockaddr_in6 *)addr)->sin6_addr;
++			break;
++		}
++		return NULL;
+ 	default:
+ 		return NULL;
+ 	}
+diff --git a/src/session.c b/src/session.c
+index cada0ab..99f7558 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -2656,7 +2656,7 @@ smp_fetch_sc_stkctr(struct session *l4, const struct arg *args, const char *kw)
+ 		if (!conn)
+ 			return NULL;
+ 
+-		key = addr_to_stktable_key(&conn->addr.from);
++		key = addr_to_stktable_key(&conn->addr.from, args->data.prx->table.type);
+ 		if (!key)
+ 			return NULL;
+ 
+@@ -2880,7 +2880,7 @@ smp_fetch_src_updt_conn_cnt(struct proxy *px, struct session *l4, void *l7, unsi
+ 	if (!conn)
+ 		return 0;
+ 
+-	key = addr_to_stktable_key(&conn->addr.from);
++	key = addr_to_stktable_key(&conn->addr.from, px->table.type);
+ 	if (!key)
+ 		return 0;
+ 
+-- 
+1.8.3.2
+
