@@ -1,7 +1,7 @@
 From b2c6a786f707d08c92bfd9ea627c38612afca8e0 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 23 Apr 2014 20:29:01 +0200
-Subject: [PATCH 3/3] BUG/MINOR: http: don't report server aborts as client
+Subject: [PATCH 03/17] BUG/MINOR: http: don't report server aborts as client
  aborts
 
 Commit f003d37 ("BUG/MINOR: http: don't report client aborts as server errors")

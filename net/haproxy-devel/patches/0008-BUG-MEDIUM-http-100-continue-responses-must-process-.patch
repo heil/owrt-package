@@ -1,0 +1,36 @@
+From 4d1f128a1807c97d08390e09cf0c84c0cb28af80 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Apr 2014 18:59:35 +0200
+Subject: [PATCH 08/17] BUG/MEDIUM: http: 100-continue responses must process
+ the next part immediately
+
+Since commit d7ad9f5 ("MAJOR: channel: add a new flag CF_WAKE_WRITE to
+notify the task of writes"), we got another bug with 100-continue responses.
+If the final response comes in the same packet as the 100, then the rest of
+the buffer is not processed since there is no wake-up event.
+
+In fact the change above uncoverred the real culprit which is more
+likely session.c which should detect that an earlier analyser was set
+and should loop back to it.
+
+A cleaner fix would be better, but setting the flag works fine.
+This issue was introduced in 1.5-dev22, no backport is needed.
+---
+ src/proto_http.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 2c5045c..6ee9354 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -5932,6 +5932,7 @@ int http_process_res_common(struct session *t, struct channel *rep, int an_bit,
+ 			txn->status = 0;
+ 			t->logs.t_data = -1; /* was not a response yet */
+ 			rep->analysers |= AN_RES_WAIT_HTTP | an_bit;
++			rep->flags |= CF_WAKE_WRITE;
+ 			return 1;
+ 		}
+ 		else if (unlikely(txn->status < 200))
+-- 
+1.8.3.2
+

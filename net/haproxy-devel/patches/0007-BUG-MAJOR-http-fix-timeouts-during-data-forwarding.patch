@@ -1,0 +1,50 @@
+From efdf094df2730c6db20975be747e70adb53eec85 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Apr 2014 20:08:57 +0200
+Subject: [PATCH 07/17] BUG/MAJOR: http: fix timeouts during data forwarding
+
+Patches c623c17 ("MEDIUM: http: start to centralize the forwarding code")
+and bed410e ("MAJOR: http: centralize data forwarding in the request path")
+merged into 1.5-dev23 cause transfers to be silently aborted after the
+server timeout due to the fact that the analysers are woken up when the
+timeout strikes and they believe they have nothing more to do, so they're
+terminating the transfer.
+
+No backport is needed.
+---
+ src/proto_http.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index f813e1c..2c5045c 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -5025,6 +5025,12 @@ int http_request_forward_body(struct session *s, struct channel *req, int an_bit
+ 	/* in most states, we should abort in case of early close */
+ 	channel_auto_close(req);
+ 
++	if (req->to_forward) {
++		/* We can't process the buffer's contents yet */
++		req->flags |= CF_WAKE_WRITE;
++		goto missing_data;
++	}
++
+ 	while (1) {
+ 		if (msg->msg_state == HTTP_MSG_DATA) {
+ 			/* must still forward */
+@@ -6194,6 +6200,12 @@ int http_response_forward_body(struct session *s, struct channel *res, int an_bi
+ 		}
+ 	}
+ 
++	if (res->to_forward) {
++		/* We can't process the buffer's contents yet */
++		res->flags |= CF_WAKE_WRITE;
++		goto missing_data;
++	}
++
+ 	if (unlikely(s->comp_algo != NULL) && msg->msg_state < HTTP_MSG_TRAILERS) {
+ 		/* We need a compression buffer in the DATA state to put the
+ 		 * output of compressed data, and in CRLF state to let the
+-- 
+1.8.3.2
+

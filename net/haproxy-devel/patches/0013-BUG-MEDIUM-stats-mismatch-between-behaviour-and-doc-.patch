@@ -1,0 +1,189 @@
+From ed2119c2fce3f2a1ae2c8b3162e1510ed8346adc Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Apr 2014 22:10:39 +0200
+Subject: [PATCH 13/17] BUG/MEDIUM: stats: mismatch between behaviour and doc
+ about front/back
+
+In version 1.3.4, we got the ability to split configuration parts between
+frontends and backends. The stats was attached to the backend and a control
+was made to ensure that it was used only in a listen or backend section, but
+not in a frontend.
+
+The documentation clearly says that the statement may only be used in the
+backend.
+
+But since that same version above, the defaults stats configuration is
+only filled in the frontend part of the proxy and not in the backend's.
+So a backend will not get stats which are enabled in a defaults section,
+despite what the doc says. However, a frontend configured after a defaults
+section will get stats and will not emit the warning!
+
+There were many technical limitations in 1.3.4 making it impossible to
+have the stats working both in the frontend and backend, but now this has
+become a total mess.
+
+It's common however to see people create a frontend with a perfectly
+working stats configuration which only emits a warning stating that it
+might not work, adding to the confusion. Most people workaround the tricky
+behaviour by declaring a "listen" section with no server, which was the
+recommended solution in 1.3 where it was even suggested to add a dispatch
+address to avoid a warning.
+
+So the right solution seems to do the following :
+
+  - ensure that the defaults section's settings apply to the backends,
+    as documented ;
+
+  - let the frontends work in order not to break existing setups relying
+    on the defaults section ;
+
+  - officially allow stats to be declared in frontends and remove the
+    warninng
+
+This patch should probably not be backported since it's not certain that
+1.4 is fully compatible with having stats in frontends and backends (which
+was really made possible thanks to applets).
+---
+ doc/configuration.txt | 25 +++++++++++++++----------
+ src/cfgparse.c        |  5 +----
+ 2 files changed, 16 insertions(+), 14 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 3c34349..3c245ab 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -5983,7 +5983,7 @@ srvtimeout <timeout> (deprecated)
+ stats admin { if | unless } <cond>
+   Enable statistics admin level if/unless a condition is matched
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 no    |    no    |   yes  |   yes
++                                 no    |    yes   |   yes  |   yes
+ 
+   This statement enables the statistics admin level if/unless a condition is
+   matched.
+@@ -6036,7 +6036,7 @@ stats admin { if | unless } <cond>
+ stats auth <user>:<passwd>
+   Enable statistics with authentication and grant access to an account
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments :
+     <user>    is a user name to grant access to
+ 
+@@ -6085,7 +6085,7 @@ stats auth <user>:<passwd>
+ stats enable
+   Enable statistics reporting with default settings
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments : none
+ 
+   This statement enables statistics reporting with default settings defined
+@@ -6123,7 +6123,7 @@ stats enable
+ stats hide-version
+   Enable statistics and hide HAProxy version reporting
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments : none
+ 
+   By default, the stats page reports some useful status information along with
+@@ -6182,7 +6182,7 @@ stats http-request { allow | deny | auth [realm <realm>] }
+ stats realm <realm>
+   Enable statistics and set authentication realm
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments :
+     <realm>   is the name of the HTTP Basic Authentication realm reported to
+               the browser. The browser uses it to display it in the pop-up
+@@ -6222,7 +6222,7 @@ stats realm <realm>
+ stats refresh <delay>
+   Enable statistics with automatic refresh
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments :
+     <delay>   is the suggested refresh delay, specified in seconds, which will
+               be returned to the browser consulting the report page. While the
+@@ -6264,7 +6264,7 @@ stats refresh <delay>
+ stats scope { <name> | "." }
+   Enable statistics and limit access scope
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments :
+     <name>    is the name of a listen, frontend or backend section to be
+               reported. The special name "." (a single dot) designates the
+@@ -6305,7 +6305,7 @@ stats scope { <name> | "." }
+ stats show-desc [ <desc> ]
+   Enable reporting of a description on the statistics page.
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+ 
+     <desc>    is an optional description to be reported. If unspecified, the
+               description from global section is automatically used instead.
+@@ -6330,6 +6330,11 @@ stats show-desc [ <desc> ]
+ 
+ 
+ stats show-legends
++  Enable reporting additional information on the statistics page
++  May be used in sections :   defaults | frontend | listen | backend
++                                 yes   |    yes   |   yes  |   yes
++  Arguments : none
++
+   Enable reporting additional information on the statistics page :
+     - cap: capabilities (proxy)
+     - mode: one of tcp, http or health (proxy)
+@@ -6347,7 +6352,7 @@ stats show-legends
+ stats show-node [ <name> ]
+   Enable reporting of a host name on the statistics page.
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments:
+     <name>    is an optional name to be reported. If unspecified, the
+               node name from global section is automatically used instead.
+@@ -6375,7 +6380,7 @@ stats show-node [ <name> ]
+ stats uri <prefix>
+   Enable statistics and define the URI prefix to access them
+   May be used in sections :   defaults | frontend | listen | backend
+-                                 yes   |    no    |   yes  |   yes
++                                 yes   |    yes   |   yes  |   yes
+   Arguments :
+     <prefix>  is the prefix of any URI which will be redirected to stats. This
+               prefix may contain a question mark ('?') to indicate part of a
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index c2c1886..19c5599 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1971,7 +1971,6 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			curproxy->timeout.tarpit = defproxy.timeout.tarpit;
+ 			curproxy->timeout.httpreq = defproxy.timeout.httpreq;
+ 			curproxy->timeout.httpka = defproxy.timeout.httpka;
+-			curproxy->uri_auth  = defproxy.uri_auth;
+ 			curproxy->mon_net = defproxy.mon_net;
+ 			curproxy->mon_mask = defproxy.mon_mask;
+ 			if (defproxy.monitor_uri)
+@@ -2007,6 +2006,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 		}
+ 
+ 		curproxy->mode = defproxy.mode;
++		curproxy->uri_auth = defproxy.uri_auth; /* for stats */
+ 
+ 		/* copy default logsrvs to curproxy */
+ 		list_for_each_entry(tmplogsrv, &defproxy.logsrvs, list) {
+@@ -3284,9 +3284,6 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			LIST_ADDQ(&curproxy->sticking_rules, &rule->list);
+ 	}
+ 	else if (!strcmp(args[0], "stats")) {
+-		if (warnifnotcap(curproxy, PR_CAP_BE, file, linenum, args[0], NULL))
+-			err_code |= ERR_WARN;
+-
+ 		if (curproxy != &defproxy && curproxy->uri_auth == defproxy.uri_auth)
+ 			curproxy->uri_auth = NULL; /* we must detach from the default config */
+ 
+-- 
+1.8.3.2
+

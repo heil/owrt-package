@@ -1,0 +1,31 @@
+From cce3648e89a39de997082acc49efa1fc9b80cd7e Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 24 Apr 2014 20:26:41 +0200
+Subject: [PATCH 10/17] BUILD: stats: let gcc know that last_fwd cannot be used
+ uninitialized...
+
+OK, for once it cannot easily know this one, and certain versions are
+emitting this harmless warning :
+
+  src/dumpstats.c: In function 'http_stats_io_handler':
+  src/dumpstats.c:4507:19: warning: 'last_fwd' may be used uninitialized in this function [-Wmaybe-uninitialized]
+---
+ src/dumpstats.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index b35a5a8..dd017e1 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -4462,7 +4462,7 @@ static void http_stats_io_handler(struct stream_interface *si)
+ 		unsigned int prev_len = si->ib->buf->i;
+ 		unsigned int data_len;
+ 		unsigned int last_len;
+-		unsigned int last_fwd;
++		unsigned int last_fwd = 0;
+ 
+ 		if (appctx->ctx.stats.flags & STAT_CHUNKED) {
+ 			/* One difficulty we're facing is that we must prevent
+-- 
+1.8.3.2
+
