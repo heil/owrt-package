@@ -1,0 +1,92 @@
+From 353bc9f43f428f23cf90230cfcf5d7b08522a973 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 22:05:31 +0200
+Subject: [PATCH 14/23] CLEANUP: proxy: rename "block_cond" to "block_rules"
+
+Next patch will make them real rules, not only conditions. This separate
+patch makes the next one more readable.
+---
+ include/types/proxy.h | 2 +-
+ src/cfgparse.c        | 4 ++--
+ src/haproxy.c         | 2 +-
+ src/proto_http.c      | 2 +-
+ src/proxy.c           | 2 +-
+ 5 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/include/types/proxy.h b/include/types/proxy.h
+index 4c0c660..cf277fd 100644
+--- a/include/types/proxy.h
++++ b/include/types/proxy.h
+@@ -228,7 +228,7 @@ struct proxy {
+ 	struct list acl;                        /* ACL declared on this proxy */
+ 	struct list http_req_rules;		/* HTTP request rules: allow/deny/... */
+ 	struct list http_res_rules;		/* HTTP response rules: allow/deny/... */
+-	struct list block_cond;                 /* early blocking conditions (chained) */
++	struct list block_rules;                /* http-request block rules to be inserted before other ones */
+ 	struct list redirect_rules;             /* content redirecting rules (chained) */
+ 	struct list switching_rules;            /* content switching rules (chained) */
+ 	struct list persist_rules;		/* 'force-persist' and 'ignore-persist' rules (chained) */
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 7a869e3..923f2e4 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -312,7 +312,7 @@ int str2listener(char *str, struct proxy *curproxy, struct bind_conf *bind_conf,
+  */
+ int warnif_rule_after_block(struct proxy *proxy, const char *file, int line, const char *arg)
+ {
+-	if (!LIST_ISEMPTY(&proxy->block_cond)) {
++	if (!LIST_ISEMPTY(&proxy->block_rules)) {
+ 		Warning("parsing [%s:%d] : a '%s' rule placed after a 'block' rule will still be processed before.\n",
+ 			file, line, arg);
+ 		return 1;
+@@ -2894,7 +2894,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 			goto out;
+ 		}
+ 
+-		LIST_ADDQ(&curproxy->block_cond, &cond->list);
++		LIST_ADDQ(&curproxy->block_rules, &cond->list);
+ 		warnif_misplaced_block(curproxy, file, linenum, args[0]);
+ 	}
+ 	else if (!strcmp(args[0], "redirect")) {
+diff --git a/src/haproxy.c b/src/haproxy.c
+index ed2ff21..9e0f33f 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -1016,7 +1016,7 @@ void deinit(void)
+ 			free(cwl);
+ 		}
+ 
+-		list_for_each_entry_safe(cond, condb, &p->block_cond, list) {
++		list_for_each_entry_safe(cond, condb, &p->block_rules, list) {
+ 			LIST_DEL(&cond->list);
+ 			prune_acl_cond(cond);
+ 			free(cond);
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 875cedc..14b0835 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3838,7 +3838,7 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 	session_inc_be_http_req_ctr(s);
+ 
+ 	/* first check whether we have some ACLs set to block this request */
+-	list_for_each_entry(cond, &px->block_cond, list) {
++	list_for_each_entry(cond, &px->block_rules, list) {
+ 		int ret = acl_exec_cond(cond, px, s, txn, SMP_OPT_DIR_REQ|SMP_OPT_FINAL);
+ 
+ 		ret = acl_pass(ret);
+diff --git a/src/proxy.c b/src/proxy.c
+index c8b815e..ee7ffd7 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -506,7 +506,7 @@ void init_new_proxy(struct proxy *p)
+ 	LIST_INIT(&p->acl);
+ 	LIST_INIT(&p->http_req_rules);
+ 	LIST_INIT(&p->http_res_rules);
+-	LIST_INIT(&p->block_cond);
++	LIST_INIT(&p->block_rules);
+ 	LIST_INIT(&p->redirect_rules);
+ 	LIST_INIT(&p->mon_fail_cond);
+ 	LIST_INIT(&p->switching_rules);
+-- 
+1.8.3.2
+

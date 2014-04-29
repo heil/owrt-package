@@ -1,0 +1,44 @@
+From 65410831a1697790aa7df37c1ab58b693edb4577 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 21:25:43 +0200
+Subject: [PATCH 10/23] BUG/MINOR: http: block rules forgot to increment the
+ session's request counter
+
+The session's backend request counters were incremented after the block
+rules while these rules could increment the session's error counters,
+meaning that we could have more errors than requests reported in a stick
+table! Commit 5d5b5d8 ("MEDIUM: proto_tcp: add support for tracking L7
+information") is the most responsible for this.
+
+This bug is 1.5-specific and does not need any backport.
+---
+ src/proto_http.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index c5f6ecb..241dc52 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3769,6 +3769,9 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 		req->buf->i,
+ 		req->analysers);
+ 
++	/* just in case we have some per-backend tracking */
++	session_inc_be_http_req_ctr(s);
++
+ 	/* first check whether we have some ACLs set to block this request */
+ 	list_for_each_entry(cond, &px->block_cond, list) {
+ 		int ret = acl_exec_cond(cond, px, s, txn, SMP_OPT_DIR_REQ|SMP_OPT_FINAL);
+@@ -3781,9 +3784,6 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 			goto deny;
+ 	}
+ 
+-	/* just in case we have some per-backend tracking */
+-	session_inc_be_http_req_ctr(s);
+-
+ 	/* evaluate http-request rules */
+ 	http_req_last_rule = http_req_get_intercept_rule(px, &px->http_req_rules, s, txn);
+ 
+-- 
+1.8.3.2
+

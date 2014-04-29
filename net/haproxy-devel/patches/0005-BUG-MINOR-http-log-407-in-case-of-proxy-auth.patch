@@ -1,0 +1,31 @@
+From e6d24163e5cbe4fd884be97bc2ab40dfba540e4c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 16:59:15 +0200
+Subject: [PATCH 05/23] BUG/MINOR: http: log 407 in case of proxy auth
+
+Commit 844a7e7 ("[MEDIUM] http: add support for proxy authentication")
+merged in v1.4-rc1 added the ability to emit a status code 407 in auth
+responses, but forgot to set the same status in the logs, which still
+contain 401.
+
+The bug is harmless, no backport is needed.
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 27693ac..6f6bb0d 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3953,7 +3953,7 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 			realm = (objt_applet(s->target) == &http_stats_applet) ? STATS_DEFAULT_REALM : px->id;
+ 
+ 		chunk_printf(&trash, (txn->flags & TX_USE_PX_CONN) ? HTTP_407_fmt : HTTP_401_fmt, realm);
+-		txn->status = 401;
++		txn->status = (txn->flags & TX_USE_PX_CONN) ? 407 : 401;
+ 		stream_int_retnclose(req->prod, &trash);
+ 		/* on 401 we still count one error, because normal browsing
+ 		 * won't significantly increase the counter but brute force
+-- 
+1.8.3.2
+

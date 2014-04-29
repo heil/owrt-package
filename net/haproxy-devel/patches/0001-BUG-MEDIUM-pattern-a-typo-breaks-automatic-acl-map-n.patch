@@ -1,0 +1,38 @@
+From 3b786968584b57659e86964739283b55acfc49da Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 26 Apr 2014 12:37:25 +0200
+Subject: [PATCH 01/23] BUG/MEDIUM: pattern: a typo breaks automatic acl/map
+ numbering
+
+Dmitry Sivachenko reported that nice warning :
+src/pattern.c:2243:43: warning: if statement has empty body [-Wempty-body]
+                                if (&ref2->list == &pattern_reference);
+                                                                      ^
+src/pattern.c:2243:43: note: put the semicolon on a separate line to silence
+      this warning
+
+It was merged as is with the code from commit af5a29d ("MINOR: pattern:
+Each pattern is identified by unique id").
+
+So it looks like we can reassign an ID which is still in use because of
+this.
+---
+ src/pattern.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/pattern.c b/src/pattern.c
+index 16aa09f..5ebb5ce 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -2240,7 +2240,7 @@ void pattern_finalize_config(void)
+ 						break;
+ 					}
+ 				}
+-				if (&ref2->list == &pattern_reference);
++				if (&ref2->list == &pattern_reference)
+ 					break;
+ 			}
+ 
+-- 
+1.8.3.2
+

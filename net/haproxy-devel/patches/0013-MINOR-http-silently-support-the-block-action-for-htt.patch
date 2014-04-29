@@ -1,0 +1,27 @@
+From 5bd6759a1931e416ee8f681871233312d893168b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 22:00:46 +0200
+Subject: [PATCH 13/23] MINOR: http: silently support the "block" action for
+ http-request
+
+This one will be used to convert "block" rules into "http-request block".
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 9632b27..875cedc 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8695,7 +8695,7 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 	if (!strcmp(args[0], "allow")) {
+ 		rule->action = HTTP_REQ_ACT_ALLOW;
+ 		cur_arg = 1;
+-	} else if (!strcmp(args[0], "deny")) {
++	} else if (!strcmp(args[0], "deny") || !strcmp(args[0], "block")) {
+ 		rule->action = HTTP_REQ_ACT_DENY;
+ 		cur_arg = 1;
+ 	} else if (!strcmp(args[0], "tarpit")) {
+-- 
+1.8.3.2
+

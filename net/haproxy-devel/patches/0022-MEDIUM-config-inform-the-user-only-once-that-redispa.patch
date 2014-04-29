@@ -1,0 +1,42 @@
+From a3c504c032614ee65af434e41c08ebe46855ebd8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 22:37:32 +0200
+Subject: [PATCH 22/23] MEDIUM: config: inform the user only once that
+ "redispatch" is deprecated
+
+It may go away in 1.6, but there's no point reporting it for each and
+every occurrence.
+---
+ include/types/global.h | 1 +
+ src/cfgparse.c         | 3 ++-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/include/types/global.h b/include/types/global.h
+index eff4ed3..82a8e9d 100644
+--- a/include/types/global.h
++++ b/include/types/global.h
+@@ -175,6 +175,7 @@ extern unsigned int warned;     /* bitfield of a few warnings to emit just once
+ /* bit values to go with "warned" above */
+ #define WARN_BLOCK_DEPRECATED       0x00000001
+ #define WARN_REQSETBE_DEPRECATED    0x00000002
++#define WARN_REDISPATCH_DEPRECATED  0x00000004
+ 
+ /* to be used with warned and WARN_* */
+ static inline int already_warned(unsigned int warning)
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 7356408..6ac3ccc 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -4062,7 +4062,8 @@ stats_error_parsing:
+ 		if (warnifnotcap(curproxy, PR_CAP_BE, file, linenum, args[0], NULL))
+ 			err_code |= ERR_WARN;
+ 
+-		Warning("parsing [%s:%d]: keyword '%s' is deprecated, please use 'option redispatch' instead.\n",
++		if (!already_warned(WARN_REDISPATCH_DEPRECATED))
++			Warning("parsing [%s:%d]: keyword '%s' is deprecated in favor of 'option redispatch', and will not be supported by future versions.\n",
+ 				file, linenum, args[0]);
+ 		err_code |= ERR_WARN;
+ 		/* enable reconnections to dispatch */
+-- 
+1.8.3.2
+

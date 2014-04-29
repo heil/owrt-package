@@ -1,0 +1,63 @@
+From 5e9edce0f009bb92ac746052dd3f6d271a77d34b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 11:13:33 +0200
+Subject: [PATCH 07/23] MEDIUM: http: move reqadd after execution of
+ http_request redirect
+
+We still have a plate of spaghetti in the request processing rules.
+All http-request rules are executed at once, then some responses are
+built interlaced with other rules that used to be there in the past.
+Here, reqadd is executed after an http-req redirect rule is *decided*,
+but before it is *executed*.
+
+So let's match the doc and config checks, to put the redirect actually
+before the reqadd completely.
+---
+ src/proto_http.c | 24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index a4470c4..b233fd9 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3949,6 +3949,18 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 		goto return_prx_cond;
+ 	}
+ 
++	if (http_req_last_rule && http_req_last_rule->action == HTTP_REQ_ACT_REDIR) {
++		if (!http_apply_redirect_rule(http_req_last_rule->arg.redir, s, txn))
++			goto return_bad_req;
++		req->analyse_exp = TICK_ETERNITY;
++		return 1;
++	}
++
++	if (http_req_last_rule && http_req_last_rule->action == HTTP_REQ_ACT_CUSTOM_STOP) {
++		req->analyse_exp = TICK_ETERNITY;
++		return 1;
++	}
++
+ 	/* add request headers from the rule sets in the same order */
+ 	list_for_each_entry(wl, &px->req_add, list) {
+ 		if (wl->cond) {
+@@ -3964,18 +3976,6 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit,
+ 			goto return_bad_req;
+ 	}
+ 
+-	if (http_req_last_rule && http_req_last_rule->action == HTTP_REQ_ACT_REDIR) {
+-		if (!http_apply_redirect_rule(http_req_last_rule->arg.redir, s, txn))
+-			goto return_bad_req;
+-		req->analyse_exp = TICK_ETERNITY;
+-		return 1;
+-	}
+-
+-	if (http_req_last_rule && http_req_last_rule->action == HTTP_REQ_ACT_CUSTOM_STOP) {
+-		req->analyse_exp = TICK_ETERNITY;
+-		return 1;
+-	}
+-
+ 	if (unlikely(objt_applet(s->target) == &http_stats_applet)) {
+ 		/* process the stats request now */
+ 		if (s->fe == s->be) /* report it if the request was intercepted by the frontend */
+-- 
+1.8.3.2
+

@@ -1,0 +1,43 @@
+From f767ac55a2b666b70835e621e835f19743d026d1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 28 Apr 2014 16:13:51 +0200
+Subject: [PATCH 04/23] BUG/MINOR: proxy: unsafe initialization of HTTP
+ transaction when switching from TCP frontend
+
+A switch from a TCP frontend to an HTTP backend initializes the HTTP
+transaction. txn->hdr_idx.size is used by hdr_idx_init() but not
+necessarily initialized yet here, because the first call to hdr_idx_init()
+is in fact placed in http_init_txn(). Moving it before the call is
+enough to fix it. We also remove the useless extra confusing call
+to hdr_idx_init().
+
+The bug was introduced in 1.5-dev8 with commit ac1932d ("MEDIUM:
+tune.http.maxhdr makes it possible to configure the maximum number
+of HTTP headers"). No backport to stable is needed.
+---
+ src/proxy.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/proxy.c b/src/proxy.c
+index fb1a3b4..c8b815e 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -925,14 +925,12 @@ int session_set_backend(struct session *s, struct proxy *be)
+ 	 * a struct hdr_idx for it if we did not have one.
+ 	 */
+ 	if (unlikely(!s->txn.hdr_idx.v && be->http_needed)) {
++		s->txn.hdr_idx.size = global.tune.max_http_hdr;
+ 		if ((s->txn.hdr_idx.v = pool_alloc2(pool2_hdr_idx)) == NULL)
+ 			return 0; /* not enough memory */
+ 
+ 		/* and now initialize the HTTP transaction state */
+ 		http_init_txn(s);
+-
+-		s->txn.hdr_idx.size = global.tune.max_http_hdr;
+-		hdr_idx_init(&s->txn.hdr_idx);
+ 	}
+ 
+ 	/* If an LB algorithm needs to access some pre-parsed body contents,
+-- 
+1.8.3.2
+
