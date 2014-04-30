@@ -1,0 +1,120 @@
+From 644c101e2ddf956b3949e7142771f156159876eb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 30 Apr 2014 18:11:11 +0200
+Subject: [PATCH 26/26] BUG/MAJOR: http: connection setup may stall on balance
+ url_param
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On the mailing list, seri0528@naver.com reported an issue when
+using balance url_param or balance uri. The request would sometimes
+stall forever.
+
+Cyril Bonté managed to reproduce it with the configuration below :
+
+  listen test :80
+    mode http
+    balance url_param q
+    hash-type consistent
+    server s demo.1wt.eu:80
+
+and found it appeared with this commit : 80a92c0 ("BUG/MEDIUM: http:
+don't start to forward request data before the connect").
+
+The bug is subtle but real. The problem is that the HTTP request
+forwarding analyzer refrains from starting to parse the request
+body when some LB algorithms might need the body contents, in order
+to preserve the data pointer and avoid moving things around during
+analysis in case a redispatch is later needed. And in order to detect
+that the connection establishes, it watches the response channel's
+CF_READ_ATTACHED flag.
+
+The problem is that a request analyzer is not subscribed to a response
+channel, so it will only see changes when woken for other (generally
+correlated) reasons, such as the fact that part of the request could
+be sent. And since the CF_READ_ATTACHED flag is cleared once leaving
+process_session(), it is important not to miss it. It simply happens
+that sometimes the server starts to respond in a sequence that validates
+the connection in the middle of process_session(), that it is detected
+after the analysers, and that the newly assigned CF_READ_ATTACHED is
+not used to detect that the request analysers need to be called again,
+then the flag is lost.
+
+The CF_WAKE_WRITE flag doesn't work either because it's cleared upon
+entry into process_session(), ie if we spend more than one call not
+connecting.
+
+Thus we need a new flag to tell the connection initiator that we are
+specifically interested in being notified about connection establishment.
+This new flag is CF_WAKE_CONNECT. It is set by the requester, and is
+cleared once the connection succeeds, where CF_WAKE_ONCE is set instead,
+causing the request analysers to be scanned again.
+
+For future versions, some better options will have to be considered :
+  - let all analysers subscribe to both request and response events ;
+  - let analysers subscribe to stream interface events (reduces number
+    of useless calls)
+  - change CF_WAKE_WRITE's semantics to persist across calls to
+    process_session(), but that is different from validating a
+    connection establishment (eg: no data sent, or no data to send)
+
+The bug was introduced in 1.5-dev23, no backport is needed.
+---
+ include/types/channel.h | 2 +-
+ src/proto_http.c        | 3 ++-
+ src/session.c           | 4 ++++
+ 3 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/include/types/channel.h b/include/types/channel.h
+index 2eea3e8..88a52a4 100644
+--- a/include/types/channel.h
++++ b/include/types/channel.h
+@@ -59,7 +59,7 @@
+ #define CF_READ_ERROR     0x00000008  /* unrecoverable error on producer side */
+ #define CF_READ_ACTIVITY  (CF_READ_NULL|CF_READ_PARTIAL|CF_READ_ERROR)
+ 
+-/* unused: 0x00000010 */
++#define CF_WAKE_CONNECT   0x00000010  /* wake the task up after connect succeeds */
+ #define CF_SHUTR          0x00000020  /* producer has already shut down */
+ #define CF_SHUTR_NOW      0x00000040  /* the producer must shut down for reads ASAP */
+ #define CF_READ_NOEXP     0x00000080  /* producer should not expire */
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 1953caa..2febda4 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -4754,7 +4754,7 @@ void http_end_txn_clean_session(struct session *s)
+ 	s->req->cons->conn_retries = 0;  /* used for logging too */
+ 	s->req->cons->exp       = TICK_ETERNITY;
+ 	s->req->cons->flags    &= SI_FL_DONT_WAKE; /* we're in the context of process_session */
+-	s->req->flags &= ~(CF_SHUTW|CF_SHUTW_NOW|CF_AUTO_CONNECT|CF_WRITE_ERROR|CF_STREAMER|CF_STREAMER_FAST|CF_NEVER_WAIT);
++	s->req->flags &= ~(CF_SHUTW|CF_SHUTW_NOW|CF_AUTO_CONNECT|CF_WRITE_ERROR|CF_STREAMER|CF_STREAMER_FAST|CF_NEVER_WAIT|CF_WAKE_CONNECT);
+ 	s->rep->flags &= ~(CF_SHUTR|CF_SHUTR_NOW|CF_READ_ATTACHED|CF_READ_ERROR|CF_READ_NOEXP|CF_STREAMER|CF_STREAMER_FAST|CF_WRITE_PARTIAL|CF_NEVER_WAIT);
+ 	s->flags &= ~(SN_DIRECT|SN_ASSIGNED|SN_ADDR_SET|SN_BE_ASSIGNED|SN_FORCE_PRST|SN_IGNORE_PRST);
+ 	s->flags &= ~(SN_CURR_SESS|SN_REDIRECTABLE|SN_SRV_REUSED);
+@@ -5213,6 +5213,7 @@ int http_request_forward_body(struct session *s, struct channel *req, int an_bit
+ 	if (unlikely(msg->flags & HTTP_MSGF_WAIT_CONN)) {
+ 		if (!(s->rep->flags & CF_READ_ATTACHED)) {
+ 			channel_auto_connect(req);
++			req->flags |= CF_WAKE_CONNECT;
+ 			goto missing_data;
+ 		}
+ 		msg->flags &= ~HTTP_MSGF_WAIT_CONN;
+diff --git a/src/session.c b/src/session.c
+index dc72ba5..0824167 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -932,6 +932,10 @@ static void sess_establish(struct session *s, struct stream_interface *si)
+ 
+ 	rep->analysers |= s->fe->fe_rsp_ana | s->be->be_rsp_ana;
+ 	rep->flags |= CF_READ_ATTACHED; /* producer is now attached */
++	if (req->flags & CF_WAKE_CONNECT) {
++		req->flags |= CF_WAKE_ONCE;
++		req->flags &= ~CF_WAKE_CONNECT;
++	}
+ 	if (objt_conn(si->end)) {
+ 		/* real connections have timeouts */
+ 		req->wto = s->be->timeout.server;
+-- 
+1.8.3.2
+
