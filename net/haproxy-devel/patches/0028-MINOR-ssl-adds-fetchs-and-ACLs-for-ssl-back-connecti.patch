@@ -1,0 +1,241 @@
+From 645ae79b40dd6c05652a552959da0fe8c75e2117 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Wed, 30 Apr 2014 14:21:06 +0200
+Subject: [PATCH 28/32] MINOR: ssl: adds fetchs and ACLs for ssl back
+ connection.
+
+Adds ssl fetchs and ACLs for outgoinf SSL/Transport layer connection with their
+docs:
+ssl_bc, ssl_bc_alg_keysize, ssl_bc_cipher, ssl_bc_protocol, ssl_bc_unique_id,
+ssl_bc_session_id and ssl_bc_use_keysize.
+---
+ doc/configuration.txt | 31 +++++++++++++++++++++++++++++
+ src/ssl_sock.c        | 54 +++++++++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 77 insertions(+), 8 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index ac004e7..0cfb819 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -10279,6 +10279,37 @@ when no content is yet made available. The fetch methods described here are
+ usable as low as the "tcp-request content" rule sets unless they require some
+ future information. Those generally include the results of SSL negotiations.
+ 
++ssl_bc : boolean
++  Returns true when the back connection was made via an SSL/TLS transport
++  layer and is locally deciphered. This means the outgoing connection was made
++  other a server with the "ssl" option.
++
++ssl_bc_alg_keysize : integer
++  Returns the symmetric cipher key size supported in bits when the outgoing
++  connection was made over an SSL/TLS transport layer.
++
++ssl_bc_cipher : string
++  Returns the name of the used cipher when the outgoing connection was made
++  over an SSL/TLS transport layer.
++
++ssl_bc_protocol : string
++  Returns the name of the used protocol when the outgoing connection was made
++  over an SSL/TLS transport layer.
++
++ssl_bc_unique_id : string
++  When the outgoing connection was made over an SSL/TLS transport layer,
++  returns a base64 encoded string containing the TLS unique ID as defined
++  in RFC5929 section 3.
++
++ssl_bc_session_id : binary
++  Returns the SSL ID of the back connection when the outgoing connection was
++  made over an SSL/TLS transport layer. It is useful to log if we want to know
++  if session was reused or not.
++
++ssl_bc_use_keysize : integer
++  Returns the symmetric cipher key size used in bits when the outgoing
++  connection was made over an SSL/TLS transport layer.
++
+ ssl_c_ca_err : integer
+   When the incoming connection was made over an SSL/TLS transport layer,
+   returns the ID of the first error detected during verification of the client
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 6acc934..9509d4f 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -2318,12 +2318,16 @@ smp_fetch_ssl_c_key_alg(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	return 1;
+ }
+ 
+-/* boolean, returns true if front conn. transport layer is SSL */
++/* boolean, returns true if front conn. transport layer is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                  const struct arg *args, struct sample *smp, const char *kw)
+ {
+-	struct connection *conn = objt_conn(l4->si[0].end);
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
++	struct connection *conn = objt_conn(l4->si[back_conn].end);
+ 
+ 	smp->type = SMP_T_BOOL;
+ 	smp->data.uint = (conn && conn->xprt == &ssl_sock);
+@@ -2671,10 +2675,15 @@ out:
+ 	return ret;
+ }
+ 
++/* string, returns the used cipher if front conn. transport layer is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc_cipher(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                         const struct arg *args, struct sample *smp, const char *kw)
+ {
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	struct connection *conn;
+ 
+ 	smp->flags = 0;
+@@ -2682,7 +2691,7 @@ smp_fetch_ssl_fc_cipher(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	if (!l4)
+ 		return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -2697,10 +2706,16 @@ smp_fetch_ssl_fc_cipher(struct proxy *px, struct session *l4, void *l7, unsigned
+ 	return 1;
+ }
+ 
++/* integer, returns the algoritm's keysize if front conn. transport layer
++ * is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc_alg_keysize(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                              const struct arg *args, struct sample *smp, const char *kw)
+ {
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	struct connection *conn;
+ 
+ 	smp->flags = 0;
+@@ -2708,7 +2723,7 @@ smp_fetch_ssl_fc_alg_keysize(struct proxy *px, struct session *l4, void *l7, uns
+ 	if (!l4)
+ 		return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -2720,10 +2735,15 @@ smp_fetch_ssl_fc_alg_keysize(struct proxy *px, struct session *l4, void *l7, uns
+ 	return 1;
+ }
+ 
++/* integer, returns the used keysize if front conn. transport layer is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc_use_keysize(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                              const struct arg *args, struct sample *smp, const char *kw)
+ {
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	struct connection *conn;
+ 
+ 	smp->flags = 0;
+@@ -2731,7 +2751,7 @@ smp_fetch_ssl_fc_use_keysize(struct proxy *px, struct session *l4, void *l7, uns
+ 	if (!l4)
+ 		return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -2800,10 +2820,15 @@ smp_fetch_ssl_fc_alpn(struct proxy *px, struct session *l4, void *l7, unsigned i
+ }
+ #endif
+ 
++/* string, returns the used protocol if front conn. transport layer is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc_protocol(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                           const struct arg *args, struct sample *smp, const char *kw)
+ {
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	struct connection *conn;
+ 
+ 	smp->flags = 0;
+@@ -2811,7 +2836,7 @@ smp_fetch_ssl_fc_protocol(struct proxy *px, struct session *l4, void *l7, unsign
+ 	if (!l4)
+ 		return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -2826,11 +2851,16 @@ smp_fetch_ssl_fc_protocol(struct proxy *px, struct session *l4, void *l7, unsign
+ 	return 1;
+ }
+ 
++/* binary, returns the SSL session id if front conn. transport layer is SSL.
++ * This function is also usable on backend conn if the fetch keyword 5th
++ * char is 'b'.
++ */
+ static int
+ smp_fetch_ssl_fc_session_id(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                             const struct arg *args, struct sample *smp, const char *kw)
+ {
+ #if OPENSSL_VERSION_NUMBER > 0x0090800fL
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	SSL_SESSION *sess;
+ 	struct connection *conn;
+ 
+@@ -2840,7 +2870,7 @@ smp_fetch_ssl_fc_session_id(struct proxy *px, struct session *l4, void *l7, unsi
+ 	if (!l4)
+ 		return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -2891,6 +2921,7 @@ smp_fetch_ssl_fc_unique_id(struct proxy *px, struct session *l4, void *l7, unsig
+                           const struct arg *args, struct sample *smp, const char *kw)
+ {
+ #if OPENSSL_VERSION_NUMBER > 0x0090800fL
++	int back_conn = (kw[4] == 'b') ? 1 : 0;
+ 	struct connection *conn;
+ 	int finished_len;
+ 	int b64_len;
+@@ -2902,7 +2933,7 @@ smp_fetch_ssl_fc_unique_id(struct proxy *px, struct session *l4, void *l7, unsig
+ 	if (!l4)
+ 	        return 0;
+ 
+-	conn = objt_conn(l4->si[0].end);
++	conn = objt_conn(l4->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -3629,6 +3660,13 @@ static int srv_parse_verifyhost(char **args, int *cur_arg, struct proxy *px, str
+  * Please take care of keeping this list alphabetically sorted.
+  */
+ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
++	{ "ssl_bc",                 smp_fetch_ssl_fc,             0,                   NULL,    SMP_T_BOOL, SMP_USE_L5SRV },
++	{ "ssl_bc_alg_keysize",     smp_fetch_ssl_fc_alg_keysize, 0,                   NULL,    SMP_T_UINT, SMP_USE_L5SRV },
++	{ "ssl_bc_cipher",          smp_fetch_ssl_fc_cipher,      0,                   NULL,    SMP_T_STR,  SMP_USE_L5SRV },
++	{ "ssl_bc_protocol",        smp_fetch_ssl_fc_protocol,    0,                   NULL,    SMP_T_STR,  SMP_USE_L5SRV },
++	{ "ssl_bc_unique_id",       smp_fetch_ssl_fc_unique_id,   0,                   NULL,    SMP_T_STR,  SMP_USE_L5SRV },
++	{ "ssl_bc_use_keysize",     smp_fetch_ssl_fc_use_keysize, 0,                   NULL,    SMP_T_UINT, SMP_USE_L5SRV },
++	{ "ssl_bc_session_id",      smp_fetch_ssl_fc_session_id,  0,                   NULL,    SMP_T_BIN,  SMP_USE_L5SRV },
+ 	{ "ssl_c_ca_err",           smp_fetch_ssl_c_ca_err,       0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+ 	{ "ssl_c_ca_err_depth",     smp_fetch_ssl_c_ca_err_depth, 0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+ 	{ "ssl_c_err",              smp_fetch_ssl_c_err,          0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+-- 
+1.8.3.2
+

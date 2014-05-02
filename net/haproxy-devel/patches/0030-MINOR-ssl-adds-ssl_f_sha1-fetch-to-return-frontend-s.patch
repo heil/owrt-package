@@ -1,0 +1,46 @@
+From 55f4fa8825ab9d80ca1ad10bfbf8de88fa7538e3 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Wed, 30 Apr 2014 17:11:25 +0200
+Subject: [PATCH 30/32] MINOR: ssl: adds ssl_f_sha1 fetch to return frontend's
+ certificate fingerprint
+
+ssl_f_sha1 is a binary binary fetch used to returns the SHA-1 fingerprint of
+the certificate presented by the frontend when the incoming connection was
+made over an SSL/TLS transport layer. This can be used to know which
+certificate was chosen using SNI.
+---
+ doc/configuration.txt | 5 +++++
+ src/ssl_sock.c        | 1 +
+ 2 files changed, 6 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 0cfb819..8c2c0b0 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -10434,6 +10434,11 @@ ssl_f_serial : binary
+   incoming connection was made over an SSL/TLS transport layer. When used for
+   an ACL, the value(s) to match against can be passed in hexadecimal form.
+ 
++ssl_f_sha1 : binary
++  Returns the SHA-1 fingerprint of the certificate presented by the frontend
++  when the incoming connection was made over an SSL/TLS transport layer. This
++  can be used to know which certificate was chosen using SNI.
++
+ ssl_f_sig_alg : string
+   Returns the name of the algorithm used to sign the certificate presented by
+   the frontend when the incoming connection was made over an SSL/TLS transport
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index e88024d..19ede39 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -3435,6 +3435,7 @@ static struct sample_fetch_kw_list sample_fetch_keywords = {ILH, {
+ 	{ "ssl_f_sig_alg",          smp_fetch_ssl_x_sig_alg,      0,                   NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+ 	{ "ssl_f_s_dn",             smp_fetch_ssl_x_s_dn,         ARG2(0,STR,SINT),    NULL,    SMP_T_STR,  SMP_USE_L5CLI },
+ 	{ "ssl_f_serial",           smp_fetch_ssl_x_serial,       0,                   NULL,    SMP_T_BIN,  SMP_USE_L5CLI },
++	{ "ssl_f_sha1",             smp_fetch_ssl_x_sha1,         0,                   NULL,    SMP_T_BIN,  SMP_USE_L5CLI },
+ 	{ "ssl_f_version",          smp_fetch_ssl_x_version,      0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+ 	{ "ssl_fc",                 smp_fetch_ssl_fc,             0,                   NULL,    SMP_T_BOOL, SMP_USE_L5CLI },
+ 	{ "ssl_fc_alg_keysize",     smp_fetch_ssl_fc_alg_keysize, 0,                   NULL,    SMP_T_UINT, SMP_USE_L5CLI },
+-- 
+1.8.3.2
+
