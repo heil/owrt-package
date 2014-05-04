@@ -1,0 +1,46 @@
+From 07c8b24edb883fd8bf17ebdaffdb9d6a69ece04f Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Fri, 2 May 2014 17:11:07 +0200
+Subject: [PATCH 33/33] MINOR: http: export the smp_fetch_cookie function
+
+Remove the static attribute of smp_fetch_cookie, and declare the
+function in proto/proto_http.h for future use.
+---
+ include/proto/proto_http.h | 2 ++
+ src/proto_http.c           | 6 +++---
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 065a0ea..6370e2d 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -119,6 +119,8 @@ void free_http_req_rules(struct list *r);
+ struct chunk *http_error_message(struct session *s, int msgnum);
+ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, struct proxy *curproxy,
+                                                const char **args, char **errmsg, int use_fmt);
++int smp_fetch_cookie(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++                 const struct arg *args, struct sample *smp, const char *kw);
+ 
+ enum http_meth_t find_http_meth(const char *str, const int len);
+ 
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 2febda4..24c7cf8 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -10539,10 +10539,10 @@ smp_fetch_capture_res_ver(struct proxy *px, struct session *l4, void *l7, unsign
+  * The cookie name is in args and the name length in args->data.str.len.
+  * Accepts exactly 1 argument of type string. If the input options indicate
+  * that no iterating is desired, then only last value is fetched if any.
+- * The returned sample is of type CSTR.
++ * The returned sample is of type CSTR. Can be used to parse cookies in other
++ * files.
+  */
+-static int
+-smp_fetch_cookie(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++int smp_fetch_cookie(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                  const struct arg *args, struct sample *smp, const char *kw)
+ {
+ 	struct http_txn *txn = l7;
+-- 
+1.8.1.5
+
