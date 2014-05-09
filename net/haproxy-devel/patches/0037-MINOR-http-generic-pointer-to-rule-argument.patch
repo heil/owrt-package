@@ -1,0 +1,34 @@
+From 2a83111cee659ecc8c7956fc39097d33876b7a6e Mon Sep 17 00:00:00 2001
+From: William Lallemand <wlallemand@exceliance.fr>
+Date: Tue, 6 May 2014 18:43:27 +0200
+Subject: [PATCH 37/45] MINOR: http: generic pointer to rule argument
+
+Add a void *data which can be used as a generic storage for rule
+arguments.
+---
+ include/types/proto_http.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index 50e6a92..e1d04d6 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -431,6 +431,7 @@ struct http_req_rule {
+ 		int loglevel;                  /* log-level value for HTTP_REQ_ACT_SET_LOGL */
+ 		int tos;                       /* tos value for HTTP_REQ_ACT_SET_TOS */
+ 		int mark;                      /* nfmark value for HTTP_REQ_ACT_SET_MARK */
++		void *data;                    /* generic pointer for module or external rule */
+ 		struct {
+ 			char *ref;             /* MAP or ACL file name to update */
+ 			struct list key;       /* pattern to retrieve MAP or ACL key */
+@@ -454,6 +455,7 @@ struct http_res_rule {
+ 		int loglevel;                  /* log-level value for HTTP_RES_ACT_SET_LOGL */
+ 		int tos;                       /* tos value for HTTP_RES_ACT_SET_TOS */
+ 		int mark;                      /* nfmark value for HTTP_RES_ACT_SET_MARK */
++		void *data;                    /* generic pointer for module or external rule */
+ 		struct {
+ 			char *ref;             /* MAP or ACL file name to update */
+ 			struct list key;       /* pattern to retrieve MAP or ACL key */
+-- 
+1.8.3.2
+

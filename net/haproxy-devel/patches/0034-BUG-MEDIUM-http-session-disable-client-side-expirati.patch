@@ -1,0 +1,101 @@
+From b1982e27aaff2a92a389a9f1bc847e3bb8fdb4f2 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 6 May 2014 22:57:53 +0200
+Subject: [PATCH 34/45] BUG/MEDIUM: http/session: disable client-side
+ expiration only after body
+
+For a very long time, back in the v1.3 days, we used to rely on a trick
+to avoid expiring the client side while transferring a payload to the
+server. The problem was that if a client was able to quickly fill the
+buffers, and these buffers took some time to reach the server, the
+client should not expire while not sending anything.
+
+In order to cover this situation, the client-side timeout was disabled
+once the connection to the server was OK, since it implied that we would
+at least expire on the server if required.
+
+But there is a drawback to this : if a client stops uploading data before
+the end, its timeout is not enforced and we only expire on the server's
+timeout, so the logs report a 504.
+
+Since 1.4, we have message body analysers which ensure that we know whether
+all the expected data was received or not (HTTP_MSG_DATA or HTTP_MSG_DONE).
+So we can fix this problem by disabling the client-side or server-side
+timeout at the end of the transfer for the respective side instead of
+having it unconditionally in session.c during all the transfer.
+
+With this, the logs now report the correct side for the timeout. Note that
+this patch is not enough, because another issue remains : the HTTP body
+forwarders do not abort upon timeout, they simply rely on the generic
+handling from session.c. So for now, the session is still aborted when
+reaching the server timeout, but the culprit is properly reported. A
+subsequent patch will address this specific point.
+
+This bug was tagged MEDIUM because of the changes performed. The issue
+it fixes is minor however. After some cooling down, it may be backported
+to 1.4.
+
+It was reported by and discussed with Rachel Chavez and Patrick Hemmer
+on the mailing list.
+---
+ src/proto_http.c | 11 +++++++++++
+ src/session.c    | 14 --------------
+ 2 files changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 24c7cf8..e473228 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -5341,6 +5341,11 @@ int http_request_forward_body(struct session *s, struct channel *req, int an_bit
+ 				channel_auto_read(req);
+ 			}
+ 
++			/* if we received everything, we don't want to expire anymore */
++			if (msg->msg_state == HTTP_MSG_DONE) {
++				req->flags |= CF_READ_NOEXP;
++				req->rex = TICK_ETERNITY;
++			}
+ 			return 0;
+ 		}
+ 	}
+@@ -6529,6 +6534,12 @@ int http_response_forward_body(struct session *s, struct channel *res, int an_bi
+ 				}
+ 				return 1;
+ 			}
++
++			/* if we received everything, we don't want to expire anymore */
++			if (msg->msg_state == HTTP_MSG_DONE) {
++				res->flags |= CF_READ_NOEXP;
++				res->rex = TICK_ETERNITY;
++			}
+ 			return 0;
+ 		}
+ 	}
+diff --git a/src/session.c b/src/session.c
+index 0824167..48bdf7e 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -2411,20 +2411,6 @@ struct task *process_session(struct task *t)
+ 		s->si[0].flags &= ~(SI_FL_ERR|SI_FL_EXP);
+ 		s->si[1].flags &= ~(SI_FL_ERR|SI_FL_EXP);
+ 
+-		/* Trick: if a request is being waiting for the server to respond,
+-		 * and if we know the server can timeout, we don't want the timeout
+-		 * to expire on the client side first, but we're still interested
+-		 * in passing data from the client to the server (eg: POST). Thus,
+-		 * we can cancel the client's request timeout if the server's
+-		 * request timeout is set and the server has not yet sent a response.
+-		 */
+-
+-		if ((s->rep->flags & (CF_AUTO_CLOSE|CF_SHUTR)) == 0 &&
+-		    (tick_isset(s->req->wex) || tick_isset(s->rep->rex))) {
+-			s->req->flags |= CF_READ_NOEXP;
+-			s->req->rex = TICK_ETERNITY;
+-		}
+-
+ 		/* When any of the stream interfaces is attached to an applet,
+ 		 * we have to call it here. Note that this one may wake the
+ 		 * task up again. If at least one applet was called, the current
+-- 
+1.8.3.2
+

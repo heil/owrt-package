@@ -1,0 +1,147 @@
+From b4f98098aaa9552637f3a329b82090f8eb00f820 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 8 May 2014 21:06:11 +0200
+Subject: [PATCH 43/45] BUG/MAJOR: session: recover the correct connection
+ pointer in half-initialized sessions
+
+John-Paul Bader reported a nasty segv which happens after a few hours
+when SSL is enabled under a high load. Fortunately he could catch a
+stack trace, systematically looking like this one :
+
+(gdb) bt full
+        level = 6
+        conn = (struct connection *) 0x0
+        err_msg = <value optimized out>
+        s = (struct session *) 0x80337f800
+        conn = <value optimized out>
+        flags = 41997063
+        new_updt = <value optimized out>
+        old_updt = 1
+        e = <value optimized out>
+        status = 0
+        fd = 53999616
+        nbfd = 279
+        wait_time = <value optimized out>
+        updt_idx = <value optimized out>
+        en = <value optimized out>
+        eo = <value optimized out>
+        count = 78
+        sr = <value optimized out>
+        sw = <value optimized out>
+        rn = <value optimized out>
+        wn = <value optimized out>
+
+The variable "flags" in conn_fd_handler() holds a copy of connection->flags
+when entering the function. These flags indicate 41997063 = 0x0280d307 :
+  - {SOCK,DATA,CURR}_RD_ENA=1       => it's a handshake, waiting for reading
+  - {SOCK,DATA,CURR}_WR_ENA=0       => no need for writing
+  - CTRL_READY=1                    => FD is still allocated
+  - XPRT_READY=1                    => transport layer is initialized
+  - ADDR_FROM_SET=1, ADDR_TO_SET=0  => clearly it's a frontend connection
+  - INIT_DATA=1, WAKE_DATA=1        => processing a handshake (ssl I guess)
+  - {DATA,SOCK}_{RD,WR}_SH=0        => no shutdown
+  - ERROR=0, CONNECTED=0            => handshake not completed yet
+  - WAIT_L4_CONN=0                  => normal
+  - WAIT_L6_CONN=1                  => waiting for an L6 handshake to complete
+  - SSL_WAIT_HS=1                   => the pending handshake is an SSL handshake
+
+So this is a handshake is in progress. And the only way to reach line 88
+is for the handshake to complete without error. So we know for sure that
+ssl_sock_handshake() was called and completed the handshake then removed
+the CO_FL_SSL_WAIT_HS flag from the connection. With these flags,
+ssl_sock_handshake() does only call SSL_do_handshake() and retruns. So
+that means that the problem is necessarily in data->init().
+
+The fd is wrong as reported but is simply mis-decoded as it's the lower
+half of the last function pointer.
+
+What happens in practice is that there's an issue with the way we deal
+with embryonic sessions during their conversion to regular sessions.
+Since they have no stream interface at the beginning, the pointer to
+the connection is temporarily stored into s->target. Then during their
+conversion, the first stream interface is properly initialized and the
+connection is attached to it, then s->target is set to NULL.
+
+The problem is that if anything fails in session_complete(), the
+session is left in this intermediate state where s->target is NULL,
+and kill_mini_session() is called afterwards to perform the cleanup.
+It needs the connection, that it finds in s->target which is NULL,
+dereferences it and dies. The only reasons for dying here are a problem
+on the TCP connection when doing the setsockopt(TCP_NODELAY) or a
+memory allocation issue.
+
+This patch implements a solution consisting in restoring s->target in
+session_complete() on the error path. That way embryonic sessions that
+were valid before calling it are still valid after.
+
+The bug was introduced in 1.5-dev20 by commit f8a49ea ("MEDIUM: session:
+attach incoming connection to target on embryonic sessions"). No backport
+is needed.
+
+Special thanks to John for his numerous tests and traces.
+---
+ src/session.c | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/src/session.c b/src/session.c
+index 48bdf7e..08090bb 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -246,7 +246,8 @@ int session_accept(struct listener *l, int cfd, struct sockaddr_storage *addr)
+ 
+ 
+ /* prepare the trash with a log prefix for session <s>. It only works with
+- * embryonic sessions based on a real connection.
++ * embryonic sessions based on a real connection. This function requires that
++ * at s->target still points to the incoming connection.
+  */
+ static void prepare_mini_sess_log_prefix(struct session *s)
+ {
+@@ -275,7 +276,8 @@ static void prepare_mini_sess_log_prefix(struct session *s)
+ 
+ /* This function kills an existing embryonic session. It stops the connection's
+  * transport layer, releases assigned resources, resumes the listener if it was
+- * disabled and finally kills the file descriptor.
++ * disabled and finally kills the file descriptor. This function requires that
++ * at s->target still points to the incoming connection.
+  */
+ static void kill_mini_session(struct session *s)
+ {
+@@ -387,7 +389,9 @@ static struct task *expire_mini_session(struct task *t)
+  * be called with an embryonic session. It returns a positive value upon
+  * success, 0 if the connection can be ignored, or a negative value upon
+  * critical failure. The accepted file descriptor is closed if we return <= 0.
+- * The client-side end point is assumed to be a connection.
++ * The client-side end point is assumed to be a connection, whose pointer is
++ * taken from s->target which is assumed to be valid. If the function fails,
++ * it restores s->target.
+  */
+ int session_complete(struct session *s)
+ {
+@@ -443,7 +447,11 @@ int session_complete(struct session *s)
+ 	si_reset(&s->si[0], t);
+ 	si_set_state(&s->si[0], SI_ST_EST);
+ 
+-	/* attach the incoming connection to the stream interface now */
++	/* attach the incoming connection to the stream interface now.
++	 * We must do that *before* clearing ->target because we need
++	 * to keep a pointer to the connection in case we have to call
++	 * kill_mini_session().
++	 */
+ 	si_attach_conn(&s->si[0], conn);
+ 
+ 	if (likely(s->fe->options2 & PR_O2_INDEPSTR))
+@@ -568,6 +576,10 @@ int session_complete(struct session *s)
+  out_free_req:
+ 	pool_free2(pool2_channel, s->req);
+  out_free_task:
++	/* and restore the connection pointer in case we destroyed it,
++	 * because kill_mini_session() will need it.
++	 */
++	s->target = &conn->obj_type;
+ 	return ret;
+ }
+ 
+-- 
+1.8.3.2
+

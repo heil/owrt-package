@@ -1,0 +1,97 @@
+From cefad676891114f7f1baf03881eea6a55de4486b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 8 May 2014 22:36:29 +0200
+Subject: [PATCH 39/45] BUILD: syscalls: remove improper inline statement in
+ front of syscalls
+
+Trying to build with an old gcc and glibc revealed that we must not
+state "inline" in our _syscall* definitions since it's already present
+in the declaration making use of the _syscall* macros.
+---
+ include/common/accept4.h |  2 +-
+ include/common/splice.h  |  2 +-
+ include/common/syscall.h | 12 ++++++------
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/include/common/accept4.h b/include/common/accept4.h
+index 1130ecc..8981b92 100644
+--- a/include/common/accept4.h
++++ b/include/common/accept4.h
+@@ -58,7 +58,7 @@ static int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int fl
+ 	return socketcall(SYS_ACCEPT4, args);
+ }
+ #else
+-static _syscall4(int, accept4, int, sockfd, struct sockaddr *, addr, socklen_t *, addrlen, int, flags);
++static inline _syscall4(int, accept4, int, sockfd, struct sockaddr *, addr, socklen_t *, addrlen, int, flags);
+ #endif /* VSYSCALL etc... */
+ #endif /* USE_MY_ACCEPT4 */
+ #endif /* __linux__ && USE_ACCEPT4 */
+diff --git a/include/common/splice.h b/include/common/splice.h
+index a776b9b..ea29b16 100644
+--- a/include/common/splice.h
++++ b/include/common/splice.h
+@@ -62,7 +62,7 @@ extern int splice(int fdin, loff_t *off_in, int fdout, loff_t *off_out, size_t l
+ #define __NR_splice             313
+ #endif /* __NR_splice */
+ 
+-static _syscall6(int, splice, int, fdin, loff_t *, off_in, int, fdout, loff_t *, off_out, size_t, len, unsigned long, flags);
++static inline _syscall6(int, splice, int, fdin, loff_t *, off_in, int, fdout, loff_t *, off_out, size_t, len, unsigned long, flags);
+ #endif /* VSYSCALL */
+ 
+ #else
+diff --git a/include/common/syscall.h b/include/common/syscall.h
+index 0b1ccd6..7c9a456 100644
+--- a/include/common/syscall.h
++++ b/include/common/syscall.h
+@@ -37,42 +37,42 @@
+  */
+ #ifndef _syscall1
+ #define _syscall1(tr, nr, t1, n1)              \
+-	inline tr nr(t1 n1) {		       \
++	tr nr(t1 n1) {	                       \
+ 		return syscall(__NR_##nr, n1); \
+ 	}
+ #endif
+ 
+ #ifndef _syscall2
+ #define _syscall2(tr, nr, t1, n1, t2, n2)          \
+-	inline tr nr(t1 n1, t2 n2) {               \
++	tr nr(t1 n1, t2 n2) {                      \
+ 		return syscall(__NR_##nr, n1, n2); \
+ 	}
+ #endif
+ 
+ #ifndef _syscall3
+ #define _syscall3(tr, nr, t1, n1, t2, n2, t3, n3)      \
+-	inline tr nr(t1 n1, t2 n2, t3 n3) {            \
++	tr nr(t1 n1, t2 n2, t3 n3) {                   \
+ 		return syscall(__NR_##nr, n1, n2, n3); \
+ 	}
+ #endif
+ 
+ #ifndef _syscall4
+ #define _syscall4(tr, nr, t1, n1, t2, n2, t3, n3, t4, n4)  \
+-	inline tr nr(t1 n1, t2 n2, t3 n3, t4 n4) {         \
++	tr nr(t1 n1, t2 n2, t3 n3, t4 n4) {                \
+ 		return syscall(__NR_##nr, n1, n2, n3, n4); \
+ 	}
+ #endif
+ 
+ #ifndef _syscall5
+ #define _syscall5(tr, nr, t1, n1, t2, n2, t3, n3, t4, n4, t5, n5) \
+-	inline tr nr(t1 n1, t2 n2, t3 n3, t4 n4, t5 n5) {         \
++	tr nr(t1 n1, t2 n2, t3 n3, t4 n4, t5 n5) {                \
+ 		return syscall(__NR_##nr, n1, n2, n3, n4, n5);    \
+ 	}
+ #endif
+ 
+ #ifndef _syscall6
+ #define _syscall6(tr, nr, t1, n1, t2, n2, t3, n3, t4, n4, t5, n5, t6, n6) \
+-	inline tr nr(t1 n1, t2 n2, t3 n3, t4 n4, t5 n5, t6 n6) {          \
++	tr nr(t1 n1, t2 n2, t3 n3, t4 n4, t5 n5, t6 n6) {                 \
+ 		return syscall(__NR_##nr, n1, n2, n3, n4, n5, n6);        \
+ 	}
+ #endif
+-- 
+1.8.3.2
+

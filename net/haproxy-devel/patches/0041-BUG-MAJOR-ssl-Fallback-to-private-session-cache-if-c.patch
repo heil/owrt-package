@@ -1,0 +1,116 @@
+From caa19cc86748ebae63343bfe06426fc74eeacd02 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@exceliance.fr>
+Date: Wed, 7 May 2014 16:10:18 +0200
+Subject: [PATCH 41/45] BUG/MAJOR: ssl: Fallback to private session cache if
+ current lock mode is not supported.
+
+Process shared mutex seems not supported on some OSs (FreeBSD).
+
+This patch checks errors on mutex lock init to fallback
+on a private session cache (per process cache) in error cases.
+---
+ include/proto/shctx.h |  3 +++
+ src/cfgparse.c        | 18 ++++++++++++++----
+ src/shctx.c           | 29 +++++++++++++++++++++++------
+ 3 files changed, 40 insertions(+), 10 deletions(-)
+
+diff --git a/include/proto/shctx.h b/include/proto/shctx.h
+index a84e4a6..e0c695d 100644
+--- a/include/proto/shctx.h
++++ b/include/proto/shctx.h
+@@ -28,6 +28,9 @@
+ #define SHCTX_APPNAME "haproxy"
+ #endif
+ 
++#define SHCTX_E_ALLOC_CACHE -1
++#define SHCTX_E_INIT_LOCK   -2
++
+ /* Allocate shared memory context.
+  * <size> is the number of allocated blocks into cache (default 128 bytes)
+  * A block is large enough to contain a classic session (without client cert)
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index c4f092f..7176b59 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6744,6 +6744,8 @@ out_uri_auth_compat:
+ 		 * remains NULL so that listeners can later detach.
+ 		 */
+ 		list_for_each_entry(bind_conf, &curproxy->conf.bind, by_fe) {
++			int alloc_ctx;
++
+ 			if (!bind_conf->is_ssl) {
+ 				if (bind_conf->default_ctx) {
+ 					Warning("Proxy '%s': A certificate was specified but SSL was not enabled on bind '%s' at [%s:%d] (use 'ssl').\n",
+@@ -6758,10 +6760,18 @@ out_uri_auth_compat:
+ 				continue;
+ 			}
+ 
+-			if (shared_context_init(global.tune.sslcachesize, (global.nbproc > 1) ? 1 : 0) < 0) {
+-				Alert("Unable to allocate SSL session cache.\n");
+-				cfgerr++;
+-				continue;
++			alloc_ctx = shared_context_init(global.tune.sslcachesize, (global.nbproc > 1) ? 1 : 0);
++			if (alloc_ctx < 0) {
++				if (alloc_ctx == SHCTX_E_INIT_LOCK) {
++					Warning("Unable to init lock for the shared SSL session cache. Falling back to private cache.\n");
++					alloc_ctx = shared_context_init(global.tune.sslcachesize, 0);
++				}
++
++				if (alloc_ctx < 0) {
++					Alert("Unable to allocate SSL session cache.\n");
++					cfgerr++;
++					continue;
++				}
+ 			}
+ 
+ 			/* initialize all certificate contexts */
+diff --git a/src/shctx.c b/src/shctx.c
+index f259b9c..86e6056 100644
+--- a/src/shctx.c
++++ b/src/shctx.c
+@@ -532,19 +532,36 @@ int shared_context_init(int size, int shared)
+ 	                                      PROT_READ | PROT_WRITE, maptype | MAP_ANON, -1, 0);
+ 	if (!shctx || shctx == MAP_FAILED) {
+ 		shctx = NULL;
+-		return -1;
++		return SHCTX_E_ALLOC_CACHE;
+ 	}
+ 
+ #ifndef USE_PRIVATE_CACHE
++	if (maptype == MAP_SHARED) {
+ #ifdef USE_SYSCALL_FUTEX
+-	shctx->waiters = 0;
++		shctx->waiters = 0;
+ #else
+-	pthread_mutexattr_init(&attr);
+-	pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+-	pthread_mutex_init(&shctx->mutex, &attr);
++		if (pthread_mutexattr_init(&attr)) {
++			munmap(shctx, sizeof(struct shared_context)+(size*sizeof(struct shared_block)));
++			shctx = NULL;
++			return SHCTX_E_INIT_LOCK;
++		}
++
++		if (pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED)) {
++			pthread_mutexattr_destroy(&attr);
++			munmap(shctx, sizeof(struct shared_context)+(size*sizeof(struct shared_block)));
++			shctx = NULL;
++			return SHCTX_E_INIT_LOCK;
++		}
++
++		if (pthread_mutex_init(&shctx->mutex, &attr)) {
++			pthread_mutexattr_destroy(&attr);
++			munmap(shctx, sizeof(struct shared_context)+(size*sizeof(struct shared_block)));
++			shctx = NULL;
++			return SHCTX_E_INIT_LOCK;
++		}
+ #endif
+-	if (maptype == MAP_SHARED)
+ 		use_shared_mem = 1;
++	}
+ #endif
+ 
+ 	memset(&shctx->active.data.session.key, 0, sizeof(struct ebmb_node));
+-- 
+1.8.3.2
+

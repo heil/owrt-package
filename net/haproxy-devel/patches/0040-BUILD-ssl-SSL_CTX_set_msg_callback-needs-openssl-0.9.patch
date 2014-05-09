@@ -1,0 +1,30 @@
+From 5cbe4ef265680f83ee3d09eba4ca79b6c9741d24 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 8 May 2014 22:45:11 +0200
+Subject: [PATCH 40/45] BUILD: ssl: SSL_CTX_set_msg_callback() needs openssl >=
+ 0.9.7
+
+1.5-dev24 introduced SSL_CTX_set_msg_callback(), which came with OpenSSL
+0.9.7. A build attempt with an older one failed and we're still compatible
+with 0.9.6 in 1.5.
+---
+ src/ssl_sock.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 229290f..dae8a38 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -829,7 +829,9 @@ int ssl_sock_prepare_ctx(struct bind_conf *bind_conf, SSL_CTX *ctx, struct proxy
+ 	}
+ 
+ 	SSL_CTX_set_info_callback(ctx, ssl_sock_infocbk);
++#if OPENSSL_VERSION_NUMBER >= 0x00907000L
+ 	SSL_CTX_set_msg_callback(ctx, ssl_sock_msgcbk);
++#endif
+ 
+ #ifdef OPENSSL_NPN_NEGOTIATED
+ 	if (bind_conf->npn_str)
+-- 
+1.8.3.2
+
