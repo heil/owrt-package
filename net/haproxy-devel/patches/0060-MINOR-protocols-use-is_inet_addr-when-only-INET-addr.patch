@@ -1,0 +1,90 @@
+From 9cf8d3f46bc855e24c9f70f6518f0bd120e544c1 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 9 May 2014 22:56:10 +0200
+Subject: [PATCH 60/70] MINOR: protocols: use is_inet_addr() when only INET
+ addresses are desired
+
+We used to have is_addr() in place to validate sometimes the existence
+of an address, sometimes a valid IPv4 or IPv6 address. Replace them
+carefully so that is_inet_addr() is used wherever we can only use an
+IPv4/IPv6 address.
+---
+ src/backend.c   | 3 ++-
+ src/cfgparse.c  | 2 +-
+ src/proto_tcp.c | 6 +++---
+ src/server.c    | 2 +-
+ 4 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/src/backend.c b/src/backend.c
+index 9c3ae0e..0912fd4 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -753,7 +753,8 @@ int assign_server_address(struct session *s)
+ 		if (!is_addr(&srv_conn->addr.to) && cli_conn) {
+ 			/* if the server has no address, we use the same address
+ 			 * the client asked, which is handy for remapping ports
+-			 * locally on multiple addresses at once.
++			 * locally on multiple addresses at once. Nothing is done
++			 * for AF_UNIX addresses.
+ 			 */
+ 			conn_get_to_addr(cli_conn);
+ 
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 6b1034e..decdcfd 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -4813,7 +4813,7 @@ stats_error_parsing:
+ 			if (!strcmp(args[cur_arg], "usesrc")) {  /* address to use outside */
+ #if defined(CONFIG_HAP_CTTPROXY) || defined(CONFIG_HAP_TRANSPARENT)
+ #if !defined(CONFIG_HAP_TRANSPARENT)
+-				if (!is_addr(&curproxy->conn_src.source_addr)) {
++				if (!is_inet_addr(&curproxy->conn_src.source_addr)) {
+ 					Alert("parsing [%s:%d] : '%s' requires an explicit 'source' address.\n",
+ 					      file, linenum, "usesrc");
+ 					err_code |= ERR_ALERT | ERR_FATAL;
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index f77203a..a672de4 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -201,14 +201,14 @@ int tcp_bind_socket(int fd, int flags, struct sockaddr_storage *local, struct so
+ 
+ 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+ 	if (foreign_ok) {
+-		if (is_addr(&bind_addr)) {
++		if (is_inet_addr(&bind_addr)) {
+ 			ret = bind(fd, (struct sockaddr *)&bind_addr, get_addr_len(&bind_addr));
+ 			if (ret < 0)
+ 				return 2;
+ 		}
+ 	}
+ 	else {
+-		if (is_addr(local)) {
++		if (is_inet_addr(local)) {
+ 			ret = bind(fd, (struct sockaddr *)local, get_addr_len(local));
+ 			if (ret < 0)
+ 				return 1;
+@@ -367,7 +367,7 @@ int tcp_connect_server(struct connection *conn, int data, int delack)
+ 	if (src) {
+ 		int ret, flags = 0;
+ 
+-		if (is_addr(&conn->addr.from)) {
++		if (is_inet_addr(&conn->addr.from)) {
+ 			switch (src->opts & CO_SRC_TPROXY_MASK) {
+ 			case CO_SRC_TPROXY_ADDR:
+ 			case CO_SRC_TPROXY_CLI:
+diff --git a/src/server.c b/src/server.c
+index 51bb85a..9fa69f2 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -829,7 +829,7 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 					if (!strcmp(args[cur_arg], "usesrc")) {  /* address to use outside */
+ #if defined(CONFIG_HAP_CTTPROXY) || defined(CONFIG_HAP_TRANSPARENT)
+ #if !defined(CONFIG_HAP_TRANSPARENT)
+-						if (!is_addr(&newsrv->conn_src.source_addr)) {
++						if (!is_inet_addr(&newsrv->conn_src.source_addr)) {
+ 							Alert("parsing [%s:%d] : '%s' requires an explicit '%s' address.\n",
+ 							      file, linenum, "usesrc", "source");
+ 							err_code |= ERR_ALERT | ERR_FATAL;
+-- 
+1.8.3.2
+

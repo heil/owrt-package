@@ -1,0 +1,139 @@
+From 6ae1ba6f29eaff05211d6d9a5910eab901ed9b55 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 7 May 2014 19:01:58 +0200
+Subject: [PATCH 52/70] MEDIUM: listener: parse the new "process" bind keyword
+
+This sets the bind_proc entry in the bind_conf config block. For now it's
+still unused, but the doc was updated.
+---
+ doc/configuration.txt    | 16 +++++++++++++++-
+ include/types/listener.h |  1 +
+ src/listener.c           | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 61 insertions(+), 1 deletion(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index e178678..75c17be 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -1865,6 +1865,9 @@ bind-process [ all | odd | even | <number 1-64>[-<number 1-64>] ] ...
+   Please note that 'all' really means all processes regardless of the machine's
+   word size, and is not limited to the first 32 or 64.
+ 
++  Each "bind" line may further be limited to a subset of the proxy's processes,
++  please consult the "process" bind keyword in section 5.1.
++
+   If some backends are referenced by frontends bound to other processes, the
+   backend automatically inherits the frontend's processes.
+ 
+@@ -1885,7 +1888,7 @@ bind-process [ all | odd | even | <number 1-64>[-<number 1-64>] ] ...
+             bind 10.0.0.4:80
+             bind-process 1-4
+ 
+-  See also : "nbproc" in global section.
++  See also : "nbproc" in global section, and "process" in section 5.1.
+ 
+ 
+ block { if | unless } <condition>
+@@ -8273,6 +8276,17 @@ npn <protocols>
+   enabled (check with haproxy -vv). Note that the NPN extension has been
+   replaced with the ALPN extension (see the "alpn" keyword).
+ 
++process [ all | odd | even | <number 1-64>[-<number 1-64>] ]
++  This restricts the list of processes on which this listener is allowed to
++  run. It does not enforce any process but eliminates those which do not match.
++  If the frontend uses a "bind-process" setting, the intersection between the
++  two is applied. If in the end the listener is not allowed to run on any
++  remaining process, a warning is emitted, and the listener will either run on
++  the first process of the listener if a single process was specified, or on
++  all of its processes if multiple processes were specified. For the unlikely
++  case where several ranges are needed, this directive may be repeated. See
++  also "bind-process" and "nbproc".
++
+ ssl
+   This setting is only available when support for OpenSSL was built in. It
+   enables SSL deciphering on connections instantiated from this listener. A
+diff --git a/include/types/listener.h b/include/types/listener.h
+index 47cb185..83b63af 100644
+--- a/include/types/listener.h
++++ b/include/types/listener.h
+@@ -134,6 +134,7 @@ struct bind_conf {
+ 	struct eb_root sni_w_ctx;  /* sni_ctx tree of all known certs wildcards sorted by name */
+ #endif
+ 	int is_ssl;                /* SSL is required for these listeners */
++	unsigned long bind_proc;   /* bitmask of processes allowed to use these listeners */
+ 	struct {                   /* UNIX socket permissions */
+ 		uid_t uid;         /* -1 to leave unchanged */
+ 		gid_t gid;         /* -1 to leave unchanged */
+diff --git a/src/listener.c b/src/listener.c
+index 4a55e5a..9032a87 100644
+--- a/src/listener.c
++++ b/src/listener.c
+@@ -11,6 +11,7 @@
+  */
+ 
+ #define _GNU_SOURCE
++#include <ctype.h>
+ #include <errno.h>
+ #include <stdio.h>
+ #include <string.h>
+@@ -703,6 +704,49 @@ static int bind_parse_nice(char **args, int cur_arg, struct proxy *px, struct bi
+ 	return 0;
+ }
+ 
++/* parse the "process" bind keyword */
++static int bind_parse_process(char **args, int cur_arg, struct proxy *px, struct bind_conf *conf, char **err)
++{
++	unsigned long set = 0;
++	unsigned int low, high;
++
++	if (strcmp(args[cur_arg + 1], "all") == 0) {
++		set = 0;
++	}
++	else if (strcmp(args[cur_arg + 1], "odd") == 0) {
++		set |= ~0UL/3UL; /* 0x555....555 */
++	}
++	else if (strcmp(args[cur_arg + 1], "even") == 0) {
++		set |= (~0UL/3UL) << 1; /* 0xAAA...AAA */
++	}
++	else if (isdigit((int)*args[cur_arg + 1])) {
++		char *dash = strchr(args[cur_arg + 1], '-');
++
++		low = high = str2uic(args[cur_arg + 1]);
++		if (dash)
++			high = str2uic(dash + 1);
++
++		if (high < low) {
++			unsigned int swap = low;
++			low = high;
++			high = swap;
++		}
++
++		if (low < 1 || high > LONGBITS) {
++			memprintf(err, "'%s' : invalid range %d-%d, allowed range is 1..%d", args[cur_arg], low, high, LONGBITS);
++			return ERR_ALERT | ERR_FATAL;
++		}
++		while (low <= high)
++			set |= 1UL << (low++ - 1);
++	}
++	else {
++		memprintf(err, "'%s' expects 'all', 'odd', 'even', or a process range with numbers from 1 to %d.", args[cur_arg], LONGBITS);
++		return ERR_ALERT | ERR_FATAL;
++	}
++
++	conf->bind_proc = set;
++	return 0;
++}
+ 
+ /* Note: must not be declared <const> as its list will be overwritten.
+  * Please take care of keeping this list alphabetically sorted.
+@@ -734,6 +778,7 @@ static struct bind_kw_list bind_kws = { "ALL", { }, {
+ 	{ "maxconn",      bind_parse_maxconn,      1 }, /* set maxconn of listening socket */
+ 	{ "name",         bind_parse_name,         1 }, /* set name of listening socket */
+ 	{ "nice",         bind_parse_nice,         1 }, /* set nice of listening socket */
++	{ "process",      bind_parse_process,      1 }, /* set list of allowed process for this socket */
+ 	{ /* END */ },
+ }};
+ 
+-- 
+1.8.3.2
+

@@ -1,0 +1,34 @@
+From 28e9d06201a513c7a54d0feb7625849f776c6128 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 9 May 2014 22:47:50 +0200
+Subject: [PATCH 57/70] BUG/MINOR: backend: only match IPv4 addresses with RDP
+ cookies
+
+The RDP cookie extractor compares the 32-bit address from the request
+to the address of each server in the farm without first checking that
+the server's address is IPv4. This is a leftover from the IPv4 to IPv6
+conversion. It's harmless as it's unlikely that IPv4 and IPv6 servers
+will be mixed in an RDP farm, but better fix it.
+
+This patch does not need to be backported.
+---
+ src/backend.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/backend.c b/src/backend.c
+index 24d8142..9c3ae0e 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -1239,7 +1239,8 @@ int tcp_persist_rdp_cookie(struct session *s, struct channel *req, int an_bit)
+ 
+ 	s->target = NULL;
+ 	while (srv) {
+-		if (memcmp(&addr, &(srv->addr), sizeof(addr)) == 0) {
++		if (srv->addr.ss_family == AF_INET &&
++		    memcmp(&addr, &(srv->addr), sizeof(addr)) == 0) {
+ 			if ((srv->state & SRV_RUNNING) || (px->options & PR_O_PERSIST)) {
+ 				/* we found the server and it is usable */
+ 				s->flags |= SN_DIRECT | SN_ASSIGNED;
+-- 
+1.8.3.2
+

@@ -1,0 +1,99 @@
+From 640556c692962388bd0cb5b8285f602af63839ee Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 9 May 2014 23:38:15 +0200
+Subject: [PATCH 58/70] BUG/MINOR: checks: correctly configure the address
+ family and protocol
+
+Currently, mixing an IPv4 and an IPv6 address in checks happens to
+work by pure luck because the two protocols use the same functions
+at the socket level and both use IPPROTO_TCP. However, they're
+definitely wrong as the protocol for the check address is retrieved
+from the server's address.
+
+Now the protocol assigned to the connection is the same as the one
+the address in use belongs to (eg: the server's address or the
+explicit check address).
+---
+ src/checks.c | 24 +++++++++++++++---------
+ src/server.c |  1 +
+ 2 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index fceb2c7..5eb5a76 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1509,6 +1509,7 @@ static struct task *process_chk(struct task *t)
+ 	struct check *check = t->context;
+ 	struct server *s = check->server;
+ 	struct connection *conn = check->conn;
++	struct protocol *proto;
+ 	int rv;
+ 	int ret;
+ 	int expired = tick_is_expired(t->expire, now_ms);
+@@ -1573,12 +1574,16 @@ static struct task *process_chk(struct task *t)
+ 		/* no client address */
+ 		clear_addr(&conn->addr.from);
+ 
+-		if (is_addr(&s->check_common.addr))
++		if (is_addr(&s->check_common.addr)) {
+ 			/* we'll connect to the check addr specified on the server */
+ 			conn->addr.to = s->check_common.addr;
+-		else
++			proto = s->check_common.proto;
++		}
++		else {
+ 			/* we'll connect to the addr on the server */
+ 			conn->addr.to = s->addr;
++			proto = s->proto;
++		}
+ 
+ 		if (check->port) {
+ 			set_host_port(&conn->addr.to, check->port);
+@@ -1606,8 +1611,8 @@ static struct task *process_chk(struct task *t)
+ 		 * connect() when a pure TCP check is used (without PROXY protocol).
+ 		 */
+ 		ret = SN_ERR_INTERNAL;
+-		if (s->check_common.proto->connect)
+-			ret = s->check_common.proto->connect(conn, check->type, (check->type) ? 0 : 2);
++		if (proto->connect)
++			ret = proto->connect(conn, check->type, (check->type) ? 0 : 2);
+ 		conn->flags |= CO_FL_WAKE_DATA;
+ 		if (s->check.send_proxy) {
+ 			conn->send_proxy_ofs = 1;
+@@ -2075,15 +2080,16 @@ static void tcpcheck_main(struct connection *conn)
+ 			/* no client address */
+ 			clear_addr(&conn->addr.from);
+ 
+-			if (is_addr(&s->check_common.addr))
++			if (is_addr(&s->check_common.addr)) {
+ 				/* we'll connect to the check addr specified on the server */
+ 				conn->addr.to = s->check_common.addr;
+-			else
++				proto = s->check_common.proto;
++			}
++			else {
+ 				/* we'll connect to the addr on the server */
+ 				conn->addr.to = s->addr;
+-
+-			/* protocol */
+-			proto = protocol_by_family(conn->addr.to.ss_family);
++				proto = s->proto;
++			}
+ 
+ 			/* port */
+ 			if (check->current_step->port)
+diff --git a/src/server.c b/src/server.c
+index 565a108..51bb85a 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -597,6 +597,7 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 				}
+ 
+ 				newsrv->check_common.addr = *sk;
++				newsrv->check_common.proto = protocol_by_family(sk->ss_family);
+ 				cur_arg += 2;
+ 			}
+ 			else if (!strcmp(args[cur_arg], "port")) {
+-- 
+1.8.3.2
+

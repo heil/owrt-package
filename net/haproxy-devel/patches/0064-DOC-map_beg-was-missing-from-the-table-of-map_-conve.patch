@@ -1,0 +1,26 @@
+From 787a4c025f86cec531ce39f253000e6d2ccc7754 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 10 May 2014 07:55:30 +0200
+Subject: [PATCH 64/70] DOC: map_beg was missing from the table of map_*
+ converters
+
+---
+ doc/configuration.txt | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 1faee6c..3f57806 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -9690,6 +9690,8 @@ map_<match_type>_<output_type>(<map_file>[,<default_value>])
+   -----------+--------------+-----------------+-----------------+---------------
+     str      | str          | map_str         | map_str_int     | map_str_ip
+   -----------+--------------+-----------------+-----------------+---------------
++    str      | beg          | map_beg         | map_beg_int     | map_end_ip
++  -----------+--------------+-----------------+-----------------+---------------
+     str      | sub          | map_sub         | map_sub_int     | map_sub_ip
+   -----------+--------------+-----------------+-----------------+---------------
+     str      | dir          | map_dir         | map_dir_int     | map_dir_ip
+-- 
+1.8.3.2
+
