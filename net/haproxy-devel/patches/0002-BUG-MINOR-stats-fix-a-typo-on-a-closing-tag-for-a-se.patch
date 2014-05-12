@@ -1,0 +1,35 @@
+From d5de76a25b089aabb9cf79c1cdecaf9d9f5cf8a2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Sun, 11 May 2014 23:10:18 +0200
+Subject: [PATCH 2/3] BUG/MINOR: stats: fix a typo on a closing tag for a
+ server tracking another one
+
+The "via" column includes a link to the tracked server but instead of closing
+the link with a </a> tag, a new tag is opened.
+
+This typo should also be backported to 1.4
+---
+ src/dumpstats.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index e0c21b6..b26ec25 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -2984,11 +2984,11 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		else if (sv != ref) {
+ 			if (sv->state & SRV_MAINTAIN)
+ 				chunk_appendf(&trash,
+-					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\"><a></td>",
++					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\"></a></td>",
+ 					      ref->proxy->id, ref->id);
+ 			else
+ 				chunk_appendf(&trash,
+-					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\">via %s/%s<a></td>",
++					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\">via %s/%s</a></td>",
+ 					      ref->proxy->id, ref->id, ref->proxy->id, ref->id);
+ 		}
+ 		else
+-- 
+1.8.3.2
+

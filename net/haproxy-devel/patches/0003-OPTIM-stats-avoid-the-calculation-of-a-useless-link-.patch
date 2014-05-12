@@ -1,0 +1,30 @@
+From c7fa7db7ce586fcb4b16dbc79fc159f058a024bd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Sun, 11 May 2014 23:10:19 +0200
+Subject: [PATCH 3/3] OPTIM: stats: avoid the calculation of a useless link on
+ tracking servers in maintenance
+
+Commit f465994198 removed the "via" link when a tracking server is in maintenance, but
+still calculated an empty link that no one can use. We can safely remove it.
+---
+ src/dumpstats.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index b26ec25..c76e115 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -2983,9 +2983,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		}
+ 		else if (sv != ref) {
+ 			if (sv->state & SRV_MAINTAIN)
+-				chunk_appendf(&trash,
+-					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\"></a></td>",
+-					      ref->proxy->id, ref->id);
++				chunk_appendf(&trash, "<td class=ac colspan=3></td>");
+ 			else
+ 				chunk_appendf(&trash,
+ 					      "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\">via %s/%s</a></td>",
+-- 
+1.8.3.2
+
