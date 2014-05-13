@@ -1,0 +1,31 @@
+From 4e5ed29668d9a8bb090cad15068317beb167ec72 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 May 2014 13:37:54 +0200
+Subject: [PATCH 6/6] BUG/MEDIUM: config: a stats-less config crashes in
+ 1.5-dev25
+
+John-Paul Bader reported a stupid regression in 1.5-dev25, we
+forget to check that global.stats_fe is initialized before visiting
+its sockets, resulting in a crash.
+
+No backport is needed.
+---
+ src/cfgparse.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index decdcfd..9ec69a1 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6950,7 +6950,7 @@ out_uri_auth_compat:
+ 	}
+ 
+ 	/* Check multi-process mode compatibility */
+-	if (global.nbproc > 1) {
++	if (global.nbproc > 1 && global.stats_fe) {
+ 		list_for_each_entry(bind_conf, &global.stats_fe->conf.bind, by_fe) {
+ 			unsigned long mask;
+ 
+-- 
+1.8.3.2
+
