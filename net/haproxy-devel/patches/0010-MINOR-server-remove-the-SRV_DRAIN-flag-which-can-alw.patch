@@ -1,0 +1,119 @@
+From 02615f9b163ba717794b5801611b4ea46ad5f63c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 May 2014 22:08:20 +0200
+Subject: [PATCH 10/14] MINOR: server: remove the SRV_DRAIN flag which can
+ always be deduced
+
+This flag is only a copy of (srv->uweight == 0), so better get rid of
+it to reduce some of the confusion that remains in the code, and use
+a simple function to return this state based on this weight instead.
+---
+ include/proto/server.h | 12 ++++--------
+ include/types/server.h |  3 +--
+ src/checks.c           |  1 -
+ src/dumpstats.c        |  9 +--------
+ src/server.c           |  3 ---
+ 5 files changed, 6 insertions(+), 22 deletions(-)
+
+diff --git a/include/proto/server.h b/include/proto/server.h
+index f030962..0433ac0 100644
+--- a/include/proto/server.h
++++ b/include/proto/server.h
+@@ -96,16 +96,12 @@ const char *server_parse_weight_change_request(struct server *sv,
+ 					       const char *weight_str);
+ 
+ /*
+- * Update the server's drain state to reflect its user-weight.  This is not
+- * done immediately to allow a discrepancy between the server's user-weight
+- * and drains state to control logging of changes in the drain state.
++ * Return true if the server has a zero user-weight, meaning it's in draining
++ * mode (ie: not taking new non-persistent connections).
+  */
+-static inline void set_server_drain_state(struct server *s)
++static inline int server_is_draining(const struct server *s)
+ {
+-	if (!s->uweight)
+-		s->state |= SRV_DRAIN;
+-	else
+-		s->state &= ~SRV_DRAIN;
++	return !s->uweight;
+ }
+ /*
+  * Local variables:
+diff --git a/include/types/server.h b/include/types/server.h
+index 7a977e3..0897f9a 100644
+--- a/include/types/server.h
++++ b/include/types/server.h
+@@ -52,8 +52,7 @@
+ #define SRV_GOINGDOWN	0x0020	/* this server says that it's going down (404) */
+ #define SRV_WARMINGUP	0x0040	/* this server is warming up after a failure */
+ #define SRV_MAINTAIN	0x0080	/* this server is in maintenance mode */
+-#define SRV_DRAIN	0x0100	/* this server has been requested to drain its connections */
+-/* unused: 0x0200, 0x0400, 0x0800 */
++/* unused: 0x0100, 0x0200, 0x0400, 0x0800 */
+ #define SRV_NON_STICK	0x1000	/* never add connections allocated to this server to a stick table */
+ 
+ /* configured server options for send-proxy (server->pp_opts) */
+diff --git a/src/checks.c b/src/checks.c
+index b4d11c1..2fbda11 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1214,7 +1214,6 @@ static void event_srv_chk_r(struct connection *conn)
+ 		}
+ 
+ 		set_server_check_status(check, status, desc);
+-		set_server_drain_state(check->server);
+ 		break;
+ 	}
+ 
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index eae736c..13843f8 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -1355,12 +1355,6 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 				return 1;
+ 
+ 			warning = server_parse_weight_change_request(sv, args[3]);
+-			/*
+-			 * The user-weight may now be zero and thus
+-			 * the server considered to be draining.
+-			 * Update the server's drain state as necessary.
+-			 */
+-			set_server_drain_state(sv);
+ 			if (warning) {
+ 				appctx->ctx.cli.msg = warning;
+ 				appctx->st0 = STAT_CLI_PRINT;
+@@ -3633,7 +3627,7 @@ static int stats_dump_proxy_to_buffer(struct stream_interface *si, struct proxy
+ 				else
+ 					sv_state = 2; /* going down */
+ 
+-				if (svs->state & SRV_DRAIN)
++				if (server_is_draining(svs))
+ 					sv_state += 4;
+ 				else if (svs->state & SRV_GOINGDOWN)
+ 					sv_state += 2;
+@@ -4291,7 +4285,6 @@ static int stats_process_http_post(struct stream_interface *si)
+ 							sv->uweight = 0;
+ 
+ 						server_recalc_eweight(sv);
+-						set_server_drain_state(sv);
+ 
+ 						altered_servers++;
+ 						total_servers++;
+diff --git a/src/server.c b/src/server.c
+index 1901686..a903e84 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -1026,9 +1026,6 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 			}
+ 		}
+ 
+-		/* Set initial drain state using now-configured weight */
+-		set_server_drain_state(newsrv);
+-
+ 		if (do_check) {
+ 			int ret;
+ 
+-- 
+1.8.3.2
+

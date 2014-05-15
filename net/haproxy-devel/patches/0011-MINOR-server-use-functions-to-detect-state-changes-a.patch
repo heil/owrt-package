@@ -1,0 +1,463 @@
+From c5150dafd82f70882fc379d145e8cf25625d815d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 May 2014 19:27:31 +0200
+Subject: [PATCH 11/14] MINOR: server: use functions to detect state changes
+ and to update them
+
+Detecting that a server's status has changed is a bit messy, as well
+as it is to commit the status changes. We'll have to add new conditions
+soon and we'd better avoid to multiply the number of touched locations
+with the high risk of forgetting them.
+
+This commit introduces :
+  - srv_lb_status_changed() to report if the status changed from the
+    previously committed one ;
+  - svr_lb_commit_status() to commit the current status
+
+The function is now used by all load-balancing algorithms.
+---
+ include/proto/backend.h | 18 ++++++++++++++++++
+ src/lb_chash.c          | 24 ++++++++----------------
+ src/lb_fas.c            | 24 ++++++++----------------
+ src/lb_fwlc.c           | 24 ++++++++----------------
+ src/lb_fwrr.c           | 24 ++++++++----------------
+ src/lb_map.c            | 16 ++++++----------
+ src/server.c            |  2 +-
+ 7 files changed, 57 insertions(+), 75 deletions(-)
+
+diff --git a/include/proto/backend.h b/include/proto/backend.h
+index 68ba3d6..7af92e2 100644
+--- a/include/proto/backend.h
++++ b/include/proto/backend.h
+@@ -66,6 +66,24 @@ static inline int srv_is_usable(int state, int weight)
+ 	return 1;
+ }
+ 
++/* This function commits the current server state and weight onto the previous
++ * ones in order to detect future changes.
++ */
++static inline void srv_lb_commit_status(struct server *srv)
++{
++	srv->prev_state = srv->state;
++	srv->prev_eweight = srv->eweight;
++}
++
++/* This function returns true when a server has experienced a change since last
++ * commit on its state or weight, otherwise zero.
++ */
++static inline int srv_lb_status_changed(const struct server *srv)
++{
++	return (srv->state != srv->prev_state ||
++		srv->eweight != srv->prev_eweight);
++}
++
+ #endif /* _PROTO_BACKEND_H */
+ 
+ /*
+diff --git a/src/lb_chash.c b/src/lb_chash.c
+index 41e06c7..fb10c72 100644
+--- a/src/lb_chash.c
++++ b/src/lb_chash.c
+@@ -98,8 +98,7 @@ static void chash_set_server_status_down(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (srv_is_usable(srv->state, srv->eweight))
+@@ -136,8 +135,7 @@ out_update_backend:
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function updates the server trees according to server <srv>'s new
+@@ -151,8 +149,7 @@ static void chash_set_server_status_up(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (!srv_is_usable(srv->state, srv->eweight))
+@@ -194,8 +191,7 @@ static void chash_set_server_status_up(struct server *srv)
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function must be called after an update to server <srv>'s effective
+@@ -206,8 +202,7 @@ static void chash_update_server_weight(struct server *srv)
+ 	int old_state, new_state;
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	/* If changing the server's weight changes its state, we simply apply
+@@ -222,8 +217,7 @@ static void chash_update_server_weight(struct server *srv)
+ 	new_state = srv_is_usable(srv->state, srv->eweight);
+ 
+ 	if (!old_state && !new_state) {
+-		srv->prev_state = srv->state;
+-		srv->prev_eweight = srv->eweight;
++		srv_lb_commit_status(srv);
+ 		return;
+ 	}
+ 	else if (!old_state && new_state) {
+@@ -244,8 +238,7 @@ static void chash_update_server_weight(struct server *srv)
+ 		p->lbprm.tot_wact += srv->eweight - srv->prev_eweight;
+ 
+ 	update_backend_weight(p);
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /*
+@@ -383,8 +376,7 @@ void chash_init_server_tree(struct proxy *p)
+ 	p->lbprm.wdiv = BE_WEIGHT_SCALE;
+ 	for (srv = p->srv; srv; srv = srv->next) {
+ 		srv->eweight = (srv->uweight * p->lbprm.wdiv + p->lbprm.wmult - 1) / p->lbprm.wmult;
+-		srv->prev_eweight = srv->eweight;
+-		srv->prev_state = srv->state;
++		srv_lb_commit_status(srv);
+ 	}
+ 
+ 	recount_servers(p);
+diff --git a/src/lb_fas.c b/src/lb_fas.c
+index b4cfc79..b8b0569 100644
+--- a/src/lb_fas.c
++++ b/src/lb_fas.c
+@@ -77,8 +77,7 @@ static void fas_set_server_status_down(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (srv_is_usable(srv->state, srv->eweight))
+@@ -116,8 +115,7 @@ out_update_backend:
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function updates the server trees according to server <srv>'s new
+@@ -131,8 +129,7 @@ static void fas_set_server_status_up(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (!srv_is_usable(srv->state, srv->eweight))
+@@ -176,8 +173,7 @@ static void fas_set_server_status_up(struct server *srv)
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function must be called after an update to server <srv>'s effective
+@@ -188,8 +184,7 @@ static void fas_update_server_weight(struct server *srv)
+ 	int old_state, new_state;
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	/* If changing the server's weight changes its state, we simply apply
+@@ -204,8 +199,7 @@ static void fas_update_server_weight(struct server *srv)
+ 	new_state = srv_is_usable(srv->state, srv->eweight);
+ 
+ 	if (!old_state && !new_state) {
+-		srv->prev_state = srv->state;
+-		srv->prev_eweight = srv->eweight;
++		srv_lb_commit_status(srv);
+ 		return;
+ 	}
+ 	else if (!old_state && new_state) {
+@@ -231,8 +225,7 @@ static void fas_update_server_weight(struct server *srv)
+ 	fas_queue_srv(srv);
+ 
+ 	update_backend_weight(p);
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function is responsible for building the trees in case of fast
+@@ -253,8 +246,7 @@ void fas_init_server_tree(struct proxy *p)
+ 	p->lbprm.wdiv = BE_WEIGHT_SCALE;
+ 	for (srv = p->srv; srv; srv = srv->next) {
+ 		srv->eweight = (srv->uweight * p->lbprm.wdiv + p->lbprm.wmult - 1) / p->lbprm.wmult;
+-		srv->prev_eweight = srv->eweight;
+-		srv->prev_state = srv->state;
++		srv_lb_commit_status(srv);
+ 	}
+ 
+ 	recount_servers(p);
+diff --git a/src/lb_fwlc.c b/src/lb_fwlc.c
+index de1896e..ca68a33 100644
+--- a/src/lb_fwlc.c
++++ b/src/lb_fwlc.c
+@@ -69,8 +69,7 @@ static void fwlc_set_server_status_down(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (srv_is_usable(srv->state, srv->eweight))
+@@ -108,8 +107,7 @@ out_update_backend:
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function updates the server trees according to server <srv>'s new
+@@ -123,8 +121,7 @@ static void fwlc_set_server_status_up(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (!srv_is_usable(srv->state, srv->eweight))
+@@ -168,8 +165,7 @@ static void fwlc_set_server_status_up(struct server *srv)
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function must be called after an update to server <srv>'s effective
+@@ -180,8 +176,7 @@ static void fwlc_update_server_weight(struct server *srv)
+ 	int old_state, new_state;
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	/* If changing the server's weight changes its state, we simply apply
+@@ -196,8 +191,7 @@ static void fwlc_update_server_weight(struct server *srv)
+ 	new_state = srv_is_usable(srv->state, srv->eweight);
+ 
+ 	if (!old_state && !new_state) {
+-		srv->prev_state = srv->state;
+-		srv->prev_eweight = srv->eweight;
++		srv_lb_commit_status(srv);
+ 		return;
+ 	}
+ 	else if (!old_state && new_state) {
+@@ -223,8 +217,7 @@ static void fwlc_update_server_weight(struct server *srv)
+ 	fwlc_queue_srv(srv);
+ 
+ 	update_backend_weight(p);
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function is responsible for building the trees in case of fast
+@@ -245,8 +238,7 @@ void fwlc_init_server_tree(struct proxy *p)
+ 	p->lbprm.wdiv = BE_WEIGHT_SCALE;
+ 	for (srv = p->srv; srv; srv = srv->next) {
+ 		srv->eweight = (srv->uweight * p->lbprm.wdiv + p->lbprm.wmult - 1) / p->lbprm.wmult;
+-		srv->prev_eweight = srv->eweight;
+-		srv->prev_state = srv->state;
++		srv_lb_commit_status(srv);
+ 	}
+ 
+ 	recount_servers(p);
+diff --git a/src/lb_fwrr.c b/src/lb_fwrr.c
+index 7cf0cc7..b8756b6 100644
+--- a/src/lb_fwrr.c
++++ b/src/lb_fwrr.c
+@@ -39,8 +39,7 @@ static void fwrr_set_server_status_down(struct server *srv)
+ 	struct proxy *p = srv->proxy;
+ 	struct fwrr_group *grp;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (srv_is_usable(srv->state, srv->eweight))
+@@ -81,8 +80,7 @@ out_update_backend:
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function updates the server trees according to server <srv>'s new
+@@ -97,8 +95,7 @@ static void fwrr_set_server_status_up(struct server *srv)
+ 	struct proxy *p = srv->proxy;
+ 	struct fwrr_group *grp;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (!srv_is_usable(srv->state, srv->eweight))
+@@ -145,8 +142,7 @@ out_update_backend:
+ 	/* check/update tot_used, tot_weight */
+ 	update_backend_weight(p);
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function must be called after an update to server <srv>'s effective
+@@ -158,8 +154,7 @@ static void fwrr_update_server_weight(struct server *srv)
+ 	struct proxy *p = srv->proxy;
+ 	struct fwrr_group *grp;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	/* If changing the server's weight changes its state, we simply apply
+@@ -174,8 +169,7 @@ static void fwrr_update_server_weight(struct server *srv)
+ 	new_state = srv_is_usable(srv->state, srv->eweight);
+ 
+ 	if (!old_state && !new_state) {
+-		srv->prev_state = srv->state;
+-		srv->prev_eweight = srv->eweight;
++		srv_lb_commit_status(srv);
+ 		return;
+ 	}
+ 	else if (!old_state && new_state) {
+@@ -233,8 +227,7 @@ static void fwrr_update_server_weight(struct server *srv)
+ 	}
+ 
+ 	update_backend_weight(p);
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* Remove a server from a tree. It must have previously been dequeued. This
+@@ -273,8 +266,7 @@ void fwrr_init_server_groups(struct proxy *p)
+ 	p->lbprm.wdiv = BE_WEIGHT_SCALE;
+ 	for (srv = p->srv; srv; srv = srv->next) {
+ 		srv->eweight = (srv->uweight * p->lbprm.wdiv + p->lbprm.wmult - 1) / p->lbprm.wmult;
+-		srv->prev_eweight = srv->eweight;
+-		srv->prev_state = srv->state;
++		srv_lb_commit_status(srv);
+ 	}
+ 
+ 	recount_servers(p);
+diff --git a/src/lb_map.c b/src/lb_map.c
+index 7ecd003..2d296d7 100644
+--- a/src/lb_map.c
++++ b/src/lb_map.c
+@@ -28,8 +28,7 @@ static void map_set_server_status_down(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (srv_is_usable(srv->state, srv->eweight))
+@@ -40,8 +39,7 @@ static void map_set_server_status_down(struct server *srv)
+ 	update_backend_weight(p);
+ 	p->lbprm.map.state |= LB_MAP_RECALC;
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function updates the map according to server <srv>'s new state */
+@@ -49,8 +47,7 @@ static void map_set_server_status_up(struct server *srv)
+ {
+ 	struct proxy *p = srv->proxy;
+ 
+-	if (srv->state == srv->prev_state &&
+-	    srv->eweight == srv->prev_eweight)
++	if (!srv_lb_status_changed(srv))
+ 		return;
+ 
+ 	if (!srv_is_usable(srv->state, srv->eweight))
+@@ -61,8 +58,7 @@ static void map_set_server_status_up(struct server *srv)
+ 	update_backend_weight(p);
+ 	p->lbprm.map.state |= LB_MAP_RECALC;
+  out_update_state:
+-	srv->prev_state = srv->state;
+-	srv->prev_eweight = srv->eweight;
++	srv_lb_commit_status(srv);
+ }
+ 
+ /* This function recomputes the server map for proxy px. It relies on
+@@ -181,8 +177,8 @@ void init_server_map(struct proxy *p)
+ 	act = bck = 0;
+ 	for (srv = p->srv; srv; srv = srv->next) {
+ 		srv->eweight = (srv->uweight * p->lbprm.wdiv + p->lbprm.wmult - 1) / p->lbprm.wmult;
+-		srv->prev_eweight = srv->eweight;
+-		srv->prev_state = srv->state;
++		srv_lb_commit_status(srv);
++
+ 		if (srv->state & SRV_BACKUP)
+ 			bck += srv->eweight;
+ 		else
+diff --git a/src/server.c b/src/server.c
+index a903e84..e0b200d 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -1143,7 +1143,7 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 			else
+ 				curproxy->srv_act++;
+ 
+-			newsrv->prev_state = newsrv->state;
++			srv_lb_commit_status(newsrv);
+ 		}
+ 	}
+ 	return 0;
+-- 
+1.8.3.2
+
