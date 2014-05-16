@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=keepalived-devel
-PKG_VERSION:=1.2.11
-PKG_RELEASE:=2
+PKG_VERSION:=1.2.13
+PKG_RELEASE:=1
 
 PKG_SOURCE:=keepalived-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:= http://www.keepalived.org/software
-PKG_MD5SUM:=6a5cee0d9e0a6b84b251b044cd8f3523
+PKG_MD5SUM:=5f5c038139c55b5af54deefbcce64e33
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/keepalived-$(PKG_VERSION)
 
