@@ -1,0 +1,200 @@
+From 8d44438032401a204c5c35758b03751383a20aad Mon Sep 17 00:00:00 2001
+From: Alexey Andriyanov <alan@al-an.info>
+Date: Wed, 21 May 2014 12:34:05 +0400
+Subject: [PATCH 5/6] fix -Wformat= warnings in log_message() calls
+
+---
+ keepalived/check/check_http.c    |  3 ++-
+ keepalived/check/check_smtp.c    | 11 ++++++-----
+ keepalived/check/ipwrapper.c     |  4 ++--
+ keepalived/core/global_parser.c  |  4 ++--
+ keepalived/vrrp/vrrp.c           |  2 +-
+ keepalived/vrrp/vrrp_data.c      |  8 ++++----
+ keepalived/vrrp/vrrp_ipaddress.c |  4 ++--
+ keepalived/vrrp/vrrp_parser.c    |  4 ++--
+ lib/vector.h                     |  1 +
+ 9 files changed, 22 insertions(+), 19 deletions(-)
+
+diff --git a/keepalived/check/check_http.c b/keepalived/check/check_http.c
+index 18431f9..4ab4436 100644
+--- a/keepalived/check/check_http.c
++++ b/keepalived/check/check_http.c
+@@ -258,7 +258,8 @@ epilog(thread_t * thread, int method, int t, int c)
+ 	if (http->retry_it > http_get_check->nb_get_retry-1) {
+ 		if (svr_checker_up(checker->id, checker->rs)) {
+ 			log_message(LOG_INFO, "Check on service %s failed after %d retry."
+-			       , FMT_HTTP_RS(checker));
++			       , FMT_HTTP_RS(checker)
++			       , http->retry_it);
+ 			smtp_alert(checker->rs, NULL, NULL,
+ 				   "DOWN",
+ 				   "=> CHECK failed on service"
+diff --git a/keepalived/check/check_smtp.c b/keepalived/check/check_smtp.c
+index a52b755..097b8ba 100644
+--- a/keepalived/check/check_smtp.c
++++ b/keepalived/check/check_smtp.c
+@@ -265,13 +265,14 @@ smtp_final(thread_t *thread, int error, const char *format, ...)
+ 		/* Always syslog the error when the real server is up */
+                 if (svr_checker_up(checker->id, checker->rs)) {
+ 			if (format != NULL) {
+-				memcpy(error_buff, "SMTP_CHECK ", 11);
++				/* prepend format with the "SMTP_CHECK " string */
++				error_buff[0] = '\0';
++				strncat(error_buff, "SMTP_CHECK ", sizeof(error_buff) - 1);
++				strncat(error_buff, format, sizeof(error_buff) - 11 - 1);
++
+ 				va_start(varg_list, format);
+-				vsnprintf(error_buff + 11, 512 - 11, format, varg_list);
++				log_message(LOG_INFO, error_buff, varg_list);
+ 				va_end(varg_list);
+-				error_buff[512 - 1] = '\0';
+-
+-				log_message(LOG_INFO, error_buff);
+ 			} else {
+ 				log_message(LOG_INFO, "SMTP_CHECK Unknown error");
+ 			}
+diff --git a/keepalived/check/ipwrapper.c b/keepalived/check/ipwrapper.c
+index 7cfbb64..64f7440 100644
+--- a/keepalived/check/ipwrapper.c
++++ b/keepalived/check/ipwrapper.c
+@@ -259,7 +259,7 @@ update_quorum_state(virtual_server_t * vs)
+ 	if (vs->quorum_state == DOWN &&
+ 	    weight_sum >= vs->quorum + vs->hysteresis) {
+ 		vs->quorum_state = UP;
+-		log_message(LOG_INFO, "Gained quorum %lu+%lu=%lu <= %u for VS %s"
++		log_message(LOG_INFO, "Gained quorum %lu+%lu=%lu <= %lu for VS %s"
+ 				    , vs->quorum
+ 				    , vs->hysteresis
+ 				    , vs->quorum + vs->hysteresis
+@@ -297,7 +297,7 @@ update_quorum_state(virtual_server_t * vs)
+ 	    weight_sum < vs->quorum - vs->hysteresis)
+ 	) {
+ 		vs->quorum_state = DOWN;
+-		log_message(LOG_INFO, "Lost quorum %lu-%lu=%lu > %u for VS %s"
++		log_message(LOG_INFO, "Lost quorum %lu-%lu=%lu > %lu for VS %s"
+ 				    , vs->quorum
+ 				    , vs->hysteresis
+ 				    , vs->quorum - vs->hysteresis
+diff --git a/keepalived/core/global_parser.c b/keepalived/core/global_parser.c
+index eed2eac..cb613bf 100644
+--- a/keepalived/core/global_parser.c
++++ b/keepalived/core/global_parser.c
+@@ -89,7 +89,7 @@ vrrp_mcast_group4_handler(vector_t *strvec)
+ 	ret = inet_stosockaddr(vector_slot(strvec, 1), 0, mcast);
+ 	if (ret < 0) {
+ 		log_message(LOG_ERR, "Configuration error: Cant parse vrrp_mcast_group4 [%s]. Skipping"
+-				   , vector_slot(strvec, 1));
++				   , FMT_STR_VSLOT(strvec, 1));
+ 	}
+ }
+ static void
+@@ -101,7 +101,7 @@ vrrp_mcast_group6_handler(vector_t *strvec)
+ 	ret = inet_stosockaddr(vector_slot(strvec, 1), 0, mcast);
+ 	if (ret < 0) {
+ 		log_message(LOG_ERR, "Configuration error: Cant parse vrrp_mcast_group6 [%s]. Skipping"
+-				   , vector_slot(strvec, 1));
++				   , FMT_STR_VSLOT(strvec, 1));
+ 	}
+ }
+ #ifdef _WITH_SNMP_
+diff --git a/keepalived/vrrp/vrrp.c b/keepalived/vrrp/vrrp.c
+index 2d41ae2..5509fe8 100644
+--- a/keepalived/vrrp/vrrp.c
++++ b/keepalived/vrrp/vrrp.c
+@@ -259,7 +259,7 @@ vrrp_in_chk(vrrp_t * vrrp, char *buffer)
+ 		 */
+ 		if ((ntohs(ip->tot_len) - ihl) <= sizeof(vrrphdr_t)) {
+ 			log_message(LOG_INFO,
+-			       "ip payload too short. %d and expect at least %d",
++			       "ip payload too short. %d and expect at least %lu",
+ 			       ntohs(ip->tot_len) - ihl, sizeof(vrrphdr_t));
+ 			return VRRP_PACKET_KO;
+ 		}
+diff --git a/keepalived/vrrp/vrrp_data.c b/keepalived/vrrp/vrrp_data.c
+index c051be5..10be35f 100644
+--- a/keepalived/vrrp/vrrp_data.c
++++ b/keepalived/vrrp/vrrp_data.c
+@@ -116,8 +116,8 @@ dump_vscript(void *data)
+ 
+ 	log_message(LOG_INFO, " VRRP Script = %s", vscript->sname);
+ 	log_message(LOG_INFO, "   Command = %s", vscript->script);
+-	log_message(LOG_INFO, "   Interval = %d sec", vscript->interval / TIMER_HZ);
+-	log_message(LOG_INFO, "   Timeout = %d sec", vscript->timeout / TIMER_HZ);
++	log_message(LOG_INFO, "   Interval = %d sec", (int)(vscript->interval / TIMER_HZ));
++	log_message(LOG_INFO, "   Timeout = %d sec", (int)(vscript->timeout / TIMER_HZ));
+ 	log_message(LOG_INFO, "   Weight = %d", vscript->weight);
+ 	log_message(LOG_INFO, "   Rise = %d", vscript->rise);
+ 	log_message(LOG_INFO, "   Fall = %d", vscript->fall);
+@@ -368,7 +368,7 @@ alloc_vrrp_unicast_peer(vector_t *strvec)
+ 	if (ret < 0) {
+ 		log_message(LOG_ERR, "Configuration error: VRRP instance[%s] malformed unicast"
+ 				     " peer address[%s]. Skipping..."
+-				   , vrrp->iname, vector_slot(strvec, 0));
++				   , vrrp->iname, FMT_STR_VSLOT(strvec, 0));
+ 		FREE(peer);
+ 		return;
+ 	}
+@@ -376,7 +376,7 @@ alloc_vrrp_unicast_peer(vector_t *strvec)
+ 	if (peer->ss_family != vrrp->family) {
+ 		log_message(LOG_ERR, "Configuration error: VRRP instance[%s] and unicast peer address"
+ 				     "[%s] MUST be of the same family !!! Skipping..."
+-				   , vrrp->iname, vector_slot(strvec, 0));
++				   , vrrp->iname, FMT_STR_VSLOT(strvec, 0));
+ 		FREE(peer);
+ 		return;
+ 	}
+diff --git a/keepalived/vrrp/vrrp_ipaddress.c b/keepalived/vrrp/vrrp_ipaddress.c
+index 36ee76d..f473205 100644
+--- a/keepalived/vrrp/vrrp_ipaddress.c
++++ b/keepalived/vrrp/vrrp_ipaddress.c
+@@ -265,12 +265,12 @@ alloc_ipaddress(list ip_list, vector_t *strvec, interface_t *ifp)
+ 			if (IP_IS6(new)) {
+ 				log_message(LOG_INFO, "VRRP is trying to assign a broadcast %s to the IPv6 address %s !!?? "
+ 						      "WTF... skipping VIP..."
+-						    , vector_slot(strvec, i), vector_slot(strvec, addr_idx));
++						    , FMT_STR_VSLOT(strvec, i), FMT_STR_VSLOT(strvec, addr_idx));
+ 				FREE(new);
+ 				return;
+ 			} else if (!inet_pton(AF_INET, vector_slot(strvec, ++i), &new->u.sin.sin_brd)) {
+ 				log_message(LOG_INFO, "VRRP is trying to assign invalid broadcast %s. "
+-						      "skipping VIP...", vector_slot(strvec, i));
++						      "skipping VIP...", FMT_STR_VSLOT(strvec, i));
+ 				FREE(new);
+ 				return;
+ 			}
+diff --git a/keepalived/vrrp/vrrp_parser.c b/keepalived/vrrp/vrrp_parser.c
+index 94a838d..1e060b5 100644
+--- a/keepalived/vrrp/vrrp_parser.c
++++ b/keepalived/vrrp/vrrp_parser.c
+@@ -205,14 +205,14 @@ vrrp_srcip_handler(vector_t *strvec)
+ 	if (ret < 0) {
+ 		log_message(LOG_ERR, "Configuration error: VRRP instance[%s] malformed unicast"
+ 				     " src address[%s]. Skipping..."
+-				   , vrrp->iname, vector_slot(strvec, 1));
++				   , vrrp->iname, FMT_STR_VSLOT(strvec, 1));
+ 		return;
+ 	}
+ 
+ 	if (saddr->ss_family != vrrp->family) {
+ 		log_message(LOG_ERR, "Configuration error: VRRP instance[%s] and unicast src address"
+ 				     "[%s] MUST be of the same family !!! Skipping..."
+-				   , vrrp->iname, vector_slot(strvec, 1));
++				   , vrrp->iname, FMT_STR_VSLOT(strvec, 1));
+ 		memset(saddr, 0, sizeof(struct sockaddr_storage));
+ 	}
+ }
+diff --git a/lib/vector.h b/lib/vector.h
+index 199dab1..1653678 100644
+--- a/lib/vector.h
++++ b/lib/vector.h
+@@ -39,6 +39,7 @@ typedef struct _vector {
+ #define vector_active(V) ((V)->active)
+ #define vector_foreach_slot(v,p,i) \
+ 	for (i = 0; i < (v)->allocated && ((p) = (v)->slot[i]); i++)
++#define FMT_STR_VSLOT(V,E) ((char*)vector_slot(V,E))
+ 
+ /* Prototypes */
+ extern vector_t *vector_alloc(void);
+-- 
+1.8.3.2
+

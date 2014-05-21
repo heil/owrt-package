@@ -1,0 +1,25 @@
+From e6e76468262eb8f2e38af53d0e9faa0ec427f8f6 Mon Sep 17 00:00:00 2001
+From: Alexey Andriyanov <alan@al-an.info>
+Date: Wed, 21 May 2014 11:55:50 +0400
+Subject: [PATCH 3/6] dump_conn_opts: fwmark was not displayed
+
+---
+ keepalived/check/check_api.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/keepalived/check/check_api.c b/keepalived/check/check_api.c
+index bae4030..6df05a2 100644
+--- a/keepalived/check/check_api.c
++++ b/keepalived/check/check_api.c
+@@ -62,6 +62,8 @@ dump_conn_opts (conn_opts_t *conn)
+ 	log_message(LOG_INFO, "   Connection dest = %s", inet_sockaddrtopair(&conn->dst));
+ 	if (conn->bindto.ss_family)
+ 		log_message(LOG_INFO, "   Bind to = %s", inet_sockaddrtopair(&conn->bindto));
++	if (conn->fwmark != 0)
++		log_message(LOG_INFO, "   Connection mark = %u", conn->fwmark);
+ 	log_message(LOG_INFO, "   Connection timeout = %d", conn->connection_to/TIMER_HZ);
+ }
+ 
+-- 
+1.8.3.2
+
