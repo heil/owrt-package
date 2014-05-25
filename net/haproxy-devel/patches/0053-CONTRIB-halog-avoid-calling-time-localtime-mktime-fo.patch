@@ -1,0 +1,74 @@
+From 9f66aa9cc40d5cc5405b23ddc100068474252fb4 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 23 May 2014 16:36:56 +0200
+Subject: [PATCH 53/54] CONTRIB: halog: avoid calling time/localtime/mktime for
+ each line
+
+The last commit provides time-based filtering. Unfortunately, it wastes
+90% of the time calling the expensive time()/localtime()/mktime()
+functions.
+
+This patch does 3 things :
+  - call time()/localtime() only once to initialize the correct
+    struct timeinfo ;
+
+  - call mktime() only when the time has changed regardless of
+    the current second.
+
+  - manually add the current second to the cached result.
+
+Doing just this is enough to multiply the parsing speed by 8.
+---
+ contrib/halog/halog.c | 22 +++++++++++++++++-----
+ 1 file changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/contrib/halog/halog.c b/contrib/halog/halog.c
+index 364bf90..c686de1 100644
+--- a/contrib/halog/halog.c
++++ b/contrib/halog/halog.c
+@@ -537,7 +537,8 @@ int convert_date_to_timestamp(const char *field)
+ 	unsigned char c;
+ 	const char *b, *e;
+ 	time_t rawtime;
+-	struct tm * timeinfo;
++	static struct tm * timeinfo;
++	static int last_res;
+ 
+ 	d = mo = y = h = m = s = 0;
+ 	e = field;
+@@ -651,17 +652,28 @@ int convert_date_to_timestamp(const char *field)
+ 		s = s * 10 + c;
+ 	}
+ 
+-	time(&rawtime);
+-	timeinfo = localtime(&rawtime);
++	if (likely(timeinfo)) {
++		if (timeinfo->tm_min == m &&
++		    timeinfo->tm_hour == h &&
++		    timeinfo->tm_mday == d &&
++		    timeinfo->tm_mon == mo - 1 &&
++		    timeinfo->tm_year == y - 1900)
++			return last_res + s;
++	}
++	else {
++		time(&rawtime);
++		timeinfo = localtime(&rawtime);
++	}
+ 
+-	timeinfo->tm_sec = s;
++	timeinfo->tm_sec = 0;
+ 	timeinfo->tm_min = m;
+ 	timeinfo->tm_hour = h;
+ 	timeinfo->tm_mday = d;
+ 	timeinfo->tm_mon = mo - 1;
+ 	timeinfo->tm_year = y - 1900;
++	last_res = mktime(timeinfo);
+ 
+-	return mktime(timeinfo);
++	return last_res + s;
+  out_err:
+ 	return -1;
+ }
+-- 
+1.8.3.2
+

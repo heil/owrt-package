@@ -1,0 +1,164 @@
+From 3209123fe7450def6991740f97624d820916ec53 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 16 May 2014 13:52:00 +0200
+Subject: [PATCH 26/54] MEDIUM: server: allow multi-level server tracking
+
+Now that it is possible to know whether a server is in forced maintenance
+or inherits its maintenance status from another one, it is possible to
+allow server tracking at more than one level. We still provide a loop
+detection however.
+
+Note that for the stats it's a bit trickier since we have to report the
+check state which corresponds to the state of the server at the end of
+the chain.
+---
+ doc/configuration.txt |  8 ++++----
+ src/cfgparse.c        | 23 ++++++++++++++++++-----
+ src/dumpstats.c       | 21 ++++++++++++++-------
+ src/server.c          |  8 ++++++--
+ 4 files changed, 42 insertions(+), 18 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index a5ec732..b81b78d 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -8999,10 +8999,10 @@ ssl
+   Supported in default-server: No
+ 
+ track [<proxy>/]<server>
+-  This option enables ability to set the current state of the server by
+-  tracking another one. Only a server with checks enabled can be tracked
+-  so it is not possible for example to track a server that tracks another
+-  one. If <proxy> is omitted the current one is used. If disable-on-404 is
++  This option enables ability to set the current state of the server by tracking
++  another one. It is possible to track a server which itself tracks another
++  server, provided that at the end of the chain, a server has health checks
++  enabled. If <proxy> is omitted the current one is used. If disable-on-404 is
+   used, it has to be enabled on both proxies.
+ 
+   Supported in default-server: No
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 08168a1..0a32df4 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6563,7 +6563,7 @@ out_uri_auth_compat:
+ 
+ 			if (newsrv->trackit) {
+ 				struct proxy *px;
+-				struct server *srv;
++				struct server *srv, *loop;
+ 				char *pname, *sname;
+ 
+ 				pname = newsrv->trackit;
+@@ -6597,11 +6597,24 @@ out_uri_auth_compat:
+ 					goto next_srv;
+ 				}
+ 
+-				if (!(srv->check.state & CHK_ST_CONFIGURED)) {
++				if (!(srv->check.state & CHK_ST_CONFIGURED) &&
++				    !(srv->agent.state & CHK_ST_CONFIGURED) &&
++				    !srv->track && !srv->trackit) {
+ 					Alert("config : %s '%s', server '%s': unable to use %s/%s for "
+-						"tracking as it does not have checks enabled.\n",
+-						proxy_type_str(curproxy), curproxy->id,
+-						newsrv->id, px->id, srv->id);
++					      "tracking as it does not have any check nor agent enabled.\n",
++					      proxy_type_str(curproxy), curproxy->id,
++					      newsrv->id, px->id, srv->id);
++					cfgerr++;
++					goto next_srv;
++				}
++
++				for (loop = srv->track; loop && loop != newsrv; loop = loop->track);
++
++				if (loop) {
++					Alert("config : %s '%s', server '%s': unable to track %s/%s as it "
++					      "belongs to a tracking chain looping back to %s/%s.\n",
++					      proxy_type_str(curproxy), curproxy->id,
++					      newsrv->id, px->id, srv->id, px->id, loop->id);
+ 					cfgerr++;
+ 					goto next_srv;
+ 				}
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index d0cd632..4d56e25 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -2737,11 +2737,19 @@ static int stats_dump_li_stats(struct stream_interface *si, struct proxy *px, st
+ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, int flags, struct server *sv, int state)
+ {
+ 	struct appctx *appctx = __objt_appctx(si->end);
+-	struct server *ref = sv->track ? sv->track : sv;
++	struct server *via, *ref;
+ 	char str[INET6_ADDRSTRLEN];
+ 	struct chunk src;
+ 	int i;
+ 
++	/* we have "via" which is the tracked server as described in the configuration,
++	 * and "ref" which is the checked server and the end of the chain.
++	 */
++	via = sv->track ? sv->track : sv;
++	ref = via;
++	while (ref->track)
++		ref = ref->track;
++
+ 	if (appctx->ctx.stats.flags & STAT_FMT_HTML) {
+ 		static char *srv_hlt_st[9] = {
+ 			"DOWN",
+@@ -2950,7 +2958,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			/* tracking a server */
+ 			chunk_appendf(&trash,
+ 			              "<td class=ac colspan=3><a class=lfsb href=\"#%s/%s\">via %s/%s</a></td>",
+-			              ref->proxy->id, ref->id, ref->proxy->id, ref->id);
++			              via->proxy->id, via->id, via->proxy->id, via->id);
+ 		}
+ 		else
+ 			chunk_appendf(&trash, "<td colspan=3></td>");
+@@ -3000,7 +3008,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 
+ 		/* status */
+ 		if (sv->admin & SRV_ADMF_IMAINT)
+-			chunk_appendf(&trash, "MAINT (via %s/%s),", ref->proxy->id, ref->id);
++			chunk_appendf(&trash, "MAINT (via %s/%s),", via->proxy->id, via->id);
+ 		else if (sv->admin & SRV_ADMF_MAINT)
+ 			chunk_appendf(&trash, "MAINT,");
+ 		else
+@@ -3582,10 +3590,9 @@ static int stats_dump_proxy_to_buffer(struct stream_interface *si, struct proxy
+ 					continue;
+ 			}
+ 
+-			if (sv->track)
+-				svs = sv->track;
+-			else
+-				svs = sv;
++			svs = sv;
++			while (svs->track)
++				svs = svs->track;
+ 
+ 			/* FIXME: produce some small strings for "UP/DOWN x/y &#xxxx;" */
+ 			if (!(svs->check.state & CHK_ST_ENABLED))
+diff --git a/src/server.c b/src/server.c
+index f0fb0a7..53e20bf 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -359,12 +359,16 @@ void srv_adm_set_ready(struct server *s, enum srv_admin mode)
+ 		check->health = check->rise; /* start OK but check immediately */
+ 	}
+ 
++	srv = s;
++	while (srv->track)
++		srv = srv->track;
++
+ 	if ((!s->track &&
+ 	     (!(s->agent.state & CHK_ST_ENABLED) || (s->agent.health >= s->agent.rise)) &&
+ 	     (!(s->check.state & CHK_ST_ENABLED) || (s->check.health >= s->check.rise))) ||
+ 	    (s->track &&
+-	     (!(s->track->agent.state & CHK_ST_ENABLED) || (s->track->agent.health >= s->track->agent.rise)) &&
+-	     (!(s->track->check.state & CHK_ST_ENABLED) || (s->track->check.health >= s->track->check.rise)))) {
++	     (!(srv->agent.state & CHK_ST_ENABLED) || (srv->agent.health >= srv->agent.rise)) &&
++	     (!(srv->check.state & CHK_ST_ENABLED) || (srv->check.health >= srv->check.rise)))) {
+ 
+ 		if (s->proxy->srv_bck == 0 && s->proxy->srv_act == 0) {
+ 			if (s->proxy->last_change < now.tv_sec)		// ignore negative times
+-- 
+1.8.3.2
+

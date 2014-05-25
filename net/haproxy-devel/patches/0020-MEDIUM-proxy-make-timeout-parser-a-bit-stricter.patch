@@ -1,0 +1,32 @@
+From fac5b5956b84e40358a7a3162be654baddc24e25 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 22 May 2014 08:24:46 +0200
+Subject: [PATCH 20/54] MEDIUM: proxy: make timeout parser a bit stricter
+
+Twice in a week I found people were surprized by a "conditional timeout" not
+being respected, because they add "if <cond>" after a timeout, and since
+they don't see any error nor read the doc, the expect it to work. Let's
+make the timeout parser reject extra arguments to avoid these situations.
+---
+ src/proxy.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/proxy.c b/src/proxy.c
+index 493df70..02103ee 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -233,6 +233,11 @@ static int proxy_parse_timeout(char **args, int section, struct proxy *proxy,
+ 		}
+ 	}
+ 
++	if (*args[2] != 0) {
++		memprintf(err, "'timeout %s' : unexpected extra argument '%s' after value '%s'.", name, args[2], args[1]);
++		retval = -1;
++	}
++
+ 	*tv = MS_TO_TICKS(timeout);
+ 	return retval;
+ }
+-- 
+1.8.3.2
+

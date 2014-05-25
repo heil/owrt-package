@@ -1,0 +1,62 @@
+From cf2924bc2537bb08cca81a3d9261ddb3293b1410 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 23 May 2014 12:15:15 +0200
+Subject: [PATCH 49/54] MEDIUM: stats: report down caused by agent prior to
+ reporting up
+
+When an agent is enabled and forces a down state, it's important to have
+this exact information and to report the agent's status, so let's check
+the agent before checking the health check.
+---
+ src/dumpstats.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 7cfe2d0..f6781a4 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -3013,6 +3013,10 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			chunk_appendf(&trash, "%s ", human_time(now.tv_sec - sv->last_change, 1));
+ 			chunk_appendf(&trash, "MAINT");
+ 		}
++		else if ((ref->agent.state & CHK_ST_ENABLED) && (ref->state == SRV_ST_STOPPED)) {
++			chunk_appendf(&trash, "%s ", human_time(now.tv_sec - ref->last_change, 1));
++			chunk_appendf(&trash, srv_hlt_st[1]); /* DOWN (agent) */
++		}
+ 		else if (ref->check.state & CHK_ST_ENABLED) {
+ 			chunk_appendf(&trash, "%s ", human_time(now.tv_sec - ref->last_change, 1));
+ 			chunk_appendf(&trash,
+@@ -3021,7 +3025,29 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			              (ref->state != SRV_ST_STOPPED) ? (ref->check.fall) : (ref->check.rise));
+ 		}
+ 
+-		if (sv->check.state & CHK_ST_ENABLED) {
++		if ((sv->state == SRV_ST_STOPPED) &&
++		    ((sv->agent.state & (CHK_ST_ENABLED|CHK_ST_PAUSED)) == CHK_ST_ENABLED) && !(sv->agent.health)) {
++			chunk_appendf(&trash,
++			              "</td><td class=ac><u> %s%s",
++			              (sv->agent.state & CHK_ST_INPROGRESS) ? "* " : "",
++			              get_check_status_info(sv->agent.status));
++
++			if (sv->agent.status >= HCHK_STATUS_L57DATA)
++				chunk_appendf(&trash, "/%d", sv->agent.code);
++
++			if (sv->agent.status >= HCHK_STATUS_CHECKED && sv->agent.duration >= 0)
++				chunk_appendf(&trash, " in %lums", sv->agent.duration);
++
++			chunk_appendf(&trash, "<div class=tips>%s",
++				      get_check_status_description(sv->agent.status));
++			if (*sv->agent.desc) {
++				chunk_appendf(&trash, ": ");
++				chunk_initlen(&src, sv->agent.desc, 0, strlen(sv->agent.desc));
++				chunk_htmlencode(&trash, &src);
++			}
++			chunk_appendf(&trash, "</div></u>");
++		}
++		else if ((sv->check.state & (CHK_ST_ENABLED|CHK_ST_PAUSED)) == CHK_ST_ENABLED) {
+ 			chunk_appendf(&trash,
+ 			              "</td><td class=ac><u> %s%s",
+ 			              (sv->check.state & CHK_ST_INPROGRESS) ? "* " : "",
+-- 
+1.8.3.2
+

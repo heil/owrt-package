@@ -1,0 +1,356 @@
+From 2012521d7bb417b9048b4f15df0dd9d8178c46e4 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 13 May 2014 19:44:56 +0200
+Subject: [PATCH 22/54] REORG/MEDIUM: server: move the maintenance bits out of
+ the server state
+
+Now we introduce srv->admin and srv->prev_admin which are bitfields
+containing one bit per source of administrative status (maintenance only
+for now). For the sake of backwards compatibility we implement a single
+source (ADMF_FMAINT) but the code already checks any source (ADMF_MAINT)
+where the STF_MAINTAIN bit was previously checked. This will later allow
+us to add ADMF_IMAINT for maintenance mode inherited from tracked servers.
+
+Along doing these changes, it appeared that some places will need to be
+revisited when implementing the inherited bit, this concerns all those
+modifying the ADMF_FMAINT bit (enable/disable actions on the CLI or stats
+page), and the checks to report "via" on the stats page. But currently
+the code is harmless.
+---
+ include/proto/backend.h | 10 ++++++++--
+ include/types/server.h  | 12 +++++++++++-
+ src/backend.c           |  2 +-
+ src/cfgparse.c          |  2 +-
+ src/checks.c            | 21 +++++++++++----------
+ src/dumpstats.c         | 30 +++++++++++++++---------------
+ src/server.c            |  3 ++-
+ 7 files changed, 49 insertions(+), 31 deletions(-)
+
+diff --git a/include/proto/backend.h b/include/proto/backend.h
+index 8043613..601a61a 100644
+--- a/include/proto/backend.h
++++ b/include/proto/backend.h
+@@ -61,7 +61,9 @@ static inline int srv_is_usable(const struct server *srv)
+ 
+ 	if (!srv->eweight)
+ 		return 0;
+-	if (state & (SRV_STF_GOINGDOWN | SRV_STF_MAINTAIN))
++	if (srv->admin & SRV_ADMF_MAINT)
++		return 0;
++	if (state & SRV_STF_GOINGDOWN)
+ 		return 0;
+ 	if (!(state & SRV_STF_RUNNING))
+ 		return 0;
+@@ -77,7 +79,9 @@ static inline int srv_was_usable(const struct server *srv)
+ 
+ 	if (!srv->prev_eweight)
+ 		return 0;
+-	if (state & (SRV_STF_GOINGDOWN | SRV_STF_MAINTAIN))
++	if (srv->prev_admin & SRV_ADMF_MAINT)
++		return 0;
++	if (state & SRV_STF_GOINGDOWN)
+ 		return 0;
+ 	if (!(state & SRV_STF_RUNNING))
+ 		return 0;
+@@ -90,6 +94,7 @@ static inline int srv_was_usable(const struct server *srv)
+ static inline void srv_lb_commit_status(struct server *srv)
+ {
+ 	srv->prev_state = srv->state;
++	srv->prev_admin = srv->admin;
+ 	srv->prev_eweight = srv->eweight;
+ }
+ 
+@@ -99,6 +104,7 @@ static inline void srv_lb_commit_status(struct server *srv)
+ static inline int srv_lb_status_changed(const struct server *srv)
+ {
+ 	return (srv->state != srv->prev_state ||
++		srv->admin != srv->prev_admin ||
+ 		srv->eweight != srv->prev_eweight);
+ }
+ 
+diff --git a/include/types/server.h b/include/types/server.h
+index 6b77b15..ba0a1a5 100644
+--- a/include/types/server.h
++++ b/include/types/server.h
+@@ -48,7 +48,16 @@ enum srv_state {
+ 	SRV_STF_RUNNING    = 0x1,        /* the server is UP */
+ 	SRV_STF_GOINGDOWN  = 0x2,        /* the server is going down (eg: 404) */
+ 	SRV_STF_WARMINGUP  = 0x4,        /* the server is warming up after a failure */
+-	SRV_STF_MAINTAIN   = 0x8,        /* the server is in maintenance mode */
++};
++
++/* Maintenance mode : each server may be in maintenance by itself or may inherit
++ * this status from another server it tracks. Let's store these origins here as
++ * flags. If no maintenance origin is specified, the server is not in maintenance.
++ */
++enum srv_admin {
++	SRV_ADMF_FMAINT    = 0x1,        /* the server was explicitly forced into maintenance */
++	SRV_ADMF_IMAINT    = 0x2,        /* the server has inherited the maintenance status from a tracked server */
++	SRV_ADMF_MAINT     = 0x3,        /* mask to check if any maintenance flag is present */
+ };
+ 
+ /* server flags */
+@@ -105,6 +114,7 @@ struct tree_occ {
+ struct server {
+ 	enum obj_type obj_type;                 /* object type == OBJ_TYPE_SERVER */
+ 	enum srv_state state, prev_state;       /* server state among SRV_STF_* */
++	enum srv_admin admin, prev_admin;       /* server maintenance status : SRV_ADMF_* */
+ 	unsigned char flags;                    /* server flags (SRV_F_*) */
+ 	struct server *next;
+ 	int cklen;				/* the len of the cookie, to speed up checks */
+diff --git a/src/backend.c b/src/backend.c
+index 3ce7415..0b4ff4d 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -1489,7 +1489,7 @@ smp_fetch_srv_is_up(struct proxy *px, struct session *l4, void *l7, unsigned int
+ 
+ 	smp->flags = SMP_F_VOL_TEST;
+ 	smp->type = SMP_T_BOOL;
+-	if (!(srv->state & SRV_STF_MAINTAIN) &&
++	if (!(srv->admin & SRV_ADMF_MAINT) &&
+ 	    (!(srv->check.state & CHK_ST_CONFIGURED) || (srv->state & SRV_STF_RUNNING)))
+ 		smp->data.uint = 1;
+ 	else
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index a002cb2..037eaa9 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -6617,7 +6617,7 @@ out_uri_auth_compat:
+ 				}
+ 
+ 				/* if the other server is forced disabled, we have to do the same here */
+-				if (srv->state & SRV_STF_MAINTAIN) {
++				if (srv->admin & SRV_ADMF_MAINT) {
+ 					newsrv->state &= ~SRV_STF_RUNNING;
+ 					newsrv->check.health = 0;
+ 					newsrv->agent.health = 0;
+diff --git a/src/checks.c b/src/checks.c
+index 9228c89..f4bfd54 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -412,7 +412,7 @@ void set_server_down(struct check *check)
+ 	struct server *srv;
+ 	int xferred;
+ 
+-	if (s->state & SRV_STF_MAINTAIN) {
++	if (s->admin & SRV_ADMF_MAINT) {
+ 		check->health = check->rise;
+ 	}
+ 
+@@ -436,7 +436,7 @@ void set_server_down(struct check *check)
+ 
+ 		chunk_reset(&trash);
+ 
+-		if (s->state & SRV_STF_MAINTAIN) {
++		if (s->admin & SRV_ADMF_MAINT) {
+ 			chunk_appendf(&trash,
+ 			             "%sServer %s/%s is DOWN for maintenance", s->flags & SRV_F_BACKUP ? "Backup " : "",
+ 			             s->proxy->id, s->id);
+@@ -463,7 +463,7 @@ void set_server_down(struct check *check)
+ 		s->counters.down_trans++;
+ 
+ 		for (srv = s->trackers; srv; srv = srv->tracknext)
+-			if (!(srv->state & SRV_STF_MAINTAIN))
++			if (!(srv->admin & SRV_ADMF_MAINT))
+ 				/* Only notify tracking servers that are not already in maintenance. */
+ 				set_server_down(&srv->check);
+ 	}
+@@ -476,9 +476,9 @@ void set_server_up(struct check *check) {
+ 	struct server *s = check->server;
+ 	struct server *srv;
+ 	int xferred;
+-	enum srv_state old_state = s->state;
++	enum srv_admin old_admin = s->admin;
+ 
+-	if (s->state & SRV_STF_MAINTAIN) {
++	if (s->admin & SRV_ADMF_MAINT) {
+ 		check->health = check->rise;
+ 	}
+ 
+@@ -499,7 +499,7 @@ void set_server_up(struct check *check) {
+ 
+ 		s->last_change = now.tv_sec;
+ 		s->state |= SRV_STF_RUNNING;
+-		s->state &= ~SRV_STF_MAINTAIN;
++		s->admin &= ~SRV_ADMF_FMAINT;
+ 		s->check.state &= ~CHK_ST_PAUSED;
+ 
+ 		if (s->slowstart > 0) {
+@@ -525,7 +525,7 @@ void set_server_up(struct check *check) {
+ 
+ 		chunk_reset(&trash);
+ 
+-		if (old_state & SRV_STF_MAINTAIN) {
++		if (old_admin) {
+ 			chunk_appendf(&trash,
+ 			             "%sServer %s/%s is UP (leaving maintenance)", s->flags & SRV_F_BACKUP ? "Backup " : "",
+ 			             s->proxy->id, s->id);
+@@ -543,7 +543,7 @@ void set_server_up(struct check *check) {
+ 		send_log(s->proxy, LOG_NOTICE, "%s.\n", trash.str);
+ 
+ 		for (srv = s->trackers; srv; srv = srv->tracknext)
+-			if (!(srv->state & SRV_STF_MAINTAIN))
++			if (!(srv->admin & SRV_ADMF_MAINT))
+ 				/* Only notify tracking servers if they're not in maintenance. */
+ 				set_server_up(&srv->check);
+ 	}
+@@ -1480,7 +1480,8 @@ static struct task *server_warmup(struct task *t)
+ 
+ 	/* by default, plan on stopping the task */
+ 	t->expire = TICK_ETERNITY;
+-	if ((s->state & (SRV_STF_RUNNING|SRV_STF_WARMINGUP|SRV_STF_MAINTAIN)) != (SRV_STF_RUNNING|SRV_STF_WARMINGUP))
++	if ((s->admin & SRV_ADMF_MAINT) ||
++	    (s->state & (SRV_STF_RUNNING|SRV_STF_WARMINGUP)) != (SRV_STF_RUNNING|SRV_STF_WARMINGUP))
+ 		return t;
+ 
+ 	server_recalc_eweight(s);
+@@ -1707,7 +1708,7 @@ static struct task *process_chk(struct task *t)
+ 					set_server_disabled(check);
+ 			}
+ 
+-			if (!(s->state & SRV_STF_MAINTAIN) &&
++			if (!(s->admin & SRV_ADMF_MAINT) &&
+ 			    check->health < check->rise + check->fall - 1) {
+ 				check->health++; /* was bad, stays for a while */
+ 				set_server_up(check);
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 47328ce..1de4199 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -1710,7 +1710,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			if (!sv)
+ 				return 1;
+ 
+-			if (sv->state & SRV_STF_MAINTAIN) {
++			if (sv->admin & SRV_ADMF_MAINT) {
+ 				/* The server is really in maintenance, we can change the server state */
+ 				if (sv->track) {
+ 					/* If this server tracks the status of another one,
+@@ -1720,7 +1720,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 						set_server_up(&sv->check);
+ 						sv->check.health = sv->check.rise;	/* up, but will fall down at first failure */
+ 					} else {
+-						sv->state &= ~SRV_STF_MAINTAIN;
++						sv->admin &= ~SRV_ADMF_FMAINT;
+ 						sv->check.state &= ~CHK_ST_PAUSED;
+ 						set_server_down(&sv->check);
+ 					}
+@@ -1782,9 +1782,9 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ 			if (!sv)
+ 				return 1;
+ 
+-			if (! (sv->state & SRV_STF_MAINTAIN)) {
++			if (!(sv->admin & SRV_ADMF_MAINT)) {
+ 				/* Not already in maintenance, we can change the server state */
+-				sv->state |= SRV_STF_MAINTAIN;
++				sv->admin |= SRV_ADMF_FMAINT;
+ 				sv->check.state |= CHK_ST_PAUSED;
+ 				set_server_down(&sv->check);
+ 			}
+@@ -2780,7 +2780,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			"<i>no check</i>"
+ 		};
+ 
+-		if ((sv->state & SRV_STF_MAINTAIN) || (ref->state & SRV_STF_MAINTAIN))
++		if ((sv->admin | ref->admin) & SRV_ADMF_MAINT)
+ 			chunk_appendf(&trash, "<tr class=\"maintain\">");
+ 		else
+ 			chunk_appendf(&trash,
+@@ -2911,11 +2911,11 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		/* status, lest check */
+ 		chunk_appendf(&trash, "<td class=ac>");
+ 
+-		if (sv->state & SRV_STF_MAINTAIN) {
++		if (sv->admin & SRV_ADMF_MAINT) {
+ 			chunk_appendf(&trash, "%s ", human_time(now.tv_sec - sv->last_change, 1));
+ 			chunk_appendf(&trash, "MAINT");
+ 		}
+-		else if (ref != sv && ref->state & SRV_STF_MAINTAIN) {
++		else if (ref != sv && (ref->admin & SRV_ADMF_MAINT)) {
+ 			chunk_appendf(&trash, "%s ", human_time(now.tv_sec - ref->last_change, 1));
+ 			chunk_appendf(&trash, "MAINT(via)");
+ 		}
+@@ -2976,7 +2976,7 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			              ref->counters.down_trans, human_time(srv_downtime(sv), 1));
+ 		}
+ 		else if (sv != ref) {
+-			if (sv->state & SRV_STF_MAINTAIN)
++			if (sv->admin & SRV_ADMF_MAINT)
+ 				chunk_appendf(&trash, "<td class=ac colspan=3></td>");
+ 			else
+ 				chunk_appendf(&trash,
+@@ -3030,9 +3030,9 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		              sv->counters.retries, sv->counters.redispatches);
+ 
+ 		/* status */
+-		if (sv->state & SRV_STF_MAINTAIN)
++		if (sv->admin & SRV_ADMF_MAINT)
+ 			chunk_appendf(&trash, "MAINT,");
+-		else if (ref != sv && ref->state & SRV_STF_MAINTAIN)
++		else if (ref != sv && (ref->admin & SRV_ADMF_MAINT))
+ 			chunk_appendf(&trash, "MAINT(via),");
+ 		else
+ 			chunk_appendf(&trash,
+@@ -3638,7 +3638,7 @@ static int stats_dump_proxy_to_buffer(struct stream_interface *si, struct proxy
+ 				else
+ 					sv_state = 0; /* DOWN */
+ 
+-			if (((sv_state == 0) || (sv->state & SRV_STF_MAINTAIN)) && (appctx->ctx.stats.flags & STAT_HIDE_DOWN)) {
++			if (((sv_state == 0) || (sv->admin & SRV_ADMF_MAINT)) && (appctx->ctx.stats.flags & STAT_HIDE_DOWN)) {
+ 				/* do not report servers which are DOWN */
+ 				appctx->ctx.stats.sv = sv->next;
+ 				continue;
+@@ -4249,9 +4249,9 @@ static int stats_process_http_post(struct stream_interface *si)
+ 				else if ((sv = findserver(px, value)) != NULL) {
+ 					switch (action) {
+ 					case ST_ADM_ACTION_DISABLE:
+-						if ((px->state != PR_STSTOPPED) && !(sv->state & SRV_STF_MAINTAIN)) {
++						if ((px->state != PR_STSTOPPED) && !(sv->admin & SRV_ADMF_MAINT)) {
+ 							/* Not already in maintenance, we can change the server state */
+-							sv->state |= SRV_STF_MAINTAIN;
++							sv->admin |= SRV_ADMF_FMAINT;
+ 							sv->check.state |= CHK_ST_PAUSED;
+ 							set_server_down(&sv->check);
+ 							altered_servers++;
+@@ -4259,7 +4259,7 @@ static int stats_process_http_post(struct stream_interface *si)
+ 						}
+ 						break;
+ 					case ST_ADM_ACTION_ENABLE:
+-						if ((px->state != PR_STSTOPPED) && (sv->state & SRV_STF_MAINTAIN)) {
++						if ((px->state != PR_STSTOPPED) && (sv->admin & SRV_ADMF_MAINT)) {
+ 							/* Already in maintenance, we can change the server state.
+ 							 * If this server tracks the status of another one,
+ 							 * we must restore the good status.
+@@ -4269,7 +4269,7 @@ static int stats_process_http_post(struct stream_interface *si)
+ 								sv->check.health = sv->check.rise;	/* up, but will fall down at first failure */
+ 							}
+ 							else {
+-								sv->state &= ~SRV_STF_MAINTAIN;
++								sv->admin &= ~SRV_ADMF_FMAINT;
+ 								sv->check.state &= ~CHK_ST_PAUSED;
+ 								set_server_down(&sv->check);
+ 							}
+diff --git a/src/server.c b/src/server.c
+index dc0883e..7309f42 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -346,6 +346,7 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 			do_check = 0;
+ 			do_agent = 0;
+ 			newsrv->flags = 0;
++			newsrv->admin = 0;
+ 			newsrv->state = SRV_STF_RUNNING; /* early server setup */
+ 			newsrv->last_change = now.tv_sec;
+ 			newsrv->id = strdup(args[1]);
+@@ -680,7 +681,7 @@ int parse_server(const char *file, int linenum, char **args, struct proxy *curpr
+ 				cur_arg += 1;
+ 			}
+ 			else if (!defsrv && !strcmp(args[cur_arg], "disabled")) {
+-				newsrv->state |= SRV_STF_MAINTAIN;
++				newsrv->admin |= SRV_ADMF_FMAINT;
+ 				newsrv->state &= ~SRV_STF_RUNNING;
+ 				newsrv->check.state |= CHK_ST_PAUSED;
+ 				newsrv->check.health = 0;
+-- 
+1.8.3.2
+
