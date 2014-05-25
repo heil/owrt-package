@@ -204,8 +204,6 @@ define Package/nginx/install
 	$(INSTALL_DATA) $(addprefix $(PKG_INSTALL_DIR)/etc/nginx/,$(config_files)) $(1)/etc/nginx/
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/nginx.init $(1)/etc/init.d/nginx
-	$(if $(CONFIG_NGINX_NAXSI),$(call Package/nginx-naxsi/install))
-	$(if $(CONFIG_NGINX_PROXYPROTOCOL),$(call Package/nginx-proxyprotocol/install))
 endef
 
 define Build/Prepare
@@ -264,11 +262,15 @@ define  Prepare/nginx-naxsi
 endef
 
 define Package/nginx-naxsi/install
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/nginx-naxsi/naxsi_config/naxsi_core.rules $(PKG_INSTALL_DIR)/etc/nginx
+	$(INSTALL_DIR) $(1)/etc/nginx
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/nginx-naxsi/naxsi_config/naxsi_core.rules $(1)/etc/nginx
+	chmod 0640 $(1)/etc/nginx/naxsi_core.rules
 endef
 
 define Package/nginx-proxyprotocol/install
-	$(INSTALL_BIN) ./files/nginx.proxyprotocol.example $(PKG_INSTALL_DIR)/etc/nginx/nginx.conf.proxyprotocol
+	$(INSTALL_DIR) $(1)/etc/nginx
+	$(INSTALL_BIN) ./files/nginx.proxyprotocol.example $(1)/etc/nginx/nginx.conf.proxyprotocol
+	chmod 0640 $(1)/etc/nginx/nginx.conf.proxyprotocol
 endef
 
 $(eval $(call BuildPackage,nginx))
