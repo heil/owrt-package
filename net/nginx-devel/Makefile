@@ -174,6 +174,9 @@ endif
 ifeq ($(CONFIG_NGINX_PROXYPROTOCOL),y)
   ADDITIONAL_MODULES += --with-proxy-protocol
 endif
+ifeq ($(CONFIG_NGINX_SYSLOG),y)
+  ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-syslog
+endif
 
 
 define Build/Configure
@@ -210,6 +213,7 @@ define Build/Prepare
 	$(call Build/Prepare/Default)
 	$(if $(CONFIG_NGINX_LUA),$(call Prepare/lua-nginx))
 	$(if $(CONFIG_NGINX_NAXSI),$(call Prepare/nginx-naxsi))
+	$(if $(CONFIG_NGINX_SYSLOG),$(call Prepare/nginx-syslog))
 endef
 
 define Download/lua-nginx
@@ -248,6 +252,17 @@ define Package/nginx-proxyprotocol/description
         IMPLEMENT Proxy Protocol
 endef
 
+define Package/nginx-syslog
+        MENU:=1
+        $(call Package/nginx)
+        TITLE+= nginx-syslog
+        DEPENDS:=nginx
+endef
+
+define Package/nginx-syslog/description
+        IMPLEMENT Syslog Protocol
+endef
+
 define Download/nginx-naxsi
 	VERSION:=bd2f58c49fdb0b7168a152abc72ef0035eddcc9e
 	SUBDIR:=nginx-naxsi
@@ -267,13 +282,34 @@ define Package/nginx-naxsi/install
 	chmod 0640 $(1)/etc/nginx/naxsi_core.rules
 endef
 
+define Download/nginx-syslog
+	VERSION:=7abf48e52552c40a21463e1a8c608e0e575261cd
+	SUBDIR:=nginx-syslog
+	FILE:=nginx-syslog-module-$(PKG_VERSION)-$$(VERSION).tar.gz
+	URL:=https://github.com/splitice/nginx_syslog_patch.git
+	PROTO:=git
+endef
+
+define  Prepare/nginx-syslog
+	$(eval $(call Download,nginx-syslog))
+	gzip -dc $(DL_DIR)/$(FILE) | tar -C $(PKG_BUILD_DIR) $(TAR_OPTIONS)
+endef
+
 define Package/nginx-proxyprotocol/install
 	$(INSTALL_DIR) $(1)/etc/nginx
 	$(INSTALL_BIN) ./files/nginx.proxyprotocol.example $(1)/etc/nginx/nginx.conf.proxyprotocol
 	chmod 0640 $(1)/etc/nginx/nginx.conf.proxyprotocol
 endef
 
+define Package/nginx-syslog/install
+	$(INSTALL_DIR) $(1)/etc/nginx
+	$(INSTALL_BIN) ./files/nginx.syslog.example $(1)/etc/nginx/nginx.conf.syslog
+	chmod 0640 $(1)/etc/nginx/nginx.conf.syslog
+endef
+
+
 $(eval $(call BuildPackage,nginx))
 $(eval $(call BuildPackage,nginx-naxsi))
 $(eval $(call BuildPackage,nginx-proxyprotocol))
+$(eval $(call BuildPackage,nginx-syslog))
 

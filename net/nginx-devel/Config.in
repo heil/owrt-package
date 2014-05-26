@@ -172,4 +172,12 @@ config NGINX_PROXYPROTOCOL
 	help
 		Enable support for NAXSI WAF.
 
+config NGINX_SYSLOG
+	bool
+	prompt "Enable Syslog module"
+	select PACKAGE_nginx-syslog
+	help
+		Provides the ability log to a remote destination
+
+
 endmenu
