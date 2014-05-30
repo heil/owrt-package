@@ -9,11 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nginx
 PKG_VERSION:=1.4.4
-<<<<<<< HEAD
 PKG_RELEASE:=3
-=======
-PKG_RELEASE:=2
->>>>>>> 0f704727cf55e387aa189d75c2d4bdf8ff3cb3c0
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://nginx.org/download/
