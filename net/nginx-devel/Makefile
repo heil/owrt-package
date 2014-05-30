@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nginx
 PKG_VERSION:=1.4.4
-PKG_RELEASE:=1
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://nginx.org/download/
@@ -77,7 +77,9 @@ define Package/nginx/conffiles
 endef
 
 ADDITIONAL_MODULES:=
-
+ifeq ($(CONFIG_NGINX_NAXSI),y)
+  ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-naxsi/naxsi_src
+endif
 ifeq ($(CONFIG_IPV6),y)
   ADDITIONAL_MODULES += --with-ipv6
 endif
@@ -168,9 +170,6 @@ endif
 ifneq ($(CONFIG_NGINX_HTTP_UPSTREAM_IP_HASH),y)
   ADDITIONAL_MODULES += --without-http_upstream_ip_hash_module
 endif
-ifeq ($(CONFIG_NGINX_NAXSI),y)
-  ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-naxsi/naxsi_src
-endif
 ifeq ($(CONFIG_NGINX_PROXYPROTOCOL),y)
   ADDITIONAL_MODULES += --with-proxy-protocol
 endif
@@ -187,6 +186,7 @@ define Build/Configure
 			--crossbuild=Linux::$(ARCH) \
 			--prefix=/usr \
 			--conf-path=/etc/nginx/nginx.conf \
+			$(ADDITIONAL_MODULES) \
 			--error-log-path=/var/log/nginx/error.log \
 			--pid-path=/var/run/nginx.pid \
 			--lock-path=/var/lock/nginx.lock \
@@ -196,8 +196,7 @@ define Build/Configure
 			--http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
 			--with-cc="$(TARGET_CC)" \
 			--with-cc-opt="$(TARGET_CPPFLAGS) $(TARGET_CFLAGS)" \
-			--with-ld-opt="$(TARGET_LDFLAGS)" \
-			$(ADDITIONAL_MODULES) )
+			--with-ld-opt="$(TARGET_LDFLAGS)" )
 endef
 
 define Package/nginx/install
@@ -264,7 +263,7 @@ define Package/nginx-syslog/description
 endef
 
 define Download/nginx-naxsi
-	VERSION:=bd2f58c49fdb0b7168a152abc72ef0035eddcc9e
+	VERSION:=34dcb45fe4fdcb144c5258d83672f8e1e1c8db2e
 	SUBDIR:=nginx-naxsi
 	FILE:=nginx-naxsi-module-$(PKG_VERSION)-$$(VERSION).tar.gz
 	URL:=https://github.com/nbs-system/naxsi.git
