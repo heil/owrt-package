@@ -1,0 +1,29 @@
+From fd2dd6876e1862af519c93f37c08946e1d14abf1 Mon Sep 17 00:00:00 2001
+From: Ryan O'Hara <rohara@redhat.com>
+Date: Wed, 21 May 2014 14:11:05 -0500
+Subject: [PATCH 7/8] Add SNMP subsystem option to man page
+
+The keepalived(8) man page did not mention the -x option to enable the
+SNMP subsystem. This patch adds the -x (and --smmp) options to the
+keepalived(8) man page, as described in the keepalived help message.
+---
+ doc/man/man8/keepalived.8 | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/doc/man/man8/keepalived.8 b/doc/man/man8/keepalived.8
+index 94c366a..7219887 100644
+--- a/doc/man/man8/keepalived.8
++++ b/doc/man/man8/keepalived.8
+@@ -91,6 +91,9 @@ the VRRP child process is "/var/run/keepalived_vrrp.pid".
+ Use specified pidfile for checkers child process. The default pidfile
+ for the checker child process is "/var/run/keepalived_checkers.pid".
+ .TP
++\fB -x, --snmp\fP
++Enable SNMP subsystem.
++.TP
+ \fB -v, --version\fP
+ Display the version and exit.
+ .TP
+-- 
+1.8.3.2
+
