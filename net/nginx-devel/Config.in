@@ -179,5 +179,9 @@ config NGINX_SYSLOG
 	help
 		Provides the ability log to a remote destination
 
+config NGINX_HTTP_UPSTREAM_CHECK
+	bool
+	prompt "Enable HTTP upstream check module"
+	default y
 
 endmenu

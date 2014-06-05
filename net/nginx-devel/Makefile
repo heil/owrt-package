@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nginx
-PKG_VERSION:=1.4.4
-PKG_RELEASE:=3
+PKG_VERSION:=1.4.7
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://nginx.org/download/
-PKG_MD5SUM:=5dfaba1cbeae9087f3949860a02caa9f
+PKG_MD5SUM:=aee151d298dcbfeb88b3f7dd3e7a4d17
 
 PKG_BUILD_PARALLEL:=1
 PKG_INSTALL:=1
@@ -176,7 +176,9 @@ endif
 ifeq ($(CONFIG_NGINX_SYSLOG),y)
   ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-syslog
 endif
-
+ifeq ($(CONFIG_NGINX_HTTP_UPSTREAM_CHECK),y)
+  ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-upstream-check
+endif
 
 define Build/Configure
 	# TODO: fix --crossbuild
@@ -213,6 +215,7 @@ define Build/Prepare
 	$(if $(CONFIG_NGINX_LUA),$(call Prepare/lua-nginx))
 	$(if $(CONFIG_NGINX_NAXSI),$(call Prepare/nginx-naxsi))
 	$(if $(CONFIG_NGINX_SYSLOG),$(call Prepare/nginx-syslog))
+	$(if $(CONFIG_NGINX_HTTP_UPSTREAM_CHECK),$(call Prepare/nginx-upstream-check))
 endef
 
 define Download/lua-nginx
@@ -228,6 +231,21 @@ define  Prepare/lua-nginx
 	gzip -dc $(DL_DIR)/$(FILE) | tar -C $(PKG_BUILD_DIR) $(TAR_OPTIONS)
 	$(call PatchDir,$(PKG_BUILD_DIR),./patches-lua-nginx)
 endef
+
+define Download/nginx-upstream-check
+	VERSION:=d40b9f956d9d978005bb15616d2f283d4e3d2031
+	SUBDIR:=nginx-upstream-check
+	FILE:=nginx-upstream-check-$(PKG_VERSION)-$$(VERSION).tar.gz
+	URL:=https://github.com/yaoweibin/nginx_upstream_check_module.git
+	PROTO:=git
+endef
+
+define  Prepare/nginx-upstream-check
+	$(eval $(call Download,nginx-upstream-check))
+	gzip -dc $(DL_DIR)/$(FILE) | tar -C $(PKG_BUILD_DIR) $(TAR_OPTIONS)
+	$(call PatchDir,$(PKG_BUILD_DIR),./patches-nginx-upstream-check)
+endef
+
 
 define Package/nginx-naxsi
         MENU:=1
