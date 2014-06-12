@@ -1,0 +1,35 @@
+From 1b48cc9c6f99ad49a4b93a0d861cea49617ee921 Mon Sep 17 00:00:00 2001
+From: Simone Gotti <simone.gotti@gmail.com>
+Date: Wed, 11 Jun 2014 12:25:28 +0200
+Subject: [PATCH 7/9] BUG/MEDIUM: fix ignored values for half-closed timeouts
+ (client-fin and server-fin) in defaults section.
+
+Signed-off-by: Simone Gotti <simone.gotti@gmail.com>
+WT: bug introduced with the new feature in 1.5-dev25, no backport is needed.
+---
+ src/cfgparse.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 35f1824..a3edc32 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2007,6 +2007,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 
+ 		if (curproxy->cap & PR_CAP_FE) {
+ 			curproxy->timeout.client = defproxy.timeout.client;
++			curproxy->timeout.clientfin = defproxy.timeout.clientfin;
+ 			curproxy->timeout.tarpit = defproxy.timeout.tarpit;
+ 			curproxy->timeout.httpreq = defproxy.timeout.httpreq;
+ 			curproxy->timeout.httpka = defproxy.timeout.httpka;
+@@ -2035,6 +2036,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 		if (curproxy->cap & PR_CAP_BE) {
+ 			curproxy->timeout.connect = defproxy.timeout.connect;
+ 			curproxy->timeout.server = defproxy.timeout.server;
++			curproxy->timeout.serverfin = defproxy.timeout.serverfin;
+ 			curproxy->timeout.check = defproxy.timeout.check;
+ 			curproxy->timeout.queue = defproxy.timeout.queue;
+ 			curproxy->timeout.tarpit = defproxy.timeout.tarpit;
+-- 
+1.8.3.2
+
