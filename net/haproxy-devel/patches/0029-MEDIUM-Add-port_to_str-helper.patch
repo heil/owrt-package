@@ -1,0 +1,85 @@
+From 75ab8bdb8369d98342a0a5d99f5d6e8dce87e3b7 Mon Sep 17 00:00:00 2001
+From: Simon Horman <horms@verge.net.au>
+Date: Mon, 16 Jun 2014 09:39:41 +0900
+Subject: [PATCH 29/30] MEDIUM: Add port_to_str helper
+
+This helper is similar to addr_to_str but
+tries to convert the port rather than the address
+of a struct sockaddr_storage.
+
+This is in preparation for supporting
+an external agent check.
+
+Signed-off-by: Simon Horman <horms@verge.net.au>
+---
+ include/common/standard.h |  8 ++++++++
+ src/standard.c            | 34 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index 8acd277..ecac1e0 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -291,6 +291,14 @@ int url2sa(const char *url, int ulen, struct sockaddr_storage *addr, struct spli
+  */
+ int addr_to_str(struct sockaddr_storage *addr, char *str, int size);
+ 
++/* Tries to convert a sockaddr_storage port to text form. Upon success, the
++ * address family is returned so that it's easy for the caller to adapt to the
++ * output format. Zero is returned if the address family is not supported. -1
++ * is returned upon error, with errno set. AF_INET, AF_INET6 and AF_UNIX are
++ * supported.
++ */
++int port_to_str(struct sockaddr_storage *addr, char *str, int size);
++
+ /* will try to encode the string <string> replacing all characters tagged in
+  * <map> with the hexadecimal representation of their ASCII-code (2 digits)
+  * prefixed by <escape>, and will store the result between <start> (included)
+diff --git a/src/standard.c b/src/standard.c
+index 06176d7..b0c5fe6 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -1156,6 +1156,40 @@ int addr_to_str(struct sockaddr_storage *addr, char *str, int size)
+ 	return -1;
+ }
+ 
++/* Tries to convert a sockaddr_storage port to text form. Upon success, the
++ * address family is returned so that it's easy for the caller to adapt to the
++ * output format. Zero is returned if the address family is not supported. -1
++ * is returned upon error, with errno set. AF_INET, AF_INET6 and AF_UNIX are
++ * supported.
++ */
++int port_to_str(struct sockaddr_storage *addr, char *str, int size)
++{
++
++	uint16_t port;
++
++
++	if (size < 5)
++		return 0;
++	*str = '\0';
++
++	switch (addr->ss_family) {
++	case AF_INET:
++		port = ((struct sockaddr_in *)addr)->sin_port;
++		break;
++	case AF_INET6:
++		port = ((struct sockaddr_in6 *)addr)->sin6_port;
++		break;
++	case AF_UNIX:
++		memcpy(str, "unix", 5);
++		return addr->ss_family;
++	default:
++		return 0;
++	}
++
++	snprintf(str, size, "%u", ntohs(port));
++	return addr->ss_family;
++}
++
+ /* will try to encode the string <string> replacing all characters tagged in
+  * <map> with the hexadecimal representation of their ASCII-code (2 digits)
+  * prefixed by <escape>, and will store the result between <start> (included)
+-- 
+1.8.3.2
+

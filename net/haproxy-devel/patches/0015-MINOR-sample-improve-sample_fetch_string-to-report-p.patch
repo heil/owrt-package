@@ -1,0 +1,65 @@
+From 5b4bf70a95b745f4316d91e80ecf58e11fa60ebf Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 13 Jun 2014 16:04:35 +0200
+Subject: [PATCH 15/30] MINOR: sample: improve sample_fetch_string() to report
+ partial contents
+
+Currently, all callers to sample_fetch_string() call it with SMP_OPT_FINAL.
+Now we improve it to support the case where this option is not set, and to
+make it return the original sample as-is. The purpose is to let the caller
+check the SMP_F_MAY_CHANGE flag in the result and know that it should wait
+to get complete contents. Currently this has no effect on existing code.
+---
+ src/sample.c | 23 ++++++++++++++++-------
+ 1 file changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/src/sample.c b/src/sample.c
+index a1e8012..66c9a9c 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -1144,19 +1144,27 @@ int smp_resolve_args(struct proxy *p)
+ }
+ 
+ /*
+- * Process a fetch + format conversion as defined by the sample expression <expr>
+- * on request or response considering the <opt> parameter. The output is always of
+- * type string. Returns either NULL if no sample could be extracted, or a pointer
+- * to the converted result stored in static temp_smp in format string.
++ * Process a fetch + format conversion as defined by the sample expression
++ * <expr> on request or response considering the <opt> parameter. The output is
++ * always of type string. If a stable sample can be fetched, or an unstable one
++ * when <opt> contains SMP_OPT_FINAL, the sample is converted to a string and
++ * returned without the SMP_F_MAY_CHANGE flag. If an unstable sample is found
++ * and <opt> does not contain SMP_OPT_FINAL, then the sample is returned as-is
++ * with its SMP_F_MAY_CHANGE flag so that the caller can check it and decide to
++ * take actions (eg: wait longer). If a sample could not be found or could not
++ * be converted, NULL is returned.
+  */
+ struct sample *sample_fetch_string(struct proxy *px, struct session *l4, void *l7,
+                                    unsigned int opt, struct sample_expr *expr)
+ {
+-	struct sample *smp;
++	struct sample *smp = &temp_smp;
+ 
+-	smp = sample_process(px, l4, l7, opt, expr, NULL);
+-	if (!smp)
++	smp->flags = 0;
++	if (!sample_process(px, l4, l7, opt, expr, smp)) {
++		if ((smp->flags & SMP_F_MAY_CHANGE) && !(opt & SMP_OPT_FINAL))
++			return smp;
+ 		return NULL;
++	}
+ 
+ 	if (!sample_casts[smp->type][SMP_T_STR])
+ 		return NULL;
+@@ -1165,6 +1173,7 @@ struct sample *sample_fetch_string(struct proxy *px, struct session *l4, void *l
+ 		return NULL;
+ 
+ 	smp->type = SMP_T_STR;
++	smp->flags &= ~SMP_F_MAY_CHANGE;
+ 	return smp;
+ }
+ 
+-- 
+1.8.3.2
+
