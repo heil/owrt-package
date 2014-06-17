@@ -1,0 +1,130 @@
+From f5b1cc38b83436b95221ffcf7e8f1c7ab1bad3b8 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 17 Jun 2014 12:20:59 +0200
+Subject: [PATCH 36/38] MEDIUM: stats: report per-backend and per-server time
+ stats in HTML and CSV outputs
+
+The time statistics computed by previous patches are now reported in the
+HTML stats in the tips related to the total sessions for backend and servers,
+and as separate columns for the CSV stats.
+---
+ doc/configuration.txt |  4 ++++
+ src/dumpstats.c       | 38 +++++++++++++++++++++++++++++++++-----
+ 2 files changed, 37 insertions(+), 5 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 36a19b8..51798b4 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -13011,6 +13011,10 @@ use hard-coded column positions.
+  55. lastsess: number of seconds since last session assigned to server/backend
+  56. last_chk: last health check contents or textual error
+  57. last_agt: last agent check contents or textual error
++ 58. qtime: the average queue time in ms over the 1024 last requests
++ 59. ctime: the average connect time in ms over the 1024 last requests
++ 60. rtime: the average response time in ms over the 1024 last requests (0 for TCP)
++ 61. ttime: the average total session time in ms over the 1024 last requests
+ 
+ 
+ 9.2. Unix Socket commands
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 1711ac7..bc0bea7 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -489,7 +489,7 @@ static void stats_dump_csv_header()
+ 	              "hrsp_1xx,hrsp_2xx,hrsp_3xx,hrsp_4xx,hrsp_5xx,hrsp_other,hanafail,"
+ 	              "req_rate,req_rate_max,req_tot,"
+ 	              "cli_abrt,srv_abrt,"
+-	              "comp_in,comp_out,comp_byp,comp_rsp,lastsess,last_chk,last_agt,"
++	              "comp_in,comp_out,comp_byp,comp_rsp,lastsess,last_chk,last_agt,qtime,ctime,rtime,ttime,"
+ 	              "\n");
+ }
+ 
+@@ -2743,8 +2743,8 @@ static int stats_dump_fe_stats(struct stream_interface *si, struct proxy *px)
+ 		chunk_appendf(&trash, "%lld,",
+ 		              px->fe_counters.p.http.comp_rsp);
+ 
+-		/* lastsess, last_chk, last_agt, */
+-		chunk_appendf(&trash, ",,,");
++		/* lastsess, last_chk, last_agt, qtime, ctime, rtime, ttime, */
++		chunk_appendf(&trash, ",,,,,,,");
+ 
+ 		/* finish with EOL */
+ 		chunk_appendf(&trash, "\n");
+@@ -2867,8 +2867,8 @@ static int stats_dump_li_stats(struct stream_interface *si, struct proxy *px, st
+ 		              ",,"
+ 		              /* compression: in, out, bypassed, comp_rsp */
+ 		              ",,,,"
+-			      /* lastsess, last_chk, last_agt, */
+-			      ",,,"
++			      /* lastsess, last_chk, last_agt, qtime, ctime, rtime, ttime, */
++			      ",,,,,,,"
+ 		              "\n",
+ 		              px->id, l->name,
+ 		              l->nbconn, l->counters->conn_max,
+@@ -3020,6 +3020,13 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 			              U2H(sv->counters.p.http.rsp[0]), tot ? (int)(100*sv->counters.p.http.rsp[0] / tot) : 0);
+ 		}
+ 
++		chunk_appendf(&trash, "<tr><th colspan=3>Avg over last 1024 success. conn.</th></tr>");
++		chunk_appendf(&trash, "<tr><th>- Queue time:</th><td>%s</td><td>ms</td></tr>",   U2H(swrate_avg(sv->counters.q_time, TIME_STATS_SAMPLES)));
++		chunk_appendf(&trash, "<tr><th>- Connect time:</th><td>%s</td><td>ms</td></tr>", U2H(swrate_avg(sv->counters.c_time, TIME_STATS_SAMPLES)));
++		if (px->mode == PR_MODE_HTTP)
++			chunk_appendf(&trash, "<tr><th>- Response time:</th><td>%s</td><td>ms</td></tr>", U2H(swrate_avg(sv->counters.d_time, TIME_STATS_SAMPLES)));
++		chunk_appendf(&trash, "<tr><th>- Total time:</th><td>%s</td><td>ms</td></tr>",   U2H(swrate_avg(sv->counters.t_time, TIME_STATS_SAMPLES)));
++
+ 		chunk_appendf(&trash,
+ 		              "</table></div></u></td>"
+ 		              /* sessions: lbtot, last */
+@@ -3297,6 +3304,13 @@ static int stats_dump_sv_stats(struct stream_interface *si, struct proxy *px, in
+ 		chunk_appendf(&trash, "%s,", ((sv->check.state & (CHK_ST_ENABLED|CHK_ST_PAUSED)) == CHK_ST_ENABLED) ? cstr(sv->check.desc) : "");
+ 		chunk_appendf(&trash, "%s,", ((sv->agent.state & (CHK_ST_ENABLED|CHK_ST_PAUSED)) == CHK_ST_ENABLED) ? cstr(sv->agent.desc) : "");
+ 
++		/* qtime, ctime, rtime, ttime, */
++		chunk_appendf(&trash, "%u,%u,%u,%u,",
++		              swrate_avg(sv->counters.q_time, TIME_STATS_SAMPLES),
++		              swrate_avg(sv->counters.c_time, TIME_STATS_SAMPLES),
++		              swrate_avg(sv->counters.d_time, TIME_STATS_SAMPLES),
++		              swrate_avg(sv->counters.t_time, TIME_STATS_SAMPLES));
++
+ 		/* finish with EOL */
+ 		chunk_appendf(&trash, "\n");
+ 	}
+@@ -3382,6 +3396,7 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 			              "<tr><th>- HTTP 5xx responses:</th><td>%s</td></tr>"
+ 			              "<tr><th>- other responses:</th><td>%s</td></tr>"
+ 			              "<tr><th>Intercepted requests:</th><td>%s</td></tr>"
++				      "<tr><th colspan=3>Avg over last 1024 success. conn.</th></tr>"
+ 			              "",
+ 			              U2H(px->be_counters.p.http.cum_req),
+ 			              U2H(px->be_counters.p.http.rsp[1]),
+@@ -3396,6 +3411,12 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 			              U2H(px->be_counters.intercepted_req));
+ 		}
+ 
++		chunk_appendf(&trash, "<tr><th>- Queue time:</th><td>%s</td><td>ms</td></tr>",   U2H(swrate_avg(px->be_counters.q_time, TIME_STATS_SAMPLES)));
++		chunk_appendf(&trash, "<tr><th>- Connect time:</th><td>%s</td><td>ms</td></tr>", U2H(swrate_avg(px->be_counters.c_time, TIME_STATS_SAMPLES)));
++		if (px->mode == PR_MODE_HTTP)
++			chunk_appendf(&trash, "<tr><th>- Response time:</th><td>%s</td><td>ms</td></tr>", U2H(swrate_avg(px->be_counters.d_time, TIME_STATS_SAMPLES)));
++		chunk_appendf(&trash, "<tr><th>- Total time:</th><td>%s</td><td>ms</td></tr>",   U2H(swrate_avg(px->be_counters.t_time, TIME_STATS_SAMPLES)));
++
+ 		chunk_appendf(&trash,
+ 		              "</table></div></u></td>"
+ 		              /* sessions: lbtot, last */
+@@ -3530,6 +3551,13 @@ static int stats_dump_be_stats(struct stream_interface *si, struct proxy *px, in
+ 		/* lastsess, last_chk, last_agt, */
+ 		chunk_appendf(&trash, "%d,,,", be_lastsession(px));
+ 
++		/* qtime, ctime, rtime, ttime, */
++		chunk_appendf(&trash, "%u,%u,%u,%u,",
++		              swrate_avg(px->be_counters.q_time, TIME_STATS_SAMPLES),
++		              swrate_avg(px->be_counters.c_time, TIME_STATS_SAMPLES),
++		              swrate_avg(px->be_counters.d_time, TIME_STATS_SAMPLES),
++		              swrate_avg(px->be_counters.t_time, TIME_STATS_SAMPLES));
++
+ 		/* finish with EOL */
+ 		chunk_appendf(&trash, "\n");
+ 	}
+-- 
+1.8.3.2
+

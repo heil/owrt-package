@@ -1,0 +1,36 @@
+From a3310dc66c03fe5f54b2058c87b6497f239c1ff4 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 16 Jun 2014 15:43:21 +0200
+Subject: [PATCH 32/38] DOC: clarify the CSV format
+
+Indicate that the text cells in the CSV format may contain quotes to
+escape ambiguous texts. We don't have this case right now since we limit
+the output, but it may happen in the future.
+---
+ doc/configuration.txt | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 670dfee..7b50803 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -12926,7 +12926,15 @@ Unix socket.
+ ---------------
+ 
+ The statistics may be consulted either from the unix socket or from the HTTP
+-page. Both means provide a CSV format whose fields follow.
++page. Both means provide a CSV format whose fields follow. The first line
++begins with a sharp ('#') and has one word per comma-delimited field which
++represents the title of the column. All other lines starting at the second one
++use a classical CSV format using a comma as the delimiter, and the double quote
++('"') as an optional text delimiter, but only if the enclosed text is ambiguous
++(if it contains a quote or a comma). The double-quote character ('"') in the
++text is doubled ('""'), which is the format that most tools recognize. Please
++do not insert any column before these ones in order not to break tools which
++use hard-coded column positions.
+ 
+   0. pxname: proxy name
+   1. svname: service name (FRONTEND for frontend, BACKEND for backend, any name
+-- 
+1.8.3.2
+

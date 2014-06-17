@@ -1,0 +1,118 @@
+From 588297f2f958cfb09226cfcc3c576308cf062a1d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 16 Jun 2014 15:16:40 +0200
+Subject: [PATCH 31/38] MINOR: tools: add new functions to quote-encode strings
+
+qstr() and cstr() will be used to quote-encode strings. The first one
+does it unconditionally. The second one is aimed at CSV files where the
+quote-encoding is only needed when the field contains a quote or a comma.
+---
+ include/common/standard.h | 27 +++++++++++++++++++++++++++
+ src/standard.c            | 39 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+)
+
+diff --git a/include/common/standard.h b/include/common/standard.h
+index ecac1e0..8811c6f 100644
+--- a/include/common/standard.h
++++ b/include/common/standard.h
+@@ -52,6 +52,10 @@
+ /* number of itoa_str entries */
+ #define NB_ITOA_STR	10
+ 
++/* maximum quoted string length (truncated above) */
++#define QSTR_SIZE 200
++#define NB_QSTR 10
++
+ /****** string-specific macros and functions ******/
+ /* if a > max, then bound <a> to <max>. The macro returns the new <a> */
+ #define UBOUND(a, max)	({ typeof(a) b = (max); if ((a) > b) (a) = b; (a); })
+@@ -195,6 +199,29 @@ static inline const char *LIM2A(unsigned long n, const char *alt)
+ 	return ret;
+ }
+ 
++/* returns a locally allocated string containing the quoted encoding of the
++ * input string. The output may be truncated to QSTR_SIZE chars, but it is
++ * guaranteed that the string will always be properly terminated. Quotes are
++ * encoded by doubling them as is commonly done in CSV files. QSTR_SIZE must
++ * always be at least 4 chars.
++ */
++const char *qstr(const char *str);
++
++/* returns <str> or its quote-encoded equivalent if it contains at least one
++ * quote or a comma. This is aimed at build CSV-compatible strings.
++ */
++static inline const char *cstr(const char *str)
++{
++	const char *p = str;
++
++	while (*p) {
++		if (*p == ',' || *p == '"')
++			return qstr(str);
++		p++;
++	}
++	return str;
++}
++
+ /*
+  * Returns non-zero if character <s> is a hex digit (0-9, a-f, A-F), else zero.
+  */
+diff --git a/src/standard.c b/src/standard.c
+index b0c5fe6..f57724c 100644
+--- a/src/standard.c
++++ b/src/standard.c
+@@ -38,6 +38,12 @@
+ char itoa_str[NB_ITOA_STR][171];
+ int itoa_idx = 0; /* index of next itoa_str to use */
+ 
++/* sometimes we'll need to quote strings (eg: in stats), and we don't expect
++ * to quote strings larger than a max configuration line.
++ */
++char quoted_str[NB_QSTR][QSTR_SIZE + 1];
++int quoted_idx = 0;
++
+ /*
+  * unsigned long long ASCII representation
+  *
+@@ -444,6 +450,39 @@ const char *limit_r(unsigned long n, char *buffer, int size, const char *alt)
+ 	return (n) ? ultoa_r(n, buffer, size) : (alt ? alt : "");
+ }
+ 
++/* returns a locally allocated string containing the quoted encoding of the
++ * input string. The output may be truncated to QSTR_SIZE chars, but it is
++ * guaranteed that the string will always be properly terminated. Quotes are
++ * encoded by doubling them as is commonly done in CSV files. QSTR_SIZE must
++ * always be at least 4 chars.
++ */
++const char *qstr(const char *str)
++{
++	char *ret = quoted_str[quoted_idx];
++	char *p, *end;
++
++	if (++quoted_idx >= NB_QSTR)
++		quoted_idx = 0;
++
++	p = ret;
++	end = ret + QSTR_SIZE;
++
++	*p++ = '"';
++
++	/* always keep 3 chars to support passing "" and the ending " */
++	while (*str && p < end - 3) {
++		if (*str == '"') {
++			*p++ = '"';
++			*p++ = '"';
++		}
++		else
++			*p++ = *str;
++		str++;
++	}
++	*p++ = '"';
++	return ret;
++}
++
+ /*
+  * Returns non-zero if character <s> is a hex digit (0-9, a-f, A-F), else zero.
+  *
+-- 
+1.8.3.2
+
