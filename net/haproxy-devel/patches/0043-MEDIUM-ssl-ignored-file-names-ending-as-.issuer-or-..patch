@@ -1,0 +1,32 @@
+From 2aab722dc14e2d5c1fd8369dc96bc8f73d737438 Mon Sep 17 00:00:00 2001
+From: Emeric Brun <ebrun@haproxy.com>
+Date: Wed, 18 Jun 2014 18:15:09 +0200
+Subject: [PATCH 43/44] MEDIUM: ssl: ignored file names ending as '.issuer' or
+ '.ocsp'.
+
+We don't want to load these files found in directories specified in "crt" or
+"crt-list".
+
+These suffixes are reserved for OCSP stapling.
+---
+ src/ssl_sock.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 8fb8b5f..2bbad17 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -868,6 +868,10 @@ int ssl_sock_load_cert(char *path, struct bind_conf *bind_conf, struct proxy *cu
+ 		*end = 0;
+ 
+ 	while ((de = readdir(dir))) {
++		end = strrchr(de->d_name, '.');
++		if (end && (!strcmp(end, ".issuer") || !strcmp(end, ".ocsp")))
++			continue;
++
+ 		snprintf(fp, sizeof(fp), "%s/%s", path, de->d_name);
+ 		if (stat(fp, &buf) != 0) {
+ 			memprintf(err, "%sunable to stat SSL certificate from file '%s' : %s.\n",
+-- 
+1.8.3.2
+
