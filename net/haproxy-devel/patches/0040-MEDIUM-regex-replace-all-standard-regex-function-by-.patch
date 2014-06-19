@@ -1,0 +1,498 @@
+From 09af0d6d4353b9045b9ddb893b21c45f4b92ca21 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 18 Jun 2014 11:35:54 +0200
+Subject: [PATCH 40/44] MEDIUM: regex: replace all standard regex function by
+ own functions
+
+This patch remove all references of standard regex in haproxy. The last
+remaining references are only in the regex.[ch] files.
+
+In the file src/checks.c, the original function uses a "pmatch" array.
+In fact this array is unused. This patch remove it.
+---
+ include/common/regex.h     |  4 +--
+ include/types/checks.h     |  2 +-
+ include/types/proto_http.h |  4 +--
+ include/types/proxy.h      |  2 +-
+ src/cfgparse.c             | 58 ++++++++++++++++++++++++----------------
+ src/checks.c               |  6 ++---
+ src/haproxy.c              |  8 +++---
+ src/proto_http.c           | 66 +++++++++++++++++++---------------------------
+ src/regex.c                |  2 +-
+ 9 files changed, 77 insertions(+), 75 deletions(-)
+
+diff --git a/include/common/regex.h b/include/common/regex.h
+index cec68c8..29a6ace 100644
+--- a/include/common/regex.h
++++ b/include/common/regex.h
+@@ -60,7 +60,7 @@ struct my_regex {
+ 
+ struct hdr_exp {
+     struct hdr_exp *next;
+-    const regex_t *preg;		/* expression to look for */
++    struct my_regex *preg;		/* expression to look for */
+     int action;				/* ACT_ALLOW, ACT_REPLACE, ACT_REMOVE, ACT_DENY */
+     const char *replace;		/* expression to set instead */
+     void *cond;				/* a possible condition or NULL */
+@@ -81,7 +81,7 @@ extern regmatch_t pmatch[MAX_MATCH];
+ int regex_comp(const char *str, struct my_regex *regex, int cs, int cap, char **err);
+ int exp_replace(char *dst, unsigned int dst_size, char *src, const char *str, const regmatch_t *matches);
+ const char *check_replace_string(const char *str);
+-const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
++const char *chain_regex(struct hdr_exp **head, struct my_regex *preg,
+ 			int action, const char *replace, void *cond);
+ 
+ /* If the function doesn't match, it returns false, else it returns true.
+diff --git a/include/types/checks.h b/include/types/checks.h
+index d5038eb..a50043b 100644
+--- a/include/types/checks.h
++++ b/include/types/checks.h
+@@ -177,7 +177,7 @@ struct tcpcheck_rule {
+ 	/* sent string is string */
+ 	char *string;                           /* sent or expected string */
+ 	int string_len;                         /* string lenght */
+-	regex_t *expect_regex;                  /* expected */
++	struct my_regex *expect_regex;          /* expected */
+ 	int inverse;                            /* 0 = regular match, 1 = inverse match */
+ 	unsigned short port;                    /* port to connect to */
+ 	unsigned short conn_opts;               /* options when setting up a new connection */
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index ff196a0..affc231 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -419,7 +419,7 @@ struct http_req_rule {
+ 			char *name;            /* header name */
+ 			int name_len;          /* header name's length */
+ 			struct list fmt;       /* log-format compatible expression */
+-			regex_t* re;           /* used by replace-header and replace-value */
++			struct my_regex re;    /* used by replace-header and replace-value */
+ 		} hdr_add;                     /* args used by "add-header" and "set-header" */
+ 		struct redirect_rule *redir;   /* redirect rule or "http-request redirect" */
+ 		int nice;                      /* nice value for HTTP_REQ_ACT_SET_NICE */
+@@ -445,7 +445,7 @@ struct http_res_rule {
+ 			char *name;            /* header name */
+ 			int name_len;          /* header name's length */
+ 			struct list fmt;       /* log-format compatible expression */
+-			regex_t* re;           /* used by replace-header and replace-value */
++			struct my_regex re;    /* used by replace-header and replace-value */
+ 		} hdr_add;                     /* args used by "add-header" and "set-header" */
+ 		int nice;                      /* nice value for HTTP_RES_ACT_SET_NICE */
+ 		int loglevel;                  /* log-level value for HTTP_RES_ACT_SET_LOGL */
+diff --git a/include/types/proxy.h b/include/types/proxy.h
+index 33524f3..b33b634 100644
+--- a/include/types/proxy.h
++++ b/include/types/proxy.h
+@@ -343,7 +343,7 @@ struct proxy {
+ 	char *check_req;			/* HTTP or SSL request to use for PR_O_HTTP_CHK|PR_O_SSL3_CHK */
+ 	int check_len;				/* Length of the HTTP or SSL3 request */
+ 	char *expect_str;			/* http-check expected content : string or text version of the regex */
+-	regex_t *expect_regex;			/* http-check expected content */
++	struct my_regex *expect_regex;		/* http-check expected content */
+ 	struct chunk errmsg[HTTP_ERR_SIZE];	/* default or customized error messages for known errors */
+ 	int uuid;				/* universally unique proxy ID, used for SNMP */
+ 	unsigned int backlog;			/* force the frontend's listen backlog */
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index eb40833..762978a 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1527,11 +1527,14 @@ static int create_cond_regex_rule(const char *file, int line,
+ 				  const char *cmd, const char *reg, const char *repl,
+ 				  const char **cond_start)
+ {
+-	regex_t *preg = NULL;
++	struct my_regex *preg = NULL;
+ 	char *errmsg = NULL;
+ 	const char *err;
++	char *error;
+ 	int ret_code = 0;
+ 	struct acl_cond *cond = NULL;
++	int cs;
++	int cap;
+ 
+ 	if (px == &defproxy) {
+ 		Alert("parsing [%s:%d] : '%s' not allowed in 'defaults' section.\n", file, line, cmd);
+@@ -1570,15 +1573,19 @@ static int create_cond_regex_rule(const char *file, int line,
+ 	                                  ((px->cap & PR_CAP_BE) ? SMP_VAL_BE_HRS_HDR : SMP_VAL_FE_HRS_HDR),
+ 	                                  file, line);
+ 
+-	preg = calloc(1, sizeof(regex_t));
++	preg = calloc(1, sizeof(*preg));
+ 	if (!preg) {
+ 		Alert("parsing [%s:%d] : '%s' : not enough memory to build regex.\n", file, line, cmd);
+ 		ret_code = ERR_ALERT | ERR_FATAL;
+ 		goto err;
+ 	}
+ 
+-	if (regcomp(preg, reg, REG_EXTENDED | flags) != 0) {
+-		Alert("parsing [%s:%d] : '%s' : bad regular expression '%s'.\n", file, line, cmd, reg);
++	cs = !(flags & REG_ICASE);
++	cap = !(flags & REG_NOSUB);
++	error = NULL;
++	if (!regex_comp(reg, preg, cs, cap, &error)) {
++		Alert("parsing [%s:%d] : '%s' : regular expression '%s' : %s\n", file, line, cmd, reg, error);
++		free(error);
+ 		ret_code = ERR_ALERT | ERR_FATAL;
+ 		goto err;
+ 	}
+@@ -1598,7 +1605,7 @@ static int create_cond_regex_rule(const char *file, int line,
+ 	return ret_code;
+ 
+  err_free:
+-	regfree(preg);
++	regex_free(preg);
+  err:
+ 	free(preg);
+ 	free(errmsg);
+@@ -1811,6 +1818,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ {
+ 	static struct proxy *curproxy = NULL;
+ 	const char *err;
++	char *error;
+ 	int rc;
+ 	unsigned val;
+ 	int err_code = 0;
+@@ -1971,8 +1979,8 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 				curproxy->expect_str = strdup(defproxy.expect_str);
+ 				if (defproxy.expect_regex) {
+ 					/* note: this regex is known to be valid */
+-					curproxy->expect_regex = calloc(1, sizeof(regex_t));
+-					regcomp(curproxy->expect_regex, defproxy.expect_str, REG_EXTENDED);
++					curproxy->expect_regex = calloc(1, sizeof(*curproxy->expect_regex));
++					regex_comp(defproxy.expect_str, curproxy->expect_regex, 1, 1, NULL);
+ 				}
+ 			}
+ 
+@@ -2119,7 +2127,7 @@ int cfg_parse_listen(const char *file, int linenum, char **args, int kwm)
+ 		defproxy.server_id_hdr_len = 0;
+ 		free(defproxy.expect_str);
+ 		if (defproxy.expect_regex) {
+-			regfree(defproxy.expect_regex);
++			regex_free(defproxy.expect_regex);
+ 			free(defproxy.expect_regex);
+ 			defproxy.expect_regex = NULL;
+ 		}
+@@ -4213,15 +4221,17 @@ stats_error_parsing:
+ 				curproxy->options2 |= PR_O2_EXP_RSTS;
+ 				free(curproxy->expect_str);
+ 				if (curproxy->expect_regex) {
+-					regfree(curproxy->expect_regex);
++					regex_free(curproxy->expect_regex);
+ 					free(curproxy->expect_regex);
+ 					curproxy->expect_regex = NULL;
+ 				}
+ 				curproxy->expect_str = strdup(args[cur_arg + 1]);
+-				curproxy->expect_regex = calloc(1, sizeof(regex_t));
+-				if (regcomp(curproxy->expect_regex, args[cur_arg + 1], REG_EXTENDED) != 0) {
+-					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s'.\n",
+-					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1]);
++				curproxy->expect_regex = calloc(1, sizeof(*curproxy->expect_regex));
++				error = NULL;
++				if (!regex_comp(args[cur_arg + 1], curproxy->expect_regex, 1, 1, &error)) {
++					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s': %s.\n",
++					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1], error);
++					free(error);
+ 					err_code |= ERR_ALERT | ERR_FATAL;
+ 					goto out;
+ 				}
+@@ -4236,15 +4246,17 @@ stats_error_parsing:
+ 				curproxy->options2 |= PR_O2_EXP_RSTR;
+ 				free(curproxy->expect_str);
+ 				if (curproxy->expect_regex) {
+-					regfree(curproxy->expect_regex);
++					regex_free(curproxy->expect_regex);
+ 					free(curproxy->expect_regex);
+ 					curproxy->expect_regex = NULL;
+ 				}
+ 				curproxy->expect_str = strdup(args[cur_arg + 1]);
+-				curproxy->expect_regex = calloc(1, sizeof(regex_t));
+-				if (regcomp(curproxy->expect_regex, args[cur_arg + 1], REG_EXTENDED) != 0) {
+-					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s'.\n",
+-					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1]);
++				curproxy->expect_regex = calloc(1, sizeof(*curproxy->expect_regex));
++				error = NULL;
++				if (!regex_comp(args[cur_arg + 1], curproxy->expect_regex, 1, 1, &error)) {
++					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s': %s.\n",
++					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1], error);
++					free(error);
+ 					err_code |= ERR_ALERT | ERR_FATAL;
+ 					goto out;
+ 				}
+@@ -4456,10 +4468,12 @@ stats_error_parsing:
+ 				tcpcheck->action = TCPCHK_ACT_EXPECT;
+ 				tcpcheck->string_len = 0;
+ 				tcpcheck->string = NULL;
+-				tcpcheck->expect_regex = calloc(1, sizeof(regex_t));
+-				if (regcomp(tcpcheck->expect_regex, args[cur_arg + 1], REG_EXTENDED) != 0) {
+-					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s'.\n",
+-					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1]);
++				tcpcheck->expect_regex = calloc(1, sizeof(*tcpcheck->expect_regex));
++				error = NULL;
++				if (!regex_comp(args[cur_arg + 1], tcpcheck->expect_regex, 1, 1, &error)) {
++					Alert("parsing [%s:%d] : '%s %s %s' : bad regular expression '%s': %s.\n",
++					      file, linenum, args[0], args[1], ptr_arg, args[cur_arg + 1], error);
++					free(error);
+ 					err_code |= ERR_ALERT | ERR_FATAL;
+ 					goto out;
+ 				}
+diff --git a/src/checks.c b/src/checks.c
+index 6b501de..cba0018 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1730,7 +1730,7 @@ static int httpchk_expect(struct server *s, int done)
+ 		if ((s->proxy->options2 & PR_O2_EXP_TYPE) == PR_O2_EXP_STS)
+ 			ret = strncmp(s->proxy->expect_str, status_code, 3) == 0;
+ 		else
+-			ret = regexec(s->proxy->expect_regex, status_code, MAX_MATCH, pmatch, 0) == 0;
++			ret = regex_exec(s->proxy->expect_regex, status_code);
+ 
+ 		/* we necessarily have the response, so there are no partial failures */
+ 		if (s->proxy->options2 & PR_O2_EXP_INV)
+@@ -1782,7 +1782,7 @@ static int httpchk_expect(struct server *s, int done)
+ 		if ((s->proxy->options2 & PR_O2_EXP_TYPE) == PR_O2_EXP_STR)
+ 			ret = strstr(contentptr, s->proxy->expect_str) != NULL;
+ 		else
+-			ret = regexec(s->proxy->expect_regex, contentptr, MAX_MATCH, pmatch, 0) == 0;
++			ret = regex_exec(s->proxy->expect_regex, contentptr);
+ 
+ 		/* if we don't match, we may need to wait more */
+ 		if (!ret && !done)
+@@ -2135,7 +2135,7 @@ static void tcpcheck_main(struct connection *conn)
+ 			if (cur->string != NULL)
+ 				ret = my_memmem(contentptr, check->bi->i, cur->string, cur->string_len) != NULL;
+ 			else if (cur->expect_regex != NULL)
+-				ret = regexec(cur->expect_regex, contentptr, MAX_MATCH, pmatch, 0) == 0;
++				ret = regex_exec(cur->expect_regex, contentptr);
+ 
+ 			if (!ret && !done)
+ 				continue; /* try to read more */
+diff --git a/src/haproxy.c b/src/haproxy.c
+index cd42b34..9f742c7 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -1034,8 +1034,8 @@ void deinit(void)
+ 
+ 		for (exp = p->req_exp; exp != NULL; ) {
+ 			if (exp->preg) {
+-				regfree((regex_t *)exp->preg);
+-				free((regex_t *)exp->preg);
++				regex_free(exp->preg);
++				free(exp->preg);
+ 			}
+ 
+ 			if (exp->replace && exp->action != ACT_SETBE)
+@@ -1047,8 +1047,8 @@ void deinit(void)
+ 
+ 		for (exp = p->rsp_exp; exp != NULL; ) {
+ 			if (exp->preg) {
+-				regfree((regex_t *)exp->preg);
+-				free((regex_t *)exp->preg);
++				regex_free(exp->preg);
++				free(exp->preg);
+ 			}
+ 
+ 			if (exp->replace && exp->action != ACT_SETBE)
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 572739d..e61f512 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3179,10 +3179,10 @@ static inline void inet_set_tos(int fd, struct sockaddr_storage from, int tos)
+ /* Returns the number of characters written to destination,
+  * -1 on internal error and -2 if no replacement took place.
+  */
+-static int http_replace_header(regex_t* re, char* dst, uint dst_size, char* val,
+-                               const char* rep_str)
++static int http_replace_header(struct my_regex *re, char *dst, uint dst_size, char *val,
++                               const char *rep_str)
+ {
+-	if (regexec(re, val, MAX_MATCH, pmatch, 0))
++	if (!regex_exec_match(re, val, MAX_MATCH, pmatch))
+ 		return -2;
+ 
+ 	return exp_replace(dst, dst_size, val, rep_str, pmatch);
+@@ -3191,8 +3191,8 @@ static int http_replace_header(regex_t* re, char* dst, uint dst_size, char* val,
+ /* Returns the number of characters written to destination,
+  * -1 on internal error and -2 if no replacement took place.
+  */
+-static int http_replace_value(regex_t* re, char* dst, uint dst_size, char* val, char delim,
+-                              const char* rep_str)
++static int http_replace_value(struct my_regex *re, char *dst, uint dst_size, char *val, char delim,
++                              const char *rep_str)
+ {
+ 	char* p = val;
+ 	char* dst_end = dst + dst_size;
+@@ -3209,7 +3209,7 @@ static int http_replace_value(regex_t* re, char* dst, uint dst_size, char* val,
+ 			tok_end = p + strlen(p);
+ 		}
+ 
+-		if (regexec(re, p, MAX_MATCH, pmatch, 0) == 0) {
++		if (regex_exec_match(re, p, MAX_MATCH, pmatch)) {
+ 			int replace_n = exp_replace(dst_p, dst_end - dst_p, p, rep_str, pmatch);
+ 
+ 			if (replace_n < 0)
+@@ -3243,7 +3243,7 @@ static int http_replace_value(regex_t* re, char* dst, uint dst_size, char* val,
+ }
+ 
+ static int http_transform_header(struct session* s, struct http_msg *msg, const char* name, uint name_len,
+-                                 char* buf, struct hdr_idx* idx, struct list *fmt, regex_t* re,
++                                 char* buf, struct hdr_idx* idx, struct list *fmt, struct my_regex *re,
+                                  struct hdr_ctx* ctx, int action)
+ {
+ 	ctx->idx = 0;
+@@ -3389,7 +3389,7 @@ http_req_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 		case HTTP_REQ_ACT_REPLACE_VAL:
+ 			if (http_transform_header(s, &txn->req, rule->arg.hdr_add.name, rule->arg.hdr_add.name_len,
+ 			                          txn->req.chn->buf->p, &txn->hdr_idx, &rule->arg.hdr_add.fmt,
+-			                          rule->arg.hdr_add.re, &ctx, rule->action))
++			                          &rule->arg.hdr_add.re, &ctx, rule->action))
+ 				return HTTP_RULE_RES_BADREQ;
+ 			break;
+ 
+@@ -3578,7 +3578,7 @@ http_res_get_intercept_rule(struct proxy *px, struct list *rules, struct session
+ 		case HTTP_RES_ACT_REPLACE_VAL:
+ 			if (http_transform_header(s, &txn->rsp, rule->arg.hdr_add.name, rule->arg.hdr_add.name_len,
+ 			                          txn->rsp.chn->buf->p, &txn->hdr_idx, &rule->arg.hdr_add.fmt,
+-			                          rule->arg.hdr_add.re, &ctx, rule->action))
++			                          &rule->arg.hdr_add.re, &ctx, rule->action))
+ 				return NULL; /* note: we should report an error here */
+ 			break;
+ 
+@@ -6924,7 +6924,7 @@ int apply_filter_to_req_headers(struct session *s, struct channel *req, struct h
+ 		term = *cur_end;
+ 		*cur_end = '\0';
+ 
+-		if (regexec(exp->preg, cur_ptr, MAX_MATCH, pmatch, 0) == 0) {
++		if (regex_exec_match(exp->preg, cur_ptr, MAX_MATCH, pmatch)) {
+ 			switch (exp->action) {
+ 			case ACT_SETBE:
+ 				/* It is not possible to jump a second time.
+@@ -7036,7 +7036,7 @@ int apply_filter_to_req_line(struct session *s, struct channel *req, struct hdr_
+ 	term = *cur_end;
+ 	*cur_end = '\0';
+ 
+-	if (regexec(exp->preg, cur_ptr, MAX_MATCH, pmatch, 0) == 0) {
++	if (regex_exec_match(exp->preg, cur_ptr, MAX_MATCH, pmatch)) {
+ 		switch (exp->action) {
+ 		case ACT_SETBE:
+ 			/* It is not possible to jump a second time.
+@@ -7807,7 +7807,7 @@ int apply_filter_to_resp_headers(struct session *s, struct channel *rtr, struct
+ 		term = *cur_end;
+ 		*cur_end = '\0';
+ 
+-		if (regexec(exp->preg, cur_ptr, MAX_MATCH, pmatch, 0) == 0) {
++		if (regex_exec_match(exp->preg, cur_ptr, MAX_MATCH, pmatch)) {
+ 			switch (exp->action) {
+ 			case ACT_ALLOW:
+ 				txn->flags |= TX_SVALLOW;
+@@ -7899,7 +7899,7 @@ int apply_filter_to_sts_line(struct session *s, struct channel *rtr, struct hdr_
+ 	term = *cur_end;
+ 	*cur_end = '\0';
+ 
+-	if (regexec(exp->preg, cur_ptr, MAX_MATCH, pmatch, 0) == 0) {
++	if (regex_exec_match(exp->preg, cur_ptr, MAX_MATCH, pmatch)) {
+ 		switch (exp->action) {
+ 		case ACT_ALLOW:
+ 			txn->flags |= TX_SVALLOW;
+@@ -8895,21 +8895,13 @@ void http_reset_txn(struct session *s)
+ 	s->rep->analyse_exp = TICK_ETERNITY;
+ }
+ 
+-static inline void free_regex(regex_t* re)
+-{
+-	if (re) {
+-		regfree(re);
+-		free(re);
+-	}
+-}
+-
+ void free_http_res_rules(struct list *r)
+ {
+ 	struct http_res_rule *tr, *pr;
+ 
+ 	list_for_each_entry_safe(pr, tr, r, list) {
+ 		LIST_DEL(&pr->list);
+-		free_regex(pr->arg.hdr_add.re);
++		regex_free(&pr->arg.hdr_add.re);
+ 		free(pr);
+ 	}
+ }
+@@ -8923,7 +8915,7 @@ void free_http_req_rules(struct list *r)
+ 		if (pr->action == HTTP_REQ_ACT_AUTH)
+ 			free(pr->arg.auth.realm);
+ 
+-		free_regex(pr->arg.hdr_add.re);
++		regex_free(&pr->arg.hdr_add.re);
+ 		free(pr);
+ 	}
+ }
+@@ -8934,6 +8926,7 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 	struct http_req_rule *rule;
+ 	struct http_req_action_kw *custom = NULL;
+ 	int cur_arg;
++	char *error;
+ 
+ 	rule = (struct http_req_rule*)calloc(1, sizeof(struct http_req_rule));
+ 	if (!rule) {
+@@ -9081,14 +9074,11 @@ struct http_req_rule *parse_http_req_cond(const char **args, const char *file, i
+ 		rule->arg.hdr_add.name_len = strlen(rule->arg.hdr_add.name);
+ 		LIST_INIT(&rule->arg.hdr_add.fmt);
+ 
+-		if (!(rule->arg.hdr_add.re = calloc(1, sizeof(*rule->arg.hdr_add.re)))) {
+-			Alert("parsing [%s:%d]: out of memory.\n", file, linenum);
+-			goto out_err;
+-		}
+-
+-		if (regcomp(rule->arg.hdr_add.re, args[cur_arg + 1], REG_EXTENDED)) {
+-			Alert("parsing [%s:%d] : '%s' : bad regular expression.\n", file, linenum,
+-			      args[cur_arg + 1]);
++		error = NULL;
++		if (!regex_comp(args[cur_arg + 1], &rule->arg.hdr_add.re, 1, 1, &error)) {
++			Alert("parsing [%s:%d] : '%s' : %s.\n", file, linenum,
++			      args[cur_arg + 1], error);
++			free(error);
+ 			goto out_err;
+ 		}
+ 
+@@ -9303,6 +9293,7 @@ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, i
+ 	struct http_res_rule *rule;
+ 	struct http_res_action_kw *custom = NULL;
+ 	int cur_arg;
++	char *error;
+ 
+ 	rule = calloc(1, sizeof(*rule));
+ 	if (!rule) {
+@@ -9435,14 +9426,11 @@ struct http_res_rule *parse_http_res_cond(const char **args, const char *file, i
+ 		rule->arg.hdr_add.name_len = strlen(rule->arg.hdr_add.name);
+ 		LIST_INIT(&rule->arg.hdr_add.fmt);
+ 
+-		if (!(rule->arg.hdr_add.re = calloc(1, sizeof(*rule->arg.hdr_add.re)))) {
+-			Alert("parsing [%s:%d]: out of memory.\n", file, linenum);
+-			goto out_err;
+-		}
+-
+-		if (regcomp(rule->arg.hdr_add.re, args[cur_arg + 1], REG_EXTENDED)) {
+-			Alert("parsing [%s:%d] : '%s' : bad regular expression.\n", file, linenum,
+-			      args[cur_arg + 1]);
++		error = NULL;
++		if (!regex_comp(args[cur_arg + 1], &rule->arg.hdr_add.re, 1, 1, &error)) {
++			Alert("parsing [%s:%d] : '%s' : %s.\n", file, linenum,
++			      args[cur_arg + 1], error);
++			free(error);
+ 			goto out_err;
+ 		}
+ 
+diff --git a/src/regex.c b/src/regex.c
+index 8de56e6..2292002 100644
+--- a/src/regex.c
++++ b/src/regex.c
+@@ -124,7 +124,7 @@ const char *check_replace_string(const char *str)
+ 
+ 
+ /* returns the pointer to an error in the replacement string, or NULL if OK */
+-const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
++const char *chain_regex(struct hdr_exp **head, struct my_regex *preg,
+ 			int action, const char *replace, void *cond)
+ {
+ 	struct hdr_exp *exp;
+-- 
+1.8.3.2
+

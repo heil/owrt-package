@@ -1,0 +1,248 @@
+From b8f980cc196b287de6f719deaca3cdc81a616136 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Wed, 11 Jun 2014 13:59:05 +0200
+Subject: [PATCH 39/44] MINOR: regex: Create JIT compatible function that
+ return match strings
+
+This patchs rename the "regex_exec" to "regex_exec2". It add a new
+"regex_exec", "regex_exec_match" and "regex_exec_match2" function. This
+function can match regex and return array containing matching parts.
+Otherwise, this function use the compiled method (JIT or PCRE or POSIX).
+
+JIT require a subject with length. PCREPOSIX and native POSIX regex
+require a null terminted subject. The regex_exec* function are splited
+in two version. The first version take a null terminated string, but it
+execute strlen() on the subject if it is compiled with JIT. The second
+version (terminated by "2") take the subject and the length. This
+version adds a null character in the subject if it is compiled with
+PCREPOSIX or native POSIX functions.
+
+The documentation of posix regex and pcreposix says that the function
+returns 0 if the string matche otherwise it returns REG_NOMATCH. The
+REG_NOMATCH macro take the value 1 with posix regex and the value 17
+with the pcreposix. The documentaion of the native pcre API (used with
+JIT) returns a negative number if no match, otherwise, it returns 0 or a
+positive number.
+
+This patch fix also the return codes of the regex_exec* functions. Now,
+these function returns true if the string match, otherwise it returns
+false.
+---
+ include/common/regex.h |  33 ++++++++++++--
+ src/pattern.c          |   2 +-
+ src/regex.c            | 121 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 152 insertions(+), 4 deletions(-)
+
+diff --git a/include/common/regex.h b/include/common/regex.h
+index 2e26b67..cec68c8 100644
+--- a/include/common/regex.h
++++ b/include/common/regex.h
+@@ -84,23 +84,50 @@ const char *check_replace_string(const char *str);
+ const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
+ 			int action, const char *replace, void *cond);
+ 
++/* If the function doesn't match, it returns false, else it returns true.
++ */
++static inline int regex_exec(const struct my_regex *preg, char *subject) {
++#ifdef USE_PCRE_JIT
++	if (pcre_exec(preg->reg, preg->extra, subject, strlen(subject), 0, 0, NULL, 0) < 0)
++		return 0;
++	return 1;
++#else
++	int match;
++	match = regexec(&preg->regex, subject, 0, NULL, 0);
++	if (match == REG_NOMATCH)
++		return 0;
++	return 1;
++#endif
++}
++
+ /* Note that <subject> MUST be at least <length+1> characters long and must
+  * be writable because the function will temporarily force a zero past the
+  * last character.
++ *
++ * If the function doesn't match, it returns false, else it returns true.
+  */
+-static inline int regex_exec(const struct my_regex *preg, char *subject, int length) {
++static inline int regex_exec2(const struct my_regex *preg, char *subject, int length) {
+ #ifdef USE_PCRE_JIT
+-	return pcre_exec(preg->reg, preg->extra, subject, length, 0, 0, NULL, 0);
++	if (pcre_exec(preg->reg, preg->extra, subject, length, 0, 0, NULL, 0) < 0)
++		return 0;
++	return 1;
+ #else
+ 	int match;
+ 	char old_char = subject[length];
+ 	subject[length] = 0;
+ 	match = regexec(&preg->regex, subject, 0, NULL, 0);
+ 	subject[length] = old_char;
+-	return match;
++	if (match == REG_NOMATCH)
++		return 0;
++	return 1;
+ #endif
+ }
+ 
++int regex_exec_match(const struct my_regex *preg, const char *subject,
++                     size_t nmatch, regmatch_t pmatch[]);
++int regex_exec_match2(const struct my_regex *preg, char *subject, int length,
++                      size_t nmatch, regmatch_t pmatch[]);
++
+ static inline void regex_free(struct my_regex *preg) {
+ #ifdef USE_PCRE_JIT
+ 	pcre_free_study(preg->extra);
+diff --git a/src/pattern.c b/src/pattern.c
+index 1d7e4d8..b02dfb8 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -529,7 +529,7 @@ struct pattern *pat_match_reg(struct sample *smp, struct pattern_expr *expr, int
+ 	list_for_each_entry(lst, &expr->patterns, list) {
+ 		pattern = &lst->pat;
+ 
+-		if (regex_exec(pattern->ptr.reg, smp->data.str.str, smp->data.str.len) == 0)
++		if (regex_exec2(pattern->ptr.reg, smp->data.str.str, smp->data.str.len))
+ 			return pattern;
+ 	}
+ 	return NULL;
+diff --git a/src/regex.c b/src/regex.c
+index a31bcda..8de56e6 100644
+--- a/src/regex.c
++++ b/src/regex.c
+@@ -15,6 +15,7 @@
+ #include <string.h>
+ 
+ #include <common/config.h>
++#include <common/defaults.h>
+ #include <common/regex.h>
+ #include <common/standard.h>
+ #include <proto/log.h>
+@@ -149,6 +150,126 @@ const char *chain_regex(struct hdr_exp **head, const regex_t *preg,
+ 	return NULL;
+ }
+ 
++/* This function apply regex. It take const null terminated char as input.
++ * If the function doesn't match, it returns false, else it returns true.
++ * When it is compiled with JIT, this function execute strlen on the subject.
++ */
++int regex_exec_match(const struct my_regex *preg, const char *subject,
++                     size_t nmatch, regmatch_t pmatch[]) {
++#ifdef USE_PCRE_JIT
++	int ret;
++	int matches[MAX_MATCH * 3];
++	int enmatch;
++	int i;
++
++	/* Silently limit the number of allowed matches. max
++	 * match i the maximum value for match, in fact this
++	 * limit is not applyied.
++	 */
++	enmatch = nmatch;
++	if (enmatch > MAX_MATCH)
++		enmatch = MAX_MATCH;
++
++	/* The value returned by pcre_exec() is one more than the highest numbered
++	 * pair that has been set. For example, if two substrings have been captured,
++	 * the returned value is 3. If there are no capturing subpatterns, the return
++	 * value from a successful match is 1, indicating that just the first pair of
++	 * offsets has been set.
++	 *
++	 * It seems that this function returns 0 if it detect more matches than avalaible
++	 * space in the matches array.
++	 */
++	ret = pcre_exec(preg->reg, preg->extra, subject, strlen(subject), 0, 0, matches, enmatch * 3);
++	if (ret < 0)
++		return 0;
++
++	if (ret == 0)
++		ret = enmatch;
++
++	for (i=0; i<nmatch; i++) {
++		/* Copy offset. */
++		if (i < ret) {
++			pmatch[i].rm_so = matches[(i*2)];
++			pmatch[i].rm_eo = matches[(i*2)+1];
++			continue;
++		}
++		/* Set the unmatvh flag (-1). */
++		pmatch[i].rm_so = -1;
++		pmatch[i].rm_eo = -1;
++	}
++	return 1;
++#else
++	int match;
++	match = regexec(&preg->regex, subject, nmatch, pmatch, 0);
++	if (match == REG_NOMATCH)
++		return 0;
++	return 1;
++#endif
++}
++
++/* This function apply regex. It take a "char *" ans length as input. The
++ * <subject> can be modified during the processing. If the function doesn't
++ * match, it returns false, else it returns true.
++ * When it is compiled with standard POSIX regex or PCRE, this function add
++ * a temporary null chracters at the end of the <subject>. The <subject> must
++ * have a real length of <length> + 1.
++ */
++int regex_exec_match2(const struct my_regex *preg, char *subject, int length,
++                      size_t nmatch, regmatch_t pmatch[]) {
++#ifdef USE_PCRE_JIT
++	int ret;
++	int matches[MAX_MATCH * 3];
++	int enmatch;
++	int i;
++
++	/* Silently limit the number of allowed matches. max
++	 * match i the maximum value for match, in fact this
++	 * limit is not applyied.
++	 */
++	enmatch = nmatch;
++	if (enmatch > MAX_MATCH)
++		enmatch = MAX_MATCH;
++
++	/* The value returned by pcre_exec() is one more than the highest numbered
++	 * pair that has been set. For example, if two substrings have been captured,
++	 * the returned value is 3. If there are no capturing subpatterns, the return
++	 * value from a successful match is 1, indicating that just the first pair of
++	 * offsets has been set.
++	 *
++	 * It seems that this function returns 0 if it detect more matches than avalaible
++	 * space in the matches array.
++	 */
++	ret = pcre_exec(preg->reg, preg->extra, subject, length, 0, 0, matches, enmatch * 3);
++	if (ret < 0)
++		return 0;
++
++	if (ret == 0)
++		ret = enmatch;
++
++	for (i=0; i<nmatch; i++) {
++		/* Copy offset. */
++		if (i < ret) {
++			pmatch[i].rm_so = matches[(i*2)];
++			pmatch[i].rm_eo = matches[(i*2)+1];
++			continue;
++		}
++		/* Set the unmatvh flag (-1). */
++		pmatch[i].rm_so = -1;
++		pmatch[i].rm_eo = -1;
++	}
++	return 1;
++#else
++	char old_char = subject[length];
++	int match;
++	subject[length] = 0;
++	match = regexec(&preg->regex, subject, nmatch, pmatch, 0);
++	subject[length] = old_char;
++	if (match == REG_NOMATCH)
++		return 0;
++	return 1;
++#endif
++}
++
+ int regex_comp(const char *str, struct my_regex *regex, int cs, int cap, char **err)
+ {
+ #ifdef USE_PCRE_JIT
+-- 
+1.8.3.2
+
