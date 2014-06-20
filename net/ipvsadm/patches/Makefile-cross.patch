@@ -34,6 +34,15 @@ Index: ipvsadm-1.26/Makefile
  
  ifneq (,$(POPT_LIB))
  POPT_DEFINE = -DHAVE_POPT
+@@ -81,7 +65,7 @@ endif
+ OBJS		= ipvsadm.o config_stream.o dynamic_array.o
+ LIBS		= $(POPT_LIB)
+ ifneq (0,$(HAVE_NL))
+-LIBS		+= -lnl
++LIBS		+= -lnl-tiny
+ endif
+ DEFINES		= -DVERSION=\"$(VERSION)\" -DSCHEDULERS=\"$(SCHEDULERS)\" \
+ 		  -DPE_LIST=\"$(PE_LIST)\" $(POPT_DEFINE)
 Index: ipvsadm-1.26/libipvs/Makefile
 ===================================================================
 --- ipvsadm-1.26.orig/libipvs/Makefile

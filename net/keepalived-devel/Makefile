@@ -46,6 +46,7 @@ CONFIGURE_ARGS+= \
 	--enable-shared \
 	--disable-static \
 	--disable-debug \
+	--with-kernel-dir=/usr/src/linux-does-not-exist \
 	--disable-strip 
 
 CONFIGURE_VARS+= \

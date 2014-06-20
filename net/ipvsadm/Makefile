@@ -23,8 +23,7 @@ define Package/ipvsadm
   CATEGORY:=Network
   TITLE:=Utility to administer the Linux Virtual Server
   URL:=http://www.LinuxVirtualServer.org
-  DEPENDS:=+libpcre +libltdl +libpopt +libnl 
-#+libnl-tiny 
+  DEPENDS:=+libpcre +libltdl +libpopt +libnl +libnl-tiny 
 endef
 
 define Package/ipvsadm/conffiles
@@ -36,8 +35,7 @@ define Package/ipvsadm/description
   offered by the latest Linux kernel 2.6.x.
 endef
 
-#TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/libnl-tiny -L$(STAGING_DIR)/usr/lib  -DLIBIPVS_USE_NL -lnl-tiny -lnl-genl
-TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include -L$(STAGING_DIR)/usr/lib  -DLIBIPVS_USE_NL -lnl-genl
+TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include/libnl3 -L$(STAGING_DIR)/usr/lib  -DLIBIPVS_USE_NL  -lnl-3
 
 define Build/Compile
         $(MAKE) -C $(PKG_BUILD_DIR)/ \
