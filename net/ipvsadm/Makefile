@@ -23,7 +23,7 @@ define Package/ipvsadm
   CATEGORY:=Network
   TITLE:=Utility to administer the Linux Virtual Server
   URL:=http://www.LinuxVirtualServer.org
-  DEPENDS:=+libpcre +libltdl +libpopt +libnl +libnl-tiny 
+  DEPENDS:=+libpcre +libltdl +libpopt +libnl 
 endef
 
 define Package/ipvsadm/conffiles
