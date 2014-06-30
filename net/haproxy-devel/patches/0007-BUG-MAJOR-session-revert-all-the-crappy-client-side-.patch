@@ -1,7 +1,7 @@
 From 6f0a7bac282c9b2082dc763977b7721b6b002089 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 23 Jun 2014 15:22:31 +0200
-Subject: [PATCH 06/15] BUG/MAJOR: session: revert all the crappy client-side
+Subject: [PATCH 07/18] BUG/MAJOR: session: revert all the crappy client-side
  timeout changes
 
 This is the 3rd regression caused by the changes below. The latest to

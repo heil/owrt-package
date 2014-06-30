@@ -1,7 +1,7 @@
 From c7c7be21bf6c7e9afd897d4bf451dc450187a77e Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 23 Jun 2014 18:07:15 +0200
-Subject: [PATCH 07/15] BUG/MINOR: logs: properly initialize and count log
+Subject: [PATCH 08/18] BUG/MINOR: logs: properly initialize and count log
  sockets
 
 Commit 81ae195 ("[MEDIUM] add support for logging via a UNIX socket")

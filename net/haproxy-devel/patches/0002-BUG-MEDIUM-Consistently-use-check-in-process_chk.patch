@@ -1,7 +1,7 @@
 From ccaabcdfca23851af6fd83f4f3265284d283e2ab Mon Sep 17 00:00:00 2001
 From: Simon Horman <horms@verge.net.au>
 Date: Fri, 20 Jun 2014 12:29:47 +0900
-Subject: [PATCH 1/2] BUG/MEDIUM: Consistently use 'check' in process_chk
+Subject: [PATCH 02/18] BUG/MEDIUM: Consistently use 'check' in process_chk
 
 I am not entirely sure that this is a bug, but it seems
 to me that it may cause a problem if there agent-check is

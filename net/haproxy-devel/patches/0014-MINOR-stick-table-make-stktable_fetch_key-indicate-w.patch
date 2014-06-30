@@ -1,7 +1,7 @@
 From b5975defba61e7ef37ae771614166d0970ede04e Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 25 Jun 2014 16:20:53 +0200
-Subject: [PATCH 13/15] MINOR: stick-table: make stktable_fetch_key() indicate
+Subject: [PATCH 14/18] MINOR: stick-table: make stktable_fetch_key() indicate
  why it failed
 
 stktable_fetch_key() does not indicate whether it returns NULL because

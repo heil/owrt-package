@@ -1,7 +1,7 @@
 From 1d3865b096b43b9a6d6a564ffb424ffa6f1ef79f Mon Sep 17 00:00:00 2001
 From: Emeric Brun <ebrun@haproxy.com>
 Date: Fri, 20 Jun 2014 15:37:32 +0200
-Subject: [PATCH 05/15] BUG/MINOR: ssl: Fix OCSP resp update fails with the
+Subject: [PATCH 06/18] BUG/MINOR: ssl: Fix OCSP resp update fails with the
  same certificate configured twice.
 
 ---

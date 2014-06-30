@@ -1,7 +1,7 @@
 From d713bcc326da5d1ac80adab666d7710f3e37650c Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 25 Jun 2014 15:36:04 +0200
-Subject: [PATCH 11/15] BUG/MINOR: counters: do not untrack counters before
+Subject: [PATCH 12/18] BUG/MINOR: counters: do not untrack counters before
  logging
 
 Baptiste Assmann reported a corner case in the releasing of stick-counters:
