@@ -1,7 +1,7 @@
 From 6c616e0b96106dd33d183afbda31e72799e967c3 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 25 Jun 2014 16:56:41 +0200
-Subject: [PATCH 13/18] BUG/MAJOR: sample: correctly reinitialize sample fetch
+Subject: [PATCH 12/17] BUG/MAJOR: sample: correctly reinitialize sample fetch
  context before calling sample_process()
 
 We used to only clear flags when reusing the static sample before calling

@@ -1,7 +1,7 @@
 From 98637e5bffdbc0b312d832e35bc1203a51ce8e7e Mon Sep 17 00:00:00 2001
 From: Simon Horman <horms@verge.net.au>
 Date: Fri, 20 Jun 2014 12:30:16 +0900
-Subject: [PATCH 03/18] MEDIUM: Add external check
+Subject: [PATCH 02/17] MEDIUM: Add external check
 
 Add an external check which makes use of an external process to
 check the status of a server.

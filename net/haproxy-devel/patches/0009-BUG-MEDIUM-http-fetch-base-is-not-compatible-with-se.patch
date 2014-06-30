@@ -1,7 +1,7 @@
 From 3caf2afabe89fb0ef0886cd1d8ea99ef21ec3491 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Tue, 24 Jun 2014 17:27:02 +0200
-Subject: [PATCH 10/18] BUG/MEDIUM: http: fetch "base" is not compatible with
+Subject: [PATCH 09/17] BUG/MEDIUM: http: fetch "base" is not compatible with
  set-header
 
 The sample fetch function "base" makes use of the trash which is also

@@ -1,7 +1,7 @@
 From 18324f574f349d510622ff45635de899437a3a11 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Fri, 27 Jun 2014 18:10:07 +0200
-Subject: [PATCH 18/18] MEDIUM: log: support a user-configurable max log line
+Subject: [PATCH 17/17] MEDIUM: log: support a user-configurable max log line
  length
 
 With all the goodies supported by logformat, people find that the limit

@@ -1,7 +1,7 @@
 From 13a6b48e241c0a50b501446992ab4fda2529f317 Mon Sep 17 00:00:00 2001
 From: Emeric Brun <ebrun@haproxy.com>
 Date: Fri, 20 Jun 2014 15:44:34 +0200
-Subject: [PATCH 04/18] BUG/MINOR: ssl: rejects OCSP response without
+Subject: [PATCH 03/17] BUG/MINOR: ssl: rejects OCSP response without
  nextupdate.
 
 To cache an OCSP Response without expiration time is not safe.

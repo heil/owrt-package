@@ -1,7 +1,7 @@
 From 92df370621b6e1286ef273310ad47371456a5cf0 Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Tue, 24 Jun 2014 11:10:00 +0200
-Subject: [PATCH 09/18] BUG/MINOR: config: http-request replace-header arg typo
+Subject: [PATCH 08/17] BUG/MINOR: config: http-request replace-header arg typo
 
 http-request replace-header was introduced with a typo which prevents it
 to be conditionned by an ACL.

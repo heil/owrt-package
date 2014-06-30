@@ -1,7 +1,7 @@
 From 4e957907aa117c07214ab84ba2a58f2fc1666931 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Fri, 27 Jun 2014 18:08:49 +0200
-Subject: [PATCH 17/18] MINOR: log: make MAX_SYSLOG_LEN overridable at build
+Subject: [PATCH 16/17] MINOR: log: make MAX_SYSLOG_LEN overridable at build
  time
 
 This value was set in log.h without any #ifndef around, so when one

@@ -1,7 +1,7 @@
 From ca3094d0b1531ce62fc1970aa7396a01330bb5c1 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 26 Jun 2014 08:20:38 +0200
-Subject: [PATCH 16/18] BUILD: remove TODO from the spec file and add README
+Subject: [PATCH 15/17] BUILD: remove TODO from the spec file and add README
 
 This used to cause a build failure since 1.5.0, as reported by
 Timothy Shelton. The proxy protocol doc was also added.

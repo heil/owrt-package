@@ -1,7 +1,7 @@
 From 1b71eb581ec1637879f725421efb95ad69f0ea4f Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 25 Jun 2014 17:01:56 +0200
-Subject: [PATCH 15/18] BUG/MEDIUM: counters: fix track-sc* to wait on unstable
+Subject: [PATCH 14/17] BUG/MEDIUM: counters: fix track-sc* to wait on unstable
  contents
 
 I've been facing multiple configurations which involved track-sc* rules
