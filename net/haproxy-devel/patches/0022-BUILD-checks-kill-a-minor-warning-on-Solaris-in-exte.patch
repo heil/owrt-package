@@ -1,0 +1,29 @@
+From dc3d190b2ccec0ef2f7fbb5ce23e40ac50bcde7a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 8 Jul 2014 00:56:27 +0200
+Subject: [PATCH 22/31] BUILD: checks: kill a minor warning on Solaris in
+ external checks
+
+Gcc on Solaris complains that elem->pid is pid_t and that we display
+it as int. A simple cast fixes this. No backport needed, this is 1.6
+only.
+---
+ src/checks.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 0571c58..18faa9b 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1843,7 +1843,7 @@ static struct task *process_chk_proc(struct task *t)
+ 					status = HCHK_STATUS_PROCOK;
+ 			} else if (expired) {
+ 				status = HCHK_STATUS_PROCTOUT;
+-				Warning("kill %d\n", elem->pid);
++				Warning("kill %d\n", (int)elem->pid);
+ 				kill(elem->pid, SIGTERM);
+ 			}
+ 			set_server_check_status(check, status, NULL);
+-- 
+1.8.5.5
+

@@ -1,0 +1,28 @@
+From 9b39dc5e490c58b73eaddf3848547691955f0988 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 8 Jul 2014 00:54:10 +0200
+Subject: [PATCH 21/31] BUILD: checks: external checker needs signal.h
+
+check.c doesn't build on solaris since 98637e5 ("MEDIUM: Add external check")
+because sigset_t is unknown. Simply include signal.h to fix the issue.
+
+No need to backport, this is 1.6-only.
+---
+ src/checks.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/checks.c b/src/checks.c
+index 59d9514..0571c58 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -15,6 +15,7 @@
+ #include <ctype.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <signal.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+-- 
+1.8.5.5
+
