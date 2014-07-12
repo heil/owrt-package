@@ -1,0 +1,126 @@
+From 0dbfdbaef1e78261b20c01674b5090cf2926d972 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 10 Jul 2014 16:37:47 +0200
+Subject: [PATCH 36/38] MINOR: samples: add two converters for the date format
+
+This patch adds two converters :
+
+   ltime(<format>[,<offset>])
+   utime(<format>[,<offset>])
+
+Both use strftime() to emit the output string from an input date. ltime()
+provides local time, while utime() provides the UTC time.
+---
+ doc/configuration.txt | 28 ++++++++++++++++++++++++++++
+ src/sample.c          | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 70 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 8a7a402..96da1cc 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -10017,6 +10017,20 @@ lower
+   sample fetch function or after a transformation keyword returning a string
+   type. The result is of type string.
+ 
++ltime(<format>[,<offset>])
++  Converts an integer supposed to contain a date since epoch to a string
++  representing this date in local time using a format defined by the <format>
++  string using strftime(3). The purpose is to allow any date format to be used
++  in logs. An optional <offset> in seconds may be applied to the input date
++  (positive or negative). See the strftime() man page for the format supported
++  by your operating system. See also the utime converter.
++
++  Example :
++
++      # Emit two colons, one with the local time and another with ip:port
++      # Eg:  20140710162350 127.0.0.1:57325
++      log-format %[date,ltime(%Y%m%d%H%M%S)]\ %ci:%cp
++
+ map(<map_file>[,<default_value>])
+ map_<match_type>(<map_file>[,<default_value>])
+ map_<match_type>_<output_type>(<map_file>[,<default_value>])
+@@ -10218,6 +10232,20 @@ upper
+   sample fetch function or after a transformation keyword returning a string
+   type. The result is of type string.
+ 
++utime(<format>[,<offset>])
++  Converts an integer supposed to contain a date since epoch to a string
++  representing this date in UTC time using a format defined by the <format>
++  string using strftime(3). The purpose is to allow any date format to be used
++  in logs. An optional <offset> in seconds may be applied to the input date
++  (positive or negative). See the strftime() man page for the format supported
++  by your operating system. See also the ltime converter.
++
++  Example :
++
++      # Emit two colons, one with the UTC time and another with ip:port
++      # Eg:  20140710162350 127.0.0.1:57325
++      log-format %[date,utime(%Y%m%d%H%M%S)]\ %ci:%cp
++
+ 
+ 7.3.2. Fetching samples from internal states
+ --------------------------------------------
+diff --git a/src/sample.c b/src/sample.c
+index 3a0f3fb..c260f7e 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -1261,6 +1261,46 @@ static int sample_conv_ipmask(const struct arg *arg_p, struct sample *smp)
+ 	return 1;
+ }
+ 
++/* takes an UINT value on input supposed to represent the time since EPOCH,
++ * adds an optional offset found in args[1] and emits a string representing
++ * the local time in the format specified in args[1] using strftime().
++ */
++static int sample_conv_ltime(const struct arg *args, struct sample *smp)
++{
++	struct chunk *temp;
++	time_t curr_date = smp->data.uint;
++
++	/* add offset */
++	if (args[1].type == ARGT_SINT || args[1].type == ARGT_UINT)
++		curr_date += args[1].data.sint;
++
++	temp = get_trash_chunk();
++	temp->len = strftime(temp->str, temp->size, args[0].data.str.str, localtime(&curr_date));
++	smp->data.str = *temp;
++	smp->type = SMP_T_STR;
++	return 1;
++}
++
++/* takes an UINT value on input supposed to represent the time since EPOCH,
++ * adds an optional offset found in args[1] and emits a string representing
++ * the UTC date in the format specified in args[1] using strftime().
++ */
++static int sample_conv_utime(const struct arg *args, struct sample *smp)
++{
++	struct chunk *temp;
++	time_t curr_date = smp->data.uint;
++
++	/* add offset */
++	if (args[1].type == ARGT_SINT || args[1].type == ARGT_UINT)
++		curr_date += args[1].data.sint;
++
++	temp = get_trash_chunk();
++	temp->len = strftime(temp->str, temp->size, args[0].data.str.str, gmtime(&curr_date));
++	smp->data.str = *temp;
++	smp->type = SMP_T_STR;
++	return 1;
++}
++
+ /************************************************************************/
+ /*       All supported sample fetch functions must be declared here     */
+ /************************************************************************/
+@@ -1363,6 +1403,8 @@ static struct sample_conv_kw_list sample_conv_kws = {ILH, {
+ 	{ "lower",  sample_conv_str2lower, 0,            NULL, SMP_T_STR,  SMP_T_STR  },
+ 	{ "hex",    sample_conv_bin2hex,   0,            NULL, SMP_T_BIN,  SMP_T_STR  },
+ 	{ "ipmask", sample_conv_ipmask,    ARG1(1,MSK4), NULL, SMP_T_IPV4, SMP_T_IPV4 },
++	{ "ltime",  sample_conv_ltime,     ARG2(1,STR,SINT), NULL, SMP_T_UINT, SMP_T_STR },
++	{ "utime",  sample_conv_utime,     ARG2(1,STR,SINT), NULL, SMP_T_UINT, SMP_T_STR },
+ 	{ NULL, NULL, 0, 0, 0 },
+ }};
+ 
+-- 
+1.8.5.5
+

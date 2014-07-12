@@ -1,0 +1,100 @@
+From 8fed9037cd5a680180fd9221568c95d9dfd03042 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 3 Jul 2014 17:02:46 +0200
+Subject: [PATCH 34/38] MEDIUM: stick-table: implement lookup from a sample
+ fetch
+
+Currently we have stktable_fetch_key() which fetches a sample according
+to an expression and returns a stick table key, but we also need a function
+which does only the second half of it from a known sample. So let's cut the
+function in two and introduce smp_to_stkey() to perform this lookup. The
+first function was adapted to make use of it in order to avoid code
+duplication.
+---
+ include/proto/stick_table.h |  1 +
+ src/stick_table.c           | 48 +++++++++++++++++++++++++++------------------
+ 2 files changed, 30 insertions(+), 19 deletions(-)
+
+diff --git a/include/proto/stick_table.h b/include/proto/stick_table.h
+index 57ca223..a121ad5 100644
+--- a/include/proto/stick_table.h
++++ b/include/proto/stick_table.h
+@@ -46,6 +46,7 @@ struct stksess *stktable_touch(struct stktable *t, struct stksess *ts, int local
+ struct stksess *stktable_lookup(struct stktable *t, struct stksess *ts);
+ struct stksess *stktable_lookup_key(struct stktable *t, struct stktable_key *key);
+ struct stksess *stktable_update_key(struct stktable *table, struct stktable_key *key);
++struct stktable_key *smp_to_stkey(struct sample *smp, struct stktable *t);
+ struct stktable_key *stktable_fetch_key(struct stktable *t, struct proxy *px,
+ 				        struct session *l4, void *l7, unsigned int opt,
+ 				        struct sample_expr *expr, struct sample *smp);
+diff --git a/src/stick_table.c b/src/stick_table.c
+index a708d3c..57993b3 100644
+--- a/src/stick_table.c
++++ b/src/stick_table.c
+@@ -597,27 +597,13 @@ static sample_to_key_fct sample_to_key[SMP_TYPES][STKTABLE_TYPES] = {
+ };
+ 
+ 
+-/*
+- * Process a fetch + format conversion as defined by the sample expression <expr>
+- * on request or response considering the <opt> parameter. Returns either NULL if
+- * no key could be extracted, or a pointer to the converted result stored in
+- * static_table_key in format <table_type>. If <smp> is not NULL, it will be reset
+- * and its flags will be initialized so that the caller gets a copy of the input
+- * sample, and knows why it was not accepted (eg: SMP_F_MAY_CHANGE is present).
++/* Prepares a stktable_key from a sample <smp> to search into table <t>.
++ * Returns NULL if the sample could not be converted (eg: no matching type),
++ * otherwise a pointer to the static stktable_key filled with what is needed
++ * for the lookup.
+  */
+-struct stktable_key *stktable_fetch_key(struct stktable *t, struct proxy *px, struct session *l4, void *l7,
+-                                        unsigned int opt, struct sample_expr *expr, struct sample *smp)
++struct stktable_key *smp_to_stkey(struct sample *smp, struct stktable *t)
+ {
+-	if (smp)
+-		memset(smp, 0, sizeof(*smp));
+-
+-	smp = sample_process(px, l4, l7, opt, expr, smp);
+-	if (!smp)
+-		return NULL;
+-
+-	if ((smp->flags & SMP_F_MAY_CHANGE) && !(opt & SMP_OPT_FINAL))
+-		return NULL; /* we can only use stable samples */
+-
+ 	if (!sample_to_key[smp->type][t->type])
+ 		return NULL;
+ 
+@@ -660,6 +646,30 @@ struct stktable_key *stktable_fetch_key(struct stktable *t, struct proxy *px, st
+ }
+ 
+ /*
++ * Process a fetch + format conversion as defined by the sample expression <expr>
++ * on request or response considering the <opt> parameter. Returns either NULL if
++ * no key could be extracted, or a pointer to the converted result stored in
++ * static_table_key in format <table_type>. If <smp> is not NULL, it will be reset
++ * and its flags will be initialized so that the caller gets a copy of the input
++ * sample, and knows why it was not accepted (eg: SMP_F_MAY_CHANGE is present).
++ */
++struct stktable_key *stktable_fetch_key(struct stktable *t, struct proxy *px, struct session *l4, void *l7,
++                                        unsigned int opt, struct sample_expr *expr, struct sample *smp)
++{
++	if (smp)
++		memset(smp, 0, sizeof(*smp));
++
++	smp = sample_process(px, l4, l7, opt, expr, smp);
++	if (!smp)
++		return NULL;
++
++	if ((smp->flags & SMP_F_MAY_CHANGE) && !(opt & SMP_OPT_FINAL))
++		return NULL; /* we can only use stable samples */
++
++	return smp_to_stkey(smp, t);
++}
++
++/*
+  * Returns 1 if sample expression <expr> result can be converted to table key of
+  * type <table_type>, otherwise zero. Used in configuration check.
+  */
+-- 
+1.8.5.5
+
