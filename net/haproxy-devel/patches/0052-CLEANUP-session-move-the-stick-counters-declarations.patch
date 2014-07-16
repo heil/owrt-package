@@ -1,0 +1,91 @@
+From 5ed1bbfc75a70e0c4d4ed544c3c23e91b5a19edf Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 25 Jun 2014 18:30:01 +0200
+Subject: [PATCH 52/53] CLEANUP: session: move the stick counters declarations
+ to stick_table.h
+
+They're really not appropriate in session.h as they always require a
+stick table, and I'm having a hard time finding them each time I need
+to.
+---
+ include/types/session.h     | 24 ------------------------
+ include/types/stick_table.h | 23 +++++++++++++++++++++++
+ 2 files changed, 23 insertions(+), 24 deletions(-)
+
+diff --git a/include/types/session.h b/include/types/session.h
+index 02772a8..f17aff4 100644
+--- a/include/types/session.h
++++ b/include/types/session.h
+@@ -91,20 +91,6 @@
+ #define SN_COMP_READY   0x00100000	/* the compression is initialized */
+ #define SN_SRV_REUSED   0x00200000	/* the server-side connection was reused */
+ 
+-/* WARNING: if new fields are added, they must be initialized in session_accept()
+- * and freed in session_free() !
+- */
+-
+-#define STKCTR_TRACK_BACKEND 1
+-#define STKCTR_TRACK_CONTENT 2
+-/* stick counter. The <entry> member is a composite address (caddr) made of a
+- * pointer to an stksess struct, and two flags among STKCTR_TRACK_* above.
+- */
+-struct stkctr {
+-	unsigned long   entry;          /* entry containing counters currently being tracked by this session  */
+-	struct stktable *table;         /* table the counters above belong to (undefined if counters are null) */
+-};
+-
+ /*
+  * Note: some session flags have dependencies :
+  *  - SN_DIRECT cannot exist without SN_ASSIGNED, because a server is
+@@ -171,16 +157,6 @@ struct session {
+ 	char *unique_id;			/* custom unique ID */
+ };
+ 
+-/* parameters to configure tracked counters */
+-struct track_ctr_prm {
+-	struct sample_expr *expr;		/* expression used as the key */
+-	union {
+-		struct stktable *t;		/* a pointer to the table */
+-		char *n;			/* or its name during parsing. */
+-	} table;
+-};
+-
+-
+ #endif /* _TYPES_SESSION_H */
+ 
+ /*
+diff --git a/include/types/stick_table.h b/include/types/stick_table.h
+index 6fdc58e..0cda104 100644
+--- a/include/types/stick_table.h
++++ b/include/types/stick_table.h
+@@ -193,4 +193,27 @@ struct stktable_key {
+ 	union stktable_key_data data;   /* data, must always be last */
+ };
+ 
++/* WARNING: if new fields are added, they must be initialized in session_accept()
++ * and freed in session_free() !
++ */
++#define STKCTR_TRACK_BACKEND 1
++#define STKCTR_TRACK_CONTENT 2
++
++/* stick counter. The <entry> member is a composite address (caddr) made of a
++ * pointer to an stksess struct, and two flags among STKCTR_TRACK_* above.
++ */
++struct stkctr {
++	unsigned long   entry;          /* entry containing counters currently being tracked by this session  */
++	struct stktable *table;         /* table the counters above belong to (undefined if counters are null) */
++};
++
++/* parameters to configure tracked counters */
++struct track_ctr_prm {
++	struct sample_expr *expr;		/* expression used as the key */
++	union {
++		struct stktable *t;		/* a pointer to the table */
++		char *n;			/* or its name during parsing. */
++	} table;
++};
++
+ #endif /* _TYPES_STICK_TABLE_H */
+-- 
+1.8.5.5
+

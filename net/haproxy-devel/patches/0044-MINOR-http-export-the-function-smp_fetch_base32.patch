@@ -1,0 +1,41 @@
+From 055b9d5c639b0e86bc15e20f724cf34b5811d387 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@exceliance.fr>
+Date: Tue, 15 Jul 2014 16:11:07 +0200
+Subject: [PATCH 44/53] MINOR: http: export the function 'smp_fetch_base32'
+
+It's sometimes useful outside of proto_http.c.
+---
+ include/proto/proto_http.h | 3 +++
+ src/proto_http.c           | 2 +-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index e898ca8..8c222df 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -122,6 +122,9 @@ struct redirect_rule *http_parse_redirect_rule(const char *file, int linenum, st
+                                                const char **args, char **errmsg, int use_fmt);
+ int smp_fetch_cookie(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                  const struct arg *args, struct sample *smp, const char *kw);
++int
++smp_fetch_base32(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
++                 const struct arg *args, struct sample *smp, const char *kw);
+ 
+ enum http_meth_t find_http_meth(const char *str, const int len);
+ 
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 94afed7..2017494 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -10296,7 +10296,7 @@ smp_fetch_base(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+  * 32-bit integer value. This fetch is useful for tracking per-path activity on
+  * high-traffic sites without having to store whole paths.
+  */
+-static int
++int
+ smp_fetch_base32(struct proxy *px, struct session *l4, void *l7, unsigned int opt,
+                  const struct arg *args, struct sample *smp, const char *kw)
+ {
+-- 
+1.8.5.5
+
