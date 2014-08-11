@@ -1,0 +1,30 @@
+From 9dbcfabafb2cf2a6a1ae71e34bbf6ebbabc389a0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Thu, 7 Aug 2014 01:55:39 +0200
+Subject: [PATCH 62/63] BUG/MINOR: checks: external checks shouldn't wait for
+ timeout to return the result
+
+When the child process terminates, it should wake up the associated task to
+process the result immediately, otherwise it will be available only when the
+task expires.
+
+This fix is specific to the 1.6 branch.
+---
+ src/checks.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/checks.c b/src/checks.c
+index aad2037..d616e96 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -1519,6 +1519,7 @@ static void pid_list_expire(pid_t pid, int status)
+ 			elem->t->expire = now_ms;
+ 			elem->status = status;
+ 			elem->exited = 1;
++			task_wakeup(elem->t, TASK_WOKEN_IO);
+ 			return;
+ 		}
+ 	}
+-- 
+1.8.5.5
+

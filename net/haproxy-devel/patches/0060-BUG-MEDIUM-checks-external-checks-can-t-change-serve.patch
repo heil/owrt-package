@@ -1,0 +1,31 @@
+From 77010d8006619d8e8199c4adc23fd77d9102edd8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Thu, 7 Aug 2014 01:55:37 +0200
+Subject: [PATCH 60/63] BUG/MEDIUM: checks: external checks can't change server
+ status to UP
+
+Mark Brooks reported an issue with external healthchecks, where servers are
+never marked as UP. This is due to a typo, which flags a successful check as
+CHK_RES_FAILED instead of CHK_RES_PASSED.
+
+This bug is specific to the 1.6 branch.
+---
+ src/checks.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index 18faa9b..2c9958a 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -93,7 +93,7 @@ static const struct check_status check_statuses[HCHK_STATUS_SIZE] = {
+ 
+ 	[HCHK_STATUS_PROCERR]	= { CHK_RES_FAILED,   "PROCERR",  "External check error" },
+ 	[HCHK_STATUS_PROCTOUT]	= { CHK_RES_FAILED,   "PROCTOUT", "External check timeout" },
+-	[HCHK_STATUS_PROCOK]	= { CHK_RES_FAILED,   "PROCOK",   "External check passed" },
++	[HCHK_STATUS_PROCOK]	= { CHK_RES_PASSED,   "PROCOK",   "External check passed" },
+ };
+ 
+ static const struct analyze_status analyze_statuses[HANA_STATUS_SIZE] = {		/* 0: ignore, 1: error, 2: OK */
+-- 
+1.8.5.5
+
