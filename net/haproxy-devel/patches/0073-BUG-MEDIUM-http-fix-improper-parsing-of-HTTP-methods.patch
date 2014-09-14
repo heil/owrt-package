@@ -1,0 +1,44 @@
+From 912c119557873e8ae4835eff95f48fd4971a30cb Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 29 Aug 2014 15:15:50 +0200
+Subject: [PATCH 73/82] BUG/MEDIUM: http: fix improper parsing of HTTP methods
+ for use with ACLs
+
+pat_parse_meth() had some remains of an early implementation attempt for
+the patterns, it initialises a trash and never sets the pattern value there.
+The result is that a non-standard method cannot be matched anymore. The bug
+appeared during the pattern rework in 1.5, so this fix must be backported
+there. Thanks to Joe Williams of GitHub for reporting the bug.
+---
+ src/proto_http.c | 9 +--------
+ 1 file changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index dc4787d..f0dd0c8 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -9851,20 +9851,13 @@ smp_prefetch_http(struct proxy *px, struct session *s, void *l7, unsigned int op
+ static int pat_parse_meth(const char *text, struct pattern *pattern, int mflags, char **err)
+ {
+ 	int len, meth;
+-	struct chunk *trash;
+ 
+ 	len  = strlen(text);
+ 	meth = find_http_meth(text, len);
+ 
+ 	pattern->val.i = meth;
+ 	if (meth == HTTP_METH_OTHER) {
+-		trash = get_trash_chunk();
+-		if (trash->size < len) {
+-			memprintf(err, "no space avalaible in the buffer. expect %d, provides %d",
+-			          len, trash->size);
+-			return 0;
+-		}
+-		pattern->ptr.str = trash->str;
++		pattern->ptr.str = (char *)text;
+ 		pattern->len = len;
+ 	}
+ 	else {
+-- 
+1.8.5.5
+

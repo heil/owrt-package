@@ -1,0 +1,80 @@
+From 656c5fa7e859aebedfb79e4626ad88147637ab4c Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Mon, 18 Aug 2014 00:56:31 +0200
+Subject: [PATCH 65/82] BUILD: ssl: disable OCSP when using boringssl
+
+Google's boringssl doesn't currently support OCSP, so
+disable it if detected.
+
+OCSP support may be reintroduced as per:
+https://code.google.com/p/chromium/issues/detail?id=398677
+
+In that case we can simply revert this commit.
+
+Signed-off-by: Lukas Tribus <luky-37@hotmail.com>
+---
+ include/proto/ssl_sock.h | 2 +-
+ src/dumpstats.c          | 2 +-
+ src/ssl_sock.c           | 6 +++---
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/include/proto/ssl_sock.h b/include/proto/ssl_sock.h
+index 3e111cd..6362953 100644
+--- a/include/proto/ssl_sock.h
++++ b/include/proto/ssl_sock.h
+@@ -54,7 +54,7 @@ char *ssl_sock_get_version(struct connection *conn);
+ int ssl_sock_get_cert_used(struct connection *conn);
+ int ssl_sock_get_remote_common_name(struct connection *conn, struct chunk *out);
+ unsigned int ssl_sock_get_verify_result(struct connection *conn);
+-#ifdef SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB
++#if (defined SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB && !defined OPENSSL_IS_BORINGSSL)
+ int ssl_sock_update_ocsp_response(struct chunk *ocsp_response, char **err);
+ #endif
+ 
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 5365042..3855e09 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -1794,7 +1794,7 @@ static int stats_sock_parse_request(struct stream_interface *si, char *line)
+ #ifdef USE_OPENSSL
+ 		else if (strcmp(args[1], "ssl") == 0) {
+ 			if (strcmp(args[2], "ocsp-response") == 0) {
+-#ifdef SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB
++#if (defined SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB && !defined OPENSSL_IS_BORINGSSL)
+ 				char *err = NULL;
+ 
+ 				/* Expect one parameter: the new response in base64 encoding */
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index cf8adc7..e53e3bd 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -44,7 +44,7 @@
+ #include <openssl/x509.h>
+ #include <openssl/err.h>
+ #include <openssl/rand.h>
+-#ifdef SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB
++#if (defined SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB && !defined OPENSSL_IS_BORINGSSL)
+ #include <openssl/ocsp.h>
+ #endif
+ 
+@@ -112,7 +112,7 @@ static DH *local_dh_4096 = NULL;
+ static DH *local_dh_8192 = NULL;
+ #endif /* OPENSSL_NO_DH */
+ 
+-#ifdef SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB
++#if (defined SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB && !defined OPENSSL_IS_BORINGSSL)
+ struct certificate_ocsp {
+ 	struct ebmb_node key;
+ 	unsigned char key_data[OCSP_MAX_CERTID_ASN1_LENGTH];
+@@ -1282,7 +1282,7 @@ static int ssl_sock_load_cert_file(const char *path, struct bind_conf *bind_conf
+ 	}
+ #endif
+ 
+-#ifdef SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB
++#if (defined SSL_CTRL_SET_TLSEXT_STATUS_REQ_CB && !defined OPENSSL_IS_BORINGSSL)
+ 	ret = ssl_sock_load_ocsp(ctx, path);
+ 	if (ret < 0) {
+ 		if (err)
+-- 
+1.8.5.5
+

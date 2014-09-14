@@ -1,0 +1,107 @@
+From 7346acb6f1c148782ebaa93d34e7b86a7f8706ae Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 28 Aug 2014 15:03:15 +0200
+Subject: [PATCH 71/82] MINOR: log: add a new field "%lc" to implement a
+ per-frontend log counter
+
+Sometimes it would be convenient to have a log counter so that from a log
+server we know whether some logs were lost or not. The frontend's log counter
+serves exactly this purpose. It's incremented each time a traffic log is
+produced. If a log is disabled using "http-request set-log-level silent",
+the counter will not be incremented. However, admin logs are not accounted
+for. Also, if logs are filtered out before being sent to the server because
+of a minimum level set on the log line, the counter will be increased anyway.
+
+The counter is 32-bit, so it will wrap, but that's not an issue considering
+that 4 billion logs are rarely in the same file, let alone close to each
+other.
+---
+ doc/configuration.txt |  1 +
+ include/types/log.h   |  1 +
+ include/types/proxy.h |  2 ++
+ src/log.c             | 18 ++++++++++++++++++
+ 4 files changed, 22 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index 90052e3..5163199 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -12569,6 +12569,7 @@ Please refer to the table below for currently defined variables :
+   |   | %fi  | frontend_ip              (accepting address)  | IP          |
+   |   | %fp  | frontend_port            (accepting address)  | numeric     |
+   |   | %ft  | frontend_name_transport ('~' suffix for SSL)  | string      |
++  |   | %lc  | frontend_log_counter                          | numeric     |
+   |   | %hr  | captured_request_headers default style        | string      |
+   |   | %hrl | captured_request_headers CLF style            | string list |
+   |   | %hs  | captured_response_headers default style       | string      |
+diff --git a/include/types/log.h b/include/types/log.h
+index c7e47ea..c680663 100644
+--- a/include/types/log.h
++++ b/include/types/log.h
+@@ -53,6 +53,7 @@ enum {
+ 	LOG_FMT_SERVERPORT,
+ 	LOG_FMT_SERVERIP,
+ 	LOG_FMT_COUNTER,
++	LOG_FMT_LOGCNT,
+ 	LOG_FMT_PID,
+ 	LOG_FMT_DATE,
+ 	LOG_FMT_DATEGMT,
+diff --git a/include/types/proxy.h b/include/types/proxy.h
+index b31df74..748f4aa 100644
+--- a/include/types/proxy.h
++++ b/include/types/proxy.h
+@@ -316,6 +316,8 @@ struct proxy {
+ 	int (*accept)(struct session *s);       /* application layer's accept() */
+ 	struct conn_src conn_src;               /* connection source settings */
+ 	struct proxy *next;
++
++	unsigned int log_count;			/* number of logs produced by the frontend */
+ 	struct list logsrvs;
+ 	struct list logformat; 			/* log_format linked list */
+ 	char *header_unique_id; 		/* unique-id header */
+diff --git a/src/log.c b/src/log.c
+index 3e3acb4..07981e5 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -107,6 +107,7 @@ static const struct logformat_type logformat_keywords[] = {
+ 	{ "hrl", LOG_FMT_HDRREQUESTLIST, PR_MODE_TCP, LW_REQHDR, NULL }, /* header request list */
+ 	{ "hs", LOG_FMT_HDRRESPONS, PR_MODE_TCP, LW_RSPHDR, NULL },  /* header response */
+ 	{ "hsl", LOG_FMT_HDRRESPONSLIST, PR_MODE_TCP, LW_RSPHDR, NULL },  /* header response list */
++	{ "lc", LOG_FMT_LOGCNT, PR_MODE_TCP, LW_INIT, NULL }, /* log counter */
+ 	{ "ms", LOG_FMT_MS, PR_MODE_TCP, LW_INIT, NULL },       /* accept date millisecond */
+ 	{ "pid", LOG_FMT_PID, PR_MODE_TCP, LW_INIT, NULL }, /* log pid */
+ 	{ "r", LOG_FMT_REQ, PR_MODE_HTTP, LW_REQ, NULL },  /* request */
+@@ -1530,6 +1531,22 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
+ 				}
+ 				break;
+ 
++			case LOG_FMT_LOGCNT: // %lc
++				if (tmp->options & LOG_OPT_HEXA) {
++					iret = snprintf(tmplog, dst + maxsize - tmplog, "%04X", s->fe->log_count);
++					if (iret < 0 || iret > dst + maxsize - tmplog)
++						goto out;
++					last_isspace = 0;
++					tmplog += iret;
++				} else {
++					ret = ultoa_o(s->fe->log_count, tmplog, dst + maxsize - tmplog);
++					if (ret == NULL)
++						goto out;
++					tmplog = ret;
++					last_isspace = 0;
++				}
++				break;
++
+ 			case LOG_FMT_HOSTNAME: // %H
+ 				src = hostname;
+ 				ret = lf_text(tmplog, src, dst + maxsize - tmplog, tmp);
+@@ -1620,6 +1637,7 @@ void sess_log(struct session *s)
+ 	size = tmplog - logline;
+ 	size += build_logline(s, tmplog, global.max_syslog_len - size, &s->fe->logformat);
+ 	if (size > 0) {
++		s->fe->log_count++;
+ 		__send_log(s->fe, level, logline, size + 1);
+ 		s->logs.logwait = 0;
+ 	}
+-- 
+1.8.5.5
+

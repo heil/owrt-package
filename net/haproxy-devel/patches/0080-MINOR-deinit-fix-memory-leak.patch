@@ -1,0 +1,26 @@
+From 34c0179464252aa9c79d3e1ff778cb67636243bd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?S=C3=A1rk=C3=B6zi=2C=20L=C3=A1szl=C3=B3?=
+ <laszlo.sarkozi@balabit.com>
+Date: Fri, 5 Sep 2014 10:08:23 +0200
+Subject: [PATCH 80/82] MINOR: deinit: fix memory leak
+
+deinit() did not free the conf.file member of server objects.
+---
+ src/haproxy.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 74b2687..13c3d26 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -1175,6 +1175,7 @@ void deinit(void)
+ 			free(s->check.bo);
+ 			free(s->agent.bi);
+ 			free(s->agent.bo);
++			free((char*)s->conf.file);
+ 			free(s);
+ 			s = s_next;
+ 		}/* end while(s) */
+-- 
+1.8.5.5
+

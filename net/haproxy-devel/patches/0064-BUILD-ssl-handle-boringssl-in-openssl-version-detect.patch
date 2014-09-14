@@ -1,0 +1,44 @@
+From 581cc8d2b8295b46aa0b7b28a88aa53e12e551dd Mon Sep 17 00:00:00 2001
+From: Lukas Tribus <luky-37@hotmail.com>
+Date: Mon, 18 Aug 2014 00:56:30 +0200
+Subject: [PATCH 64/82] BUILD: ssl: handle boringssl in openssl version
+ detection
+
+Google's boringssl doesn't have OPENSSL_VERSION_TEXT, SSLeay_version()
+or SSLEAY_VERSION, in fact, it doesn't have any real versioning, its
+just git-based.
+
+So in case we build against boringssl, we can't access those values.
+
+Instead, we just inform the user that HAProxy was build against
+boringssl.
+
+Signed-off-by: Lukas Tribus <luky-37@hotmail.com>
+---
+ src/haproxy.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 9f742c7..74b2687 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -269,10 +269,15 @@ void display_build_opts()
+ 	printf("\n");
+ 
+ #ifdef USE_OPENSSL
+-	printf("Built with OpenSSL version : " OPENSSL_VERSION_TEXT "\n");
++	printf("Built with OpenSSL version : "
++#ifdef OPENSSL_IS_BORINGSSL
++	       "BoringSSL\n");
++#else /* OPENSSL_IS_BORINGSSL */
++	        OPENSSL_VERSION_TEXT "\n");
+ 	printf("Running on OpenSSL version : %s%s\n",
+ 	       SSLeay_version(SSLEAY_VERSION),
+ 	       ((OPENSSL_VERSION_NUMBER ^ SSLeay()) >> 8) ? " (VERSIONS DIFFER!)" : "");
++#endif
+ 	printf("OpenSSL library supports TLS extensions : "
+ #if OPENSSL_VERSION_NUMBER < 0x00907000L
+ 	       "no (library version too old)"
+-- 
+1.8.5.5
+
