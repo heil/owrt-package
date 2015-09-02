@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=varnish
-PKG_VERSION:=3.0.5
-PKG_RELEASE:=2
+PKG_VERSION:=3.0.7
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://repo.varnish-cache.org/source/
-PKG_MD5SUM:=674d44775cc927aee4601edb37f60198
+PKG_MD5SUM:=aa63a7808d775c005d020c41f152b7af
 
 PKG_FIXUP:=autoreconf
 
@@ -64,6 +64,7 @@ endef
 
 define Package/varnish/conffiles
 /etc/varnish/default.vcl
+/etc/config/varnish
 endef
 
 define Package/varnish/install
