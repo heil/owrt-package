@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=keepalived-devel
-PKG_VERSION:=1.2.13
-PKG_RELEASE:=10
+PKG_VERSION:=1.2.19
+PKG_RELEASE:=17
 
 PKG_SOURCE:=keepalived-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:= http://www.keepalived.org/software
-PKG_MD5SUM:=5f5c038139c55b5af54deefbcce64e33
+PKG_MD5SUM:=5c98b06639dd50a6bff76901b53febb6
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/keepalived-$(PKG_VERSION)
 
@@ -26,7 +26,7 @@ define Package/keepalived-devel
   TITLE:=Failover and monitoring daemon for LVS clusters
   URL:=http://www.keepalived.org/
   DEPENDS:=+libopenssl +libpcre +libltdl +libpopt +ipvsadm +kmod-ipvs-core +kmod-ipvs-dh +kmod-ipvs-ftp +kmod-ipvs-lblc +kmod-ipvs-lblcr \
-	+kmod-ipvs-lc +kmod-ipvs-nq +kmod-ipvs-pe-sip +kmod-ipvs-rr +kmod-ipvs-sed +kmod-ipvs-sh +kmod-ipvs-wlc +kmod-ipvs-wrr +kmod-ipt-nathelper-extra \
+	+kmod-ipvs-lc +kmod-ipvs-nq +kmod-ipvs-pe-sip +kmod-ipvs-rr +kmod-ipvs-sed +kmod-ipvs-sh +kmod-ipvs-wlc +kmod-ipvs-wrr +kmod-nf-nathelper-extra \
 	+iptables-mod-nat-extra \
 	+libnl-tiny
 

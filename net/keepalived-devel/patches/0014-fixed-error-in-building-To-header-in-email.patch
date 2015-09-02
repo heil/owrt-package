@@ -1,0 +1,48 @@
+From a0985b53345f61c1655c83fe26f8eb0786d0c8f2 Mon Sep 17 00:00:00 2001
+From: Gu Feng <flygoast@126.com>
+Date: Wed, 19 Aug 2015 19:00:48 +0800
+Subject: [PATCH 14/17] fixed error in building To-header in email
+
+---
+ keepalived/core/smtp.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/keepalived/core/smtp.c b/keepalived/core/smtp.c
+index 4f6d685..6734fb9 100644
+--- a/keepalived/core/smtp.c
++++ b/keepalived/core/smtp.c
+@@ -464,7 +464,7 @@ build_to_header_rcpt_addrs(smtp_t *smtp)
+ 
+ 	while (1) {
+ 		fetched_email = fetch_next_email(smtp);
+-		if (fetched_email != NULL)
++		if (fetched_email == NULL)
+ 			break;
+ 
+ 		bytes_not_written = 0;
+@@ -477,18 +477,19 @@ build_to_header_rcpt_addrs(smtp_t *smtp)
+ 				break;
+ 
+ 			/* Prepend with a comma and space to all non-first email addresses */
+-			strcat(email_to_addrs, ", ");
+-			email_to_addrs += 2;
++			*email_to_addrs++ = ',';
++			*email_to_addrs++ = ' ';
+ 			bytes_available -= 2;
+ 		}
+ 
+-		bytes_not_written = snprintf(email_to_addrs, bytes_to_write, "%s", fetched_email);
++		bytes_not_written = snprintf(email_to_addrs, bytes_to_write + 1, "%s", fetched_email) - bytes_to_write;;
+ 		if (bytes_not_written > 0) {
+ 			/* Inconsistent state, no choice but to break here and do nothing */
+ 			break;
+ 		}
+ 
+ 		email_to_addrs += bytes_to_write;
++		bytes_available -= bytes_to_write;
+ 		smtp->email_it++;
+ 	}
+ 
+-- 
+2.4.6
+

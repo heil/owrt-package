@@ -1,0 +1,440 @@
+From b138665d0154ea0267b4fcf8c89355cda01269e5 Mon Sep 17 00:00:00 2001
+From: Alexey Andriyanov <alan@al-an.info>
+Date: Wed, 20 May 2015 10:19:45 +0300
+Subject: [PATCH 07/17] ipvs: respect the error code of the ipvs_talk
+
+Previously, if the IPVS reflector was unable to perform
+its task, it reported error through syslog and ignored it.
+
+This behavior leads to inconsistancies with quorum-handler:
+it is called with UP even if no RS were added into the IPVS.
+This could take place, for example, when there is a limit of
+opened filehandles and keepalived was unable to open netlink
+socket (it is opened on every call to the ipvs_talk).
+
+Now the check is not marked as OK unless IPVS reflector reports
+OK. Following successfull check will try to add an RS again.
+
+The special case errors "ENOENT on remove" and "EEXIST on add"
+are treated with OK result code.
+---
+ keepalived/check/ipvswrapper.c | 86 +++++++++++++++++++++++++++++-------------
+ keepalived/check/ipwrapper.c   | 71 ++++++++++++++++++----------------
+ keepalived/include/ipwrapper.h |  2 +-
+ 3 files changed, 100 insertions(+), 59 deletions(-)
+
+diff --git a/keepalived/check/ipvswrapper.c b/keepalived/check/ipvswrapper.c
+index 9415556..86bab43 100644
+--- a/keepalived/check/ipvswrapper.c
++++ b/keepalived/check/ipvswrapper.c
+@@ -88,11 +88,22 @@ ipvs_talk(int cmd)
+ 	int result;
+ 	if (result = ipvs_command(cmd, urule))
+ 		if ((cmd == IP_VS_SO_SET_EDITDEST) &&
+-		    (errno == ENOENT))
+-			result = ipvs_command(IP_VS_SO_SET_ADDDEST, urule);
+-	if (result)
++		    (errno == ENOENT)) {
++			cmd = IP_VS_SO_SET_ADDDEST;
++			result = ipvs_command(cmd, urule);
++		}
++	if (result) {
+ 		log_message(LOG_INFO, "IPVS : %s", ipvs_strerror(errno));
+-	return IPVS_SUCCESS;
++		if (errno == EEXIST &&
++			(cmd == IP_VS_SO_SET_ADD || IP_VS_SO_SET_ADDDEST)
++		)
++			result = 0;
++		else if (errno == ENOENT &&
++			(cmd == IP_VS_SO_SET_DEL || IP_VS_SO_SET_DELDEST)
++		)
++			result = 0;
++	}
++	return result;
+ }
+ 
+ int
+@@ -122,7 +133,6 @@ static int
+ ipvs_group_range_cmd(int cmd, virtual_server_group_entry_t *vsg_entry)
+ {
+ 	uint32_t addr_ip;
+-	int err = 0;
+ 
+ 	/* Parse the whole range */
+ 	for (addr_ip = inet_sockaddrip4(&vsg_entry->addr);
+@@ -132,10 +142,11 @@ ipvs_group_range_cmd(int cmd, virtual_server_group_entry_t *vsg_entry)
+ 		urule->vport = inet_sockaddrport(&vsg_entry->addr);
+ 
+ 		/* Talk to the IPVS channel */
+-		err = ipvs_talk(cmd);
++		if (ipvs_talk(cmd))
++			return -1;
+ 	}
+ 
+-	return err;
++	return 0;
+ }
+ 
+ /* set IPVS group rules */
+@@ -146,10 +157,9 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 	virtual_server_group_entry_t *vsg_entry;
+ 	list l;
+ 	element e;
+-	int err = 1;
+ 
+ 	/* return if jointure fails */
+-	if (!vsg) return -1;
++	if (!vsg) return 0;
+ 
+ 	/* visit addr_ip list */
+ 	l = vsg->addr_ip;
+@@ -160,7 +170,8 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			err = ipvs_talk(cmd);
++			if (ipvs_talk(cmd))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
+@@ -175,7 +186,8 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			err = ipvs_talk(cmd);
++			if (ipvs_talk(cmd))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
+@@ -188,12 +200,13 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			err = ipvs_group_range_cmd(cmd, vsg_entry);
++			if (ipvs_group_range_cmd(cmd, vsg_entry))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
+ 
+-	return err;
++	return 0;
+ }
+ 
+ /* Fill IPVS rule with root vs infos */
+@@ -407,7 +420,7 @@ ipvs_stop(void)
+ }
+ 
+ /* Send user rules to IPVS module */
+-static void
++static int
+ ipvs_talk(int cmd)
+ {
+ 	int result = -1;
+@@ -439,13 +452,25 @@ ipvs_talk(int cmd)
+ 			break;
+ 		case IP_VS_SO_SET_EDITDEST:
+ 			if ((result = ipvs_update_dest(srule, drule)) &&
+-			    (errno == ENOENT))
++			    (errno == ENOENT)) {
++				cmd = IP_VS_SO_SET_ADDDEST;
+ 				result = ipvs_add_dest(srule, drule);
++			}
+ 			break;
+ 	}
+ 
+-	if (result)
++	if (result) {
+ 		log_message(LOG_INFO, "IPVS: %s", ipvs_strerror(errno));
++		if (errno == EEXIST &&
++			(cmd == IP_VS_SO_SET_ADD || IP_VS_SO_SET_ADDDEST)
++		)
++			result = 0;
++		else if (errno == ENOENT &&
++			(cmd == IP_VS_SO_SET_DEL || IP_VS_SO_SET_DELDEST)
++		)
++			result = 0;
++	}
++	return result;
+ }
+ 
+ int
+@@ -465,7 +490,7 @@ ipvs_syncd_cmd(int cmd, char *ifname, int state, int syncid)
+ }
+ 
+ /* IPVS group range rule */
+-static void
++static int
+ ipvs_group_range_cmd(int cmd, virtual_server_group_entry_t *vsg_entry)
+ {
+ 	uint32_t addr_ip, ip;
+@@ -494,12 +519,15 @@ ipvs_group_range_cmd(int cmd, virtual_server_group_entry_t *vsg_entry)
+ 		srule->port = inet_sockaddrport(&vsg_entry->addr);
+ 
+ 		/* Talk to the IPVS channel */
+-		ipvs_talk(cmd);
++		if (ipvs_talk(cmd))
++			return -1;
+ 	}
++
++	return 0;
+ }
+ 
+ /* set IPVS group rules */
+-static void
++static int
+ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ {
+ 	virtual_server_group_t *vsg = vs->vsg;
+@@ -508,7 +536,7 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 	element e;
+ 
+ 	/* return if jointure fails */
+-	if (!vsg) return;
++	if (!vsg) return 0;
+ 
+ 	/* visit addr_ip list */
+ 	l = vsg->addr_ip;
+@@ -525,7 +553,8 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			ipvs_talk(cmd);
++			if (ipvs_talk(cmd))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
+@@ -548,7 +577,8 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			ipvs_talk(cmd);
++			if (ipvs_talk(cmd))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
+@@ -561,10 +591,12 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 		/* Talk to the IPVS channel */
+ 		if (IPVS_ALIVE(cmd, vsg_entry, rs)) {
+-			ipvs_group_range_cmd(cmd, vsg_entry);
++			if (ipvs_group_range_cmd(cmd, vsg_entry))
++				return -1;
+ 			IPVS_SET_ALIVE(cmd, vsg_entry);
+ 		}
+ 	}
++	return 0;
+ }
+ 
+ /* Fill IPVS rule with root vs infos */
+@@ -618,6 +650,8 @@ ipvs_set_rule(int cmd, virtual_server_t * vs, real_server_t * rs)
+ int
+ ipvs_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ {
++	int err = 0;
++
+ 	/* Allocate the room */
+ 	memset(srule, 0, sizeof(ipvs_service_t));
+ 	ipvs_set_rule(cmd, vs, rs);
+@@ -638,7 +672,7 @@ ipvs_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 
+ 	/* Set vs rule and send to kernel */
+ 	if (vs->vsgname) {
+-		ipvs_group_cmd(cmd, vs, rs);
++		err = ipvs_group_cmd(cmd, vs, rs);
+ 	} else {
+ 		if (vs->vfwmark) {
+ 			srule->af = AF_INET;
+@@ -659,10 +693,10 @@ ipvs_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 		}
+ 
+ 		/* Talk to the IPVS channel */
+-		ipvs_talk(cmd);
++		err = ipvs_talk(cmd);
+ 	}
+ 
+-	return IPVS_SUCCESS;
++	return err;
+ }
+ 
+ /* add alive destinations to the newly created vsge */
+diff --git a/keepalived/check/ipwrapper.c b/keepalived/check/ipwrapper.c
+index 7d26c59..4712089 100644
+--- a/keepalived/check/ipwrapper.c
++++ b/keepalived/check/ipwrapper.c
+@@ -65,8 +65,7 @@ clear_service_rs(virtual_server_t * vs, list l)
+ 			log_message(LOG_INFO, "Removing service %s from VS %s"
+ 						, FMT_RS(rs)
+ 						, FMT_VS(vs));
+-			if (!ipvs_cmd(LVS_CMD_DEL_DEST, vs, rs))
+-				return 0;
++			ipvs_cmd(LVS_CMD_DEL_DEST, vs, rs);
+ 			UNSET_ALIVE(rs);
+ 			if (!vs->omega)
+ 				continue;
+@@ -119,15 +118,13 @@ clear_service_vs(virtual_server_t * vs)
+ 	if (!LIST_ISEMPTY(vs->rs)) {
+ 		if (vs->s_svr) {
+ 			if (ISALIVE(vs->s_svr))
+-				if (!ipvs_cmd(LVS_CMD_DEL_DEST, vs, vs->s_svr))
+-					return 0;
++				ipvs_cmd(LVS_CMD_DEL_DEST, vs, vs->s_svr);
+ 		} else if (!clear_service_rs(vs, vs->rs))
+ 			return 0;
+ 		/* The above will handle Omega case for VS as well. */
+ 	}
+ 
+-	if (!ipvs_cmd(LVS_CMD_DEL, vs, NULL))
+-		return 0;
++	ipvs_cmd(LVS_CMD_DEL, vs, NULL);
+ 
+ 	UNSET_ALIVE(vs);
+ 	return 1;
+@@ -166,8 +163,7 @@ init_service_rs(virtual_server_t * vs)
+ 		 * later upon healthchecks recovery (if ever).
+ 		 */
+ 		if (!vs->alpha && !ISALIVE(rs)) {
+-			if (!ipvs_cmd(LVS_CMD_ADD_DEST, vs, rs))
+-				return 0;
++			ipvs_cmd(LVS_CMD_ADD_DEST, vs, rs);
+ 			SET_ALIVE(rs);
+ 		}
+ 	}
+@@ -213,10 +209,8 @@ init_service_vs(virtual_server_t * vs)
+ {
+ 	/* Init the VS root */
+ 	if (!ISALIVE(vs) || vs->vsgname) {
+-		if (!ipvs_cmd(LVS_CMD_ADD, vs, NULL))
+-			return 0;
+-		else
+-			SET_ALIVE(vs);
++		ipvs_cmd(LVS_CMD_ADD, vs, NULL);
++		SET_ALIVE(vs);
+ 	}
+ 
+ 	/* Processing real server queue */
+@@ -357,7 +351,7 @@ update_quorum_state(virtual_server_t * vs)
+ }
+ 
+ /* manipulate add/remove rs according to alive state */
+-void
++int
+ perform_svr_state(int alive, virtual_server_t * vs, real_server_t * rs)
+ {
+ 	/*
+@@ -374,7 +368,8 @@ perform_svr_state(int alive, virtual_server_t * vs, real_server_t * rs)
+ 				    , FMT_VS(vs));
+ 		/* Add only if we have quorum or no sorry server */
+ 		if (vs->quorum_state == UP || !vs->s_svr || !ISALIVE(vs->s_svr)) {
+-			ipvs_cmd(LVS_CMD_ADD_DEST, vs, rs);
++			if (ipvs_cmd(LVS_CMD_ADD_DEST, vs, rs))
++				return -1;
+ 		}
+ 		rs->alive = alive;
+ 		if (rs->notify_up) {
+@@ -402,7 +397,8 @@ perform_svr_state(int alive, virtual_server_t * vs, real_server_t * rs)
+ 		 * Remove only if we have quorum or no sorry server
+ 		 */
+ 		if (vs->quorum_state == UP || !vs->s_svr || !ISALIVE(vs->s_svr)) {
+-			ipvs_cmd(LVS_CMD_DEL_DEST, vs, rs);
++			if (ipvs_cmd(LVS_CMD_DEL_DEST, vs, rs))
++				return -1;
+ 		}
+ 		rs->alive = alive;
+ 		if (rs->notify_down) {
+@@ -419,6 +415,7 @@ perform_svr_state(int alive, virtual_server_t * vs, real_server_t * rs)
+ 		/* We may have lost quorum */
+ 		update_quorum_state(vs);
+ 	}
++	return 0;
+ }
+ 
+ /* Store new weight in real_server struct and then update kernel. */
+@@ -481,27 +478,39 @@ update_svr_checker_state(int alive, checker_id_t cid, virtual_server_t *vs, real
+ 	 * things out itself.
+ 	 */
+ 	if (alive) {
+-		/* Remove the succeeded check from failed_checkers list. */
+ 		for (e = LIST_HEAD(l); e; ELEMENT_NEXT(e)) {
+ 			id = ELEMENT_DATA(e);
+-			if (*id == cid) {
+-				free_list_element(l, e);
+-				/* If we don't break, the next iteration will trigger
+-				 * a SIGSEGV.
+-				 */
++			if (*id == cid)
+ 				break;
+-			}
+ 		}
+-		if (LIST_SIZE(l) == 0)
+-			perform_svr_state(alive, vs, rs);
++
++		/* call the UP handler unless any more failed checks found */
++		if (LIST_SIZE(l) == 0 || (LIST_SIZE(l) == 1 && e)) {
++			if (perform_svr_state(alive, vs, rs))
++				return;
++		}
++
++		/* Remove the succeeded check from failed_checkers */
++		if (e)
++			free_list_element(l, e);
+ 	}
+ 	/* Handle not alive state */
+ 	else {
++		if (LIST_SIZE(l) == 0) {
++			if (perform_svr_state(alive, vs, rs))
++				return;
++		} else {
++			/* do not add failed check into list twice */
++			for (e = LIST_HEAD(l); e; ELEMENT_NEXT(e)) {
++				id = ELEMENT_DATA(e);
++				if (*id == cid)
++					return;
++			}
++		}
++
+ 		id = (checker_id_t *) MALLOC(sizeof(checker_id_t));
+ 		*id = cid;
+ 		list_add(l, id);
+-		if (LIST_SIZE(l) == 1)
+-			perform_svr_state(alive, vs, rs);
+ 	}
+ }
+ 
+@@ -700,12 +709,10 @@ clear_diff_services(void)
+ 			vs->omega = 1;
+ 			if (!clear_diff_rs(vs, new_vs->rs))
+ 				return 0;
+-			if (vs->s_svr)
+-				if (ISALIVE(vs->s_svr))
+-					if (!ipvs_cmd(LVS_CMD_DEL_DEST
+-						      , vs
+-						      , vs->s_svr))
+-						return 0;
++			if (vs->s_svr && ISALIVE(vs->s_svr))
++				ipvs_cmd(LVS_CMD_DEL_DEST
++					      , vs
++					      , vs->s_svr);
+ 		}
+ 	}
+ 
+diff --git a/keepalived/include/ipwrapper.h b/keepalived/include/ipwrapper.h
+index 30d81be..0d3e77a 100644
+--- a/keepalived/include/ipwrapper.h
++++ b/keepalived/include/ipwrapper.h
+@@ -49,7 +49,7 @@
+ #define LVS_CMD_EDIT_DEST	IP_VS_SO_SET_EDITDEST
+ 
+ /* prototypes */
+-extern void perform_svr_state(int, virtual_server_t *, real_server_t *);
++extern int perform_svr_state(int, virtual_server_t *, real_server_t *);
+ extern void update_svr_wgt(int, virtual_server_t *, real_server_t *);
+ extern int svr_checker_up(checker_id_t, real_server_t *);
+ extern void update_svr_checker_state(int, checker_id_t, virtual_server_t *, real_server_t *);
+-- 
+2.4.6
+
