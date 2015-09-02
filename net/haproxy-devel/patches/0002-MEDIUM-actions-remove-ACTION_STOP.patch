@@ -1,0 +1,320 @@
+From 42148735bc04c298d756b7d0be0ae67eac8e9286 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@arpalert.org>
+Date: Wed, 2 Sep 2015 17:17:33 +0200
+Subject: [PATCH 2/2] MEDIUM: actions: remove ACTION_STOP
+
+Before this patch, two type of custom actions exists: ACT_ACTION_CONT and
+ACT_ACTION_STOP. ACT_ACTION_CONT is a non terminal action and ACT_ACTION_STOP is
+a terminal action.
+
+Note that ACT_ACTION_STOP is not used in HAProxy.
+
+This patch remove this behavior. Only type type of custom action exists, and it
+is called ACT_CUSTOM. Now, the custion action can return a code indicating the
+required behavior. ACT_RET_CONT wants that HAProxy continue the current rule
+list evaluation, and ACT_RET_STOP wants that HAPRoxy stops the the current rule
+list evaluation.
+---
+ include/types/action.h |  4 +--
+ src/hlua.c             |  2 +-
+ src/proto_http.c       | 31 ++++++-----------
+ src/proto_tcp.c        | 90 +++++++++++++++++++++++---------------------------
+ src/stick_table.c      |  4 +--
+ src/vars.c             |  2 +-
+ 6 files changed, 59 insertions(+), 74 deletions(-)
+
+diff --git a/include/types/action.h b/include/types/action.h
+index f28cae5..a1dd638 100644
+--- a/include/types/action.h
++++ b/include/types/action.h
+@@ -34,6 +34,7 @@ enum act_from {
+ 
+ enum act_return {
+ 	ACT_RET_CONT,  /* continue processing. */
++	ACT_RET_STOP,  /* stop processing. */
+ 	ACT_RET_YIELD, /* call me again. */
+ 	ACT_RET_ERR,   /* processing error. */
+ };
+@@ -44,8 +45,7 @@ enum act_parse_ret {
+ };
+ 
+ enum act_name {
+-	ACT_ACTION_CONT = 0,
+-	ACT_ACTION_STOP,
++	ACT_CUSTOM = 0,
+ 
+ 	/* common action */
+ 	ACT_ACTION_ALLOW,
+diff --git a/src/hlua.c b/src/hlua.c
+index aa23696..61e28d0 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -4465,7 +4465,7 @@ static enum act_parse_ret action_register_lua(const char **args, int *cur_arg, s
+ 	/* TODO: later accept arguments. */
+ 	rule->arg.hlua_rule->args = NULL;
+ 
+-	rule->action = ACT_ACTION_CONT;
++	rule->action = ACT_CUSTOM;
+ 	rule->action_ptr = hlua_action;
+ 	return ACT_RET_PRS_OK;
+ }
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 7887791..bb1ef69 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -3712,26 +3712,19 @@ resume_execution:
+ 			break;
+ 			}
+ 
+-		case ACT_ACTION_CONT:
++		case ACT_CUSTOM:
+ 			switch (rule->action_ptr(rule, px, s->sess, s)) {
+ 			case ACT_RET_ERR:
+ 			case ACT_RET_CONT:
+ 				break;
++			case ACT_RET_STOP:
++				return HTTP_RULE_RES_DONE;
+ 			case ACT_RET_YIELD:
+ 				s->current_rule = rule;
+ 				return HTTP_RULE_RES_YIELD;
+ 			}
+ 			break;
+ 
+-		case ACT_ACTION_STOP:
+-			switch (rule->action_ptr(rule, px, s->sess, s)) {
+-			case ACT_RET_YIELD:
+-			case ACT_RET_ERR:
+-			case ACT_RET_CONT:
+-				return HTTP_RULE_RES_DONE;
+-			}
+-			break;
+-
+ 		case ACT_ACTION_TRK_SC0 ... ACT_ACTION_TRK_SCMAX:
+ 			/* Note: only the first valid tracking parameter of each
+ 			 * applies.
+@@ -4001,21 +3994,19 @@ resume_execution:
+ 				return HTTP_RULE_RES_BADREQ;
+ 			return HTTP_RULE_RES_DONE;
+ 
+-		case ACT_ACTION_CONT:
++		case ACT_CUSTOM:
+ 			switch (rule->action_ptr(rule, px, s->sess, s)) {
+ 			case ACT_RET_ERR:
+ 			case ACT_RET_CONT:
+ 				break;
++			case ACT_RET_STOP:
++				return HTTP_RULE_RES_STOP;
+ 			case ACT_RET_YIELD:
+ 				s->current_rule = rule;
+ 				return HTTP_RULE_RES_YIELD;
+ 			}
+ 			break;
+ 
+-		case ACT_ACTION_STOP:
+-			rule->action_ptr(rule, px, s->sess, s);
+-			return HTTP_RULE_RES_STOP;
+-
+ 		/* other flags exists, but normaly, they never be matched. */
+ 		default:
+ 			break;
+@@ -12428,7 +12419,7 @@ enum act_parse_ret parse_set_req_line(const char **args, int *orig_arg, struct p
+ {
+ 	int cur_arg = *orig_arg;
+ 
+-	rule->action = ACT_ACTION_CONT;
++	rule->action = ACT_CUSTOM;
+ 
+ 	switch (args[0][4]) {
+ 	case 'm' :
+@@ -12478,7 +12469,7 @@ enum act_parse_ret parse_http_set_status(const char **args, int *orig_arg, struc
+ {
+ 	char *error;
+ 
+-	rule->action = ACT_ACTION_CONT;
++	rule->action = ACT_CUSTOM;
+ 	rule->action_ptr = action_http_set_status;
+ 
+ 	/* Check if an argument is available */
+@@ -12654,7 +12645,7 @@ enum act_parse_ret parse_http_req_capture(const char **args, int *orig_arg, stru
+ 		px->req_cap = hdr;
+ 		px->to_log |= LW_REQHDR;
+ 
+-		rule->action       = ACT_ACTION_CONT;
++		rule->action       = ACT_CUSTOM;
+ 		rule->action_ptr   = http_action_req_capture;
+ 		rule->arg.cap.expr = expr;
+ 		rule->arg.cap.hdr  = hdr;
+@@ -12682,7 +12673,7 @@ enum act_parse_ret parse_http_req_capture(const char **args, int *orig_arg, stru
+ 
+ 		proxy->conf.args.ctx = ARGC_CAP;
+ 
+-		rule->action       = ACT_ACTION_CONT;
++		rule->action       = ACT_CUSTOM;
+ 		rule->action_ptr   = http_action_req_capture_by_id;
+ 		rule->arg.capid.expr = expr;
+ 		rule->arg.capid.idx  = id;
+@@ -12805,7 +12796,7 @@ enum act_parse_ret parse_http_res_capture(const char **args, int *orig_arg, stru
+ 
+ 	proxy->conf.args.ctx = ARGC_CAP;
+ 
+-	rule->action       = ACT_ACTION_CONT;
++	rule->action       = ACT_CUSTOM;
+ 	rule->action_ptr   = http_action_res_capture_by_id;
+ 	rule->arg.capid.expr = expr;
+ 	rule->arg.capid.idx  = id;
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index c89360c..e671e41 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -1163,21 +1163,19 @@ resume_execution:
+ 			}
+ 			else {
+ 				/* Custom keywords. */
+-				if (rule->action_ptr) {
+-					switch (rule->action_ptr(rule, s->be, s->sess, s)) {
+-					case ACT_RET_ERR:
+-					case ACT_RET_CONT:
+-						break;
+-					case ACT_RET_YIELD:
+-						s->current_rule = rule;
+-						goto missing_data;
+-					}
+-				}
+-
+-				/* accept */
+-				if (rule->action == ACT_ACTION_STOP)
++				if (!rule->action_ptr)
++					continue;
++				switch (rule->action_ptr(rule, s->be, s->sess, s)) {
++				case ACT_RET_ERR:
++				case ACT_RET_CONT:
++					continue;
++				case ACT_RET_STOP:
+ 					break;
+-				/* otherwise continue */
++				case ACT_RET_YIELD:
++					s->current_rule = rule;
++					goto missing_data;
++				}
++				break; /* ACT_RET_STOP */
+ 			}
+ 		}
+ 	}
+@@ -1294,22 +1292,20 @@ resume_execution:
+ 			}
+ 			else {
+ 				/* Custom keywords. */
+-				if (rule->action_ptr) {
+-					switch (rule->action_ptr(rule, s->be, s->sess, s)) {
+-					case ACT_RET_ERR:
+-					case ACT_RET_CONT:
+-						break;
+-					case ACT_RET_YIELD:
+-						channel_dont_close(rep);
+-						s->current_rule = rule;
+-						return 0;
+-					}
+-				}
+-
+-				/* accept */
+-				if (rule->action == ACT_ACTION_STOP)
++				if (!rule->action_ptr)
++					continue;
++				switch (rule->action_ptr(rule, s->be, s->sess, s)) {
++				case ACT_RET_ERR:
++				case ACT_RET_CONT:
++					continue;
++				case ACT_RET_STOP:
+ 					break;
+-				/* otherwise continue */
++				case ACT_RET_YIELD:
++					channel_dont_close(rep);
++					s->current_rule = rule;
++					return 0;
++				}
++				break; /* ACT_RET_STOP */
+ 			}
+ 		}
+ 	}
+@@ -1384,26 +1380,24 @@ int tcp_exec_req_rules(struct session *sess)
+ 			}
+ 			else {
+ 				/* Custom keywords. */
+-				if (rule->action_ptr) {
+-					switch (rule->action_ptr(rule, sess->fe, sess, NULL)) {
+-					case ACT_RET_YIELD:
+-						/* yield is not allowed at this point. If this return code is
+-						 * used it is a bug, so I prefer to abort the process.
+-						 */
+-						send_log(sess->fe, LOG_WARNING,
+-						         "Internal error: yield not allowed with tcp-request connection actions.");
+-					case ACT_RET_CONT:
+-						break;
+-					case ACT_RET_ERR:
+-						result = 0;
+-						break;
+-					}
+-					if (rule->action == ACT_ACTION_CONT)
+-						continue;
++				if (rule->action_ptr)
++					break;
++				switch (rule->action_ptr(rule, sess->fe, sess, NULL)) {
++				case ACT_RET_YIELD:
++					/* yield is not allowed at this point. If this return code is
++					 * used it is a bug, so I prefer to abort the process.
++					 */
++					send_log(sess->fe, LOG_WARNING,
++					         "Internal error: yield not allowed with tcp-request connection actions.");
++				case ACT_RET_STOP:
++					break;
++				case ACT_RET_CONT:
++					continue;
++				case ACT_RET_ERR:
++					result = 0;
++					break;
+ 				}
+-
+-				/* otherwise it's an accept */
+-				break;
++				break; /* ACT_RET_STOP */
+ 			}
+ 		}
+ 	}
+diff --git a/src/stick_table.c b/src/stick_table.c
+index 7f3a5a7..a51bde3 100644
+--- a/src/stick_table.c
++++ b/src/stick_table.c
+@@ -1373,7 +1373,7 @@ static enum act_parse_ret parse_inc_gpc0(const char **args, int *arg, struct pro
+ 			return ACT_RET_PRS_ERR;
+ 		}
+ 	}
+-	rule->action = ACT_ACTION_CONT;
++	rule->action = ACT_CUSTOM;
+ 	rule->action_ptr = action_inc_gpc0;
+ 	return ACT_RET_PRS_OK;
+ }
+@@ -1450,7 +1450,7 @@ static enum act_parse_ret parse_set_gpt0(const char **args, int *arg, struct pro
+ 	}
+ 	(*arg)++;
+ 
+-	rule->action = ACT_ACTION_CONT;
++	rule->action = ACT_CUSTOM;
+ 	rule->action_ptr = action_set_gpt0;
+ 
+ 	return ACT_RET_PRS_OK;
+diff --git a/src/vars.c b/src/vars.c
+index d1d05cc..d20839c 100644
+--- a/src/vars.c
++++ b/src/vars.c
+@@ -588,7 +588,7 @@ static enum act_parse_ret parse_store(const char **args, int *arg, struct proxy
+ 		return ACT_RET_PRS_ERR;
+ 	}
+ 
+-	rule->action     = ACT_ACTION_CONT;
++	rule->action     = ACT_CUSTOM;
+ 	rule->action_ptr = action_store;
+ 	return ACT_RET_PRS_OK;
+ }
+-- 
+2.4.6
+

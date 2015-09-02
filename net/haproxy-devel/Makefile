@@ -9,11 +9,11 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
-PKG_VERSION:=1.6-dev0
-PKG_RELEASE:=82
+PKG_VERSION:=1.6-dev4
+PKG_RELEASE:=02
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.6/src/devel
-PKG_MD5SUM:=eb5026b8ae3529fe7201f52896523f67
+PKG_MD5SUM:=bb300d99f0ac6114dc997f277d80e5d1
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/haproxy-$(PKG_VERSION)
 PKG_SOURCE_SUBDIR:=haproxy-$(PKG_VERSION)
@@ -30,6 +30,21 @@ define Package/haproxy-devel
   MAINTAINER:=Thomas Heil <heil@terminal-consulting.de>
 endef
 
+define Download/lua531
+	FILE:=lua-5.3.1.tar.gz
+	URL:=http://www.lua.org/ftp/
+	EBTREE=$(FILE)
+	MD5SUM:=797adacada8d85761c079390ff1d9961
+endef
+$(eval $(call Download,lua531))
+
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	tar -zxvf $(DL_DIR)/lua-5.3.1.tar.gz -C $(PKG_BUILD_DIR)
+	ln -s $(PKG_BUILD_DIR)/lua-5.3.1 $(PKG_BUILD_DIR)/lua
+endef
+
+
 define Package/haproxy-devel/conffiles
 /etc/haproxy.cfg
 endef
@@ -45,6 +60,8 @@ else
 endif
 
 define Build/Compile
+	make TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR)/lua INSTALL_TOP="$(STAGING_DIR)/lua531/" linux install 
+
 	$(MAKE) TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR) \
 		DESTDIR="$(PKG_INSTALL_DIR)" \
 		CC="$(TARGET_CC)" \
@@ -52,11 +69,16 @@ define Build/Compile
 		LD="$(TARGET_CC)" \
 		LDFLAGS="$(TARGET_LDFLAGS)" \
 		ADDLIB="-lcrypto" \
+		USE_LUA=1 \
+		LUA_LIB_NAME="lua" \
 		PCREDIR="$(STAGING_DIR)/usr/include" \
+	        LUA_INC="$(STAGING_DIR)/lua531/include" \
+		LUA_LIB="$(STAGING_DIR)/lua531/lib" \
 		SMALL_OPTS="-DBUFSIZE=16384 -DMAXREWRITE=1030 -DSYSTEM_MAXCONN=165530 " \
 		USE_LINUX_TPROXY=1 USE_LINUX_SPLICE=1 USE_REGPARM=1 USE_OPENSSL=1 \
 		USE_ZLIB=yes USE_PCRE=1 \
 		VERSION="$(PKG_VERSION)-patch$(PKG_RELEASE)" \
+		IGNOREGIT=1 \
 		install
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/contrib/halog \
