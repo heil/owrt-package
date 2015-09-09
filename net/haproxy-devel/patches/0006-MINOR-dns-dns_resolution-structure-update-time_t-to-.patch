@@ -1,0 +1,34 @@
+From 189363e35a228835c7d96f3865f20acecd9c2975 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Thu, 3 Sep 2015 10:55:20 +0200
+Subject: [PATCH 06/17] MINOR: dns: dns_resolution structure update: time_t to
+ unsigned int
+
+3 variables of the dns_resolution structure are set to 'time_t' type.
+Since they are all set by 'now_ms' and used as 'ticks' in HAProxy's
+internal, it is safer to set them to the same type than now_ms:
+'unsigned int'.
+---
+ include/types/dns.h | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/types/dns.h b/include/types/dns.h
+index d5431a5..d0a835d 100644
+--- a/include/types/dns.h
++++ b/include/types/dns.h
+@@ -151,9 +151,9 @@ struct dns_resolution {
+ 	char *hostname_dn;		/* server hostname in domain name label format */
+ 	int hostname_dn_len;		/* server domain name label len */
+ 	int resolver_family_priority;	/* which IP family should the resolver use when both are returned */
+-	time_t last_resolution;		/* time of the lastest valid resolution */
+-	time_t last_sent_packet;	/* time of the latest DNS packet sent */
+-	time_t last_status_change;	/* time of the latest DNS resolution status change */
++	unsigned int last_resolution;	/* time of the lastest valid resolution */
++	unsigned int last_sent_packet;	/* time of the latest DNS packet sent */
++	unsigned int last_status_change;	/* time of the latest DNS resolution status change */
+ 	int query_id;			/* DNS query ID dedicated for this resolution */
+ 	struct eb32_node qid;		/* ebtree query id */
+ 	int query_type;			/* query type to send. By default DNS_RTYPE_ANY */
+-- 
+2.4.6
+

@@ -1,0 +1,58 @@
+From 0df5d9669ab527431f0efe8d517b5bba0c1edc4b Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Wed, 2 Sep 2015 21:58:32 +0200
+Subject: [PATCH 12/17] MINOR: dns: New DNS response analysis code:
+ DNS_RESP_TRUNCATED
+
+This patch introduces a new internal response state about the analysis
+of a DNS response received by a server.
+It is dedicated to report to above layer that the response is
+'truncated'.
+---
+ include/types/dns.h | 1 +
+ src/dns.c           | 4 ++++
+ src/server.c        | 1 +
+ 3 files changed, 6 insertions(+)
+
+diff --git a/include/types/dns.h b/include/types/dns.h
+index ba35c71..3ec3492 100644
+--- a/include/types/dns.h
++++ b/include/types/dns.h
+@@ -198,6 +198,7 @@ enum {
+ 	DNS_RESP_WRONG_NAME,		/* response does not match query name */
+ 	DNS_RESP_CNAME_ERROR,		/* error when resolving a CNAME in an atomic response */
+ 	DNS_RESP_TIMEOUT,		/* DNS server has not answered in time */
++	DNS_RESP_TRUNCATED,		/* DNS response is truncated */
+ };
+ 
+ /* return codes after searching an IP in a DNS response buffer, using a family preference */
+diff --git a/src/dns.c b/src/dns.c
+index bf5afdf..d195217 100644
+--- a/src/dns.c
++++ b/src/dns.c
+@@ -218,6 +218,10 @@ void dns_resolve_recv(struct dgram_conn *dgram)
+ 			resolution->requester_error_cb(resolution, DNS_RESP_CNAME_ERROR);
+ 			continue;
+ 
++		case DNS_RESP_TRUNCATED:
++			nameserver->counters.truncated += 1;
++			resolution->requester_error_cb(resolution, DNS_RESP_TRUNCATED);
++			continue;
+ 		}
+ 
+ 		nameserver->counters.valid += 1;
+diff --git a/src/server.c b/src/server.c
+index 9bbed79..ca8c4f8 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -2132,6 +2132,7 @@ int snr_resolution_error_cb(struct dns_resolution *resolution, int error_code)
+ 			break;
+ 
+ 		case DNS_RESP_ANCOUNT_ZERO:
++		case DNS_RESP_TRUNCATED:
+ 		case DNS_RESP_ERROR:
+ 			if (resolution->query_type == DNS_RTYPE_ANY) {
+ 				/* let's change the query type */
+-- 
+2.4.6
+

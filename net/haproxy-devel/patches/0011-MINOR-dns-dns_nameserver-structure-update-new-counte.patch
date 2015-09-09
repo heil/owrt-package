@@ -1,0 +1,42 @@
+From 6cdea9359bf4e37742588d9af82bf1b39790be2c Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Wed, 2 Sep 2015 21:56:05 +0200
+Subject: [PATCH 11/17] MINOR: dns: dns_nameserver structure update: new
+ counter for truncated response
+
+This patch updates the dns_nameserver structure to integrate a counter
+dedicated to 'truncated' response sent by servers.
+Such response are important to track, since HAProxy is supposed to
+replay its request.
+---
+ include/types/dns.h | 1 +
+ src/dumpstats.c     | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/include/types/dns.h b/include/types/dns.h
+index 589bb5d..ba35c71 100644
+--- a/include/types/dns.h
++++ b/include/types/dns.h
+@@ -136,6 +136,7 @@ struct dns_nameserver {
+ 		long int invalid;	/* - malformed DNS response */
+ 		long int too_big;	/* - too big response */
+ 		long int outdated;	/* - outdated response (server slower than the other ones) */
++		long int truncated;	/* - truncated response */
+ 	} counters;
+ };
+ 
+diff --git a/src/dumpstats.c b/src/dumpstats.c
+index 01fe53b..92f2dea 100644
+--- a/src/dumpstats.c
++++ b/src/dumpstats.c
+@@ -6266,6 +6266,7 @@ static int stats_dump_resolvers_to_buffer(struct stream_interface *si)
+ 			chunk_appendf(&trash, "  other: %ld\n", pnameserver->counters.other);
+ 			chunk_appendf(&trash, "  invalid: %ld\n", pnameserver->counters.invalid);
+ 			chunk_appendf(&trash, "  too_big: %ld\n", pnameserver->counters.too_big);
++			chunk_appendf(&trash, "  truncated: %ld\n", pnameserver->counters.truncated);
+ 			chunk_appendf(&trash, "  outdated: %ld\n", pnameserver->counters.outdated);
+ 		}
+ 
+-- 
+2.4.6
+
