@@ -1,0 +1,66 @@
+From 0453a1dd4533530b444255b0cdb96cd6b95aec67 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Wed, 9 Sep 2015 00:51:08 +0200
+Subject: [PATCH 20/24] MINOR: dns: new flag to report that no IP can be found
+ in a DNS response packet
+
+Some DNS response may be valid from a protocol point of view but may not
+contain any IP addresses.
+This patch gives a new flag to the function dns_get_ip_from_response to
+report such case.
+It's up to the upper layer to decide what to do with this information.
+---
+ include/types/dns.h | 1 +
+ src/dns.c           | 5 +++++
+ src/server.c        | 7 +++++++
+ 3 files changed, 13 insertions(+)
+
+diff --git a/include/types/dns.h b/include/types/dns.h
+index 59b59c7..f8edb73 100644
+--- a/include/types/dns.h
++++ b/include/types/dns.h
+@@ -212,6 +212,7 @@ enum {
+ 					 *    matching preference was found */
+ 	DNS_UPD_CNAME,			/* CNAME without any IP provided in the response */
+ 	DNS_UPD_NAME_ERROR,		/* name in the response did not match the query */
++	DNS_UPD_NO_IP_FOUND,		/* no IP could be found in the response */
+ };
+ 
+ #endif /* _TYPES_DNS_H */
+diff --git a/src/dns.c b/src/dns.c
+index 4dfe697..d002f1b 100644
+--- a/src/dns.c
++++ b/src/dns.c
+@@ -724,6 +724,11 @@ int dns_get_ip_from_response(unsigned char *resp, unsigned char *resp_end,
+ 		return DNS_UPD_CNAME;
+ 	}
+ 
++	/* no IP found in the response */
++	if (!newip4 && !newip6) {
++		return DNS_UPD_NO_IP_FOUND;
++	}
++
+ 	/* case when the caller looks first for an IPv4 address */
+ 	if (family_priority == AF_INET) {
+ 		if (newip4) {
+diff --git a/src/server.c b/src/server.c
+index 4e06ad2..8bc3165 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -2049,6 +2049,13 @@ int snr_resolution_cb(struct dns_resolution *resolution, struct dns_nameserver *
+ 			}
+ 			goto invalid;
+ 
++		case DNS_UPD_NO_IP_FOUND:
++			if (resolution->status != RSLV_STATUS_OTHER) {
++				resolution->status = RSLV_STATUS_OTHER;
++				resolution->last_status_change = now_ms;
++			}
++			goto stop_resolution;
++
+ 		default:
+ 			goto invalid;
+ 
+-- 
+2.4.6
+

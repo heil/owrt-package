@@ -1,0 +1,51 @@
+From ec3c37db3b62db315cbc1bfd759fcb30ebd0891c Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@arpalert.org>
+Date: Thu, 10 Sep 2015 18:28:10 +0200
+Subject: [PATCH 24/24] CLEANUP: actions: missplaced includes
+
+The include of action.h are misplaced.
+---
+ include/proto/proto_http.h | 1 +
+ include/proto/proto_tcp.h  | 1 +
+ include/types/proto_http.h | 1 -
+ 3 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index db62528..d62cd9b 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -23,6 +23,7 @@
+ #define _PROTO_PROTO_HTTP_H
+ 
+ #include <common/config.h>
++#include <types/action.h>
+ #include <types/proto_http.h>
+ #include <types/stream.h>
+ #include <types/task.h>
+diff --git a/include/proto/proto_tcp.h b/include/proto/proto_tcp.h
+index 17404d4..8ca7290 100644
+--- a/include/proto/proto_tcp.h
++++ b/include/proto/proto_tcp.h
+@@ -23,6 +23,7 @@
+ #define _PROTO_PROTO_TCP_H
+ 
+ #include <common/config.h>
++#include <types/action.h>
+ #include <types/task.h>
+ #include <proto/stick_table.h>
+ 
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index 3f827b8..a208239 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -27,7 +27,6 @@
+ #include <common/mini-clist.h>
+ #include <common/regex.h>
+ 
+-#include <types/action.h>
+ #include <types/hdr_idx.h>
+ 
+ /* These are the flags that are found in txn->flags */
+-- 
+2.4.6
+
