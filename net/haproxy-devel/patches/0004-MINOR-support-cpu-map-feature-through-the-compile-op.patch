@@ -1,0 +1,41 @@
+From caa6a1bb46e1f87823c7faa25230933f97eb766e Mon Sep 17 00:00:00 2001
+From: Pieter Baauw <piba.nl.dev@gmail.com>
+Date: Thu, 17 Sep 2015 21:26:40 +0200
+Subject: [PATCH 04/28] MINOR: support cpu-map feature through the compile
+ option USE_CPU_AFFINITY on FreeBSD
+
+---
+ src/haproxy.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index ae790c4..681109d 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -50,6 +50,10 @@
+ #define __USE_GNU
+ #include <sched.h>
+ #undef __USE_GNU
++#ifdef __FreeBSD__
++#include <sys/param.h>
++#include <sys/cpuset.h>
++#endif
+ #endif
+ 
+ #ifdef DEBUG_FULL
+@@ -1780,8 +1784,12 @@ int main(int argc, char **argv)
+ 		if (proc < global.nbproc &&  /* child */
+ 		    proc < LONGBITS &&       /* only the first 32/64 processes may be pinned */
+ 		    global.cpu_map[proc])    /* only do this if the process has a CPU map */
++#ifdef __FreeBSD__
++			cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, -1, sizeof(unsigned long), (void *)&global.cpu_map[proc]);
++#else
+ 			sched_setaffinity(0, sizeof(unsigned long), (void *)&global.cpu_map[proc]);
+ #endif
++#endif
+ 		/* close the pidfile both in children and father */
+ 		if (pidfd >= 0) {
+ 			//lseek(pidfd, 0, SEEK_SET);  /* debug: emulate eglibc bug */
+-- 
+2.4.9
+

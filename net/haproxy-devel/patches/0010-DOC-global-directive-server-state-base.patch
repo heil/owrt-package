@@ -1,0 +1,36 @@
+From 5626f489ec4971753d7fc1afa2294a5de90e1a16 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Sun, 23 Aug 2015 10:00:10 +0200
+Subject: [PATCH 10/28] DOC: global directive server-state-base
+
+Documentation relative to the new global directive server-state-file.
+---
+ doc/configuration.txt | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index c4aa8f9..7508a28 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -561,6 +561,7 @@ The following keywords are supported in the "global" section :
+    - nosplice
+    - nogetaddrinfo
+    - spread-checks
++   - server-state-base
+    - tune.bufsize
+    - tune.chksize
+    - tune.comp.maxlevel
+@@ -759,6 +760,10 @@ stats bind-process [ all | odd | even | <number 1-64>[-<number 1-64>] ] ...
+   word size (32 or 64). A better option consists in using the "process" setting
+   of the "stats socket" line to force the process on each line.
+ 
++server-state-base <directory>
++  Specifies the directory prefix to be prepended in front of all servers state
++  file names which do not start with a '/'. Read below 'See also'.
++
+ ssl-default-bind-ciphers <ciphers>
+   This setting is only available when support for OpenSSL was built in. It sets
+   the default string describing the list of cipher algorithms ("cipher suite")
+-- 
+2.4.9
+

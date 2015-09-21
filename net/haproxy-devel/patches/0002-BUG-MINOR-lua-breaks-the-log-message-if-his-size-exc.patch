@@ -1,0 +1,36 @@
+From ccf0063896ff4c64ae9399d3a935660460e57731 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@arpalert.org>
+Date: Wed, 16 Sep 2015 12:47:03 +0200
+Subject: [PATCH 02/28] BUG/MINOR: lua: breaks the log message if his size
+ exceed one buffer
+
+Previously, the log was ignored if the log message exceed one buffer.
+This patch doens't ignore the log, but trancate the message.
+---
+ src/hlua.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/hlua.c b/src/hlua.c
+index 07e9263..9651b7f 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -814,8 +814,14 @@ static inline void hlua_sendlog(struct proxy *px, int level, const char *msg)
+ 	/* Cleanup the log message. */
+ 	p = trash.str;
+ 	for (; *msg != '\0'; msg++, p++) {
+-		if (p >= trash.str + trash.size - 1)
+-			return;
++		if (p >= trash.str + trash.size - 1) {
++			/* Break the message if exceed the buffer size. */
++			*(p-4) = ' ';
++			*(p-3) = '.';
++			*(p-2) = '.';
++			*(p-1) = '.';
++			break;
++		}
+ 		if (isprint(*msg))
+ 			*p = *msg;
+ 		else
+-- 
+2.4.9
+

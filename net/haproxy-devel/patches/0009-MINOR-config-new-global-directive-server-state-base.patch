@@ -1,0 +1,55 @@
+From 6bc89366bb8a2e27e3df4dbe61dab5bfa6d60d86 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Sun, 23 Aug 2015 09:22:25 +0200
+Subject: [PATCH 09/28] MINOR: config: new global directive server-state-base
+
+This new global directive can be used to provide a base directory where
+all the server state files could be loaded.
+If a server state file name starts with a slash '/', then this directive
+must not be applied.
+---
+ include/types/global.h |  1 +
+ src/cfgparse.c         | 15 +++++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/include/types/global.h b/include/types/global.h
+index c2b028a..fe1085e 100644
+--- a/include/types/global.h
++++ b/include/types/global.h
+@@ -129,6 +129,7 @@ struct global {
+ 	char *log_tag;                  /* name for syslog */
+ 	struct list logsrvs;
+ 	char *log_send_hostname;   /* set hostname in syslog header */
++	char *server_state_base;   /* path to a directory where server state files can be found */
+ 	struct {
+ 		int maxpollevents; /* max number of poll events at once */
+ 		int maxaccept;     /* max number of consecutive accept() */
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 71d3fea..d3ee132 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -1645,6 +1645,21 @@ int cfg_parse_global(const char *file, int linenum, char **args, int kwm)
+ 		global.log_send_hostname = malloc(len + 2);
+ 		snprintf(global.log_send_hostname, len + 2, "%s ", name);
+ 	}
++	else if (!strcmp(args[0], "server-state-base")) { /* path base where HAProxy can find server state files */
++		if (global.server_state_base != NULL) {
++			Alert("parsing [%s:%d] : '%s' already specified. Continuing.\n", file, linenum, args[0]);
++			err_code |= ERR_ALERT;
++			goto out;
++		}
++
++		if (!*(args[1])) {
++			Alert("parsing [%s:%d] : '%s' expects one argument: a directory path.\n", file, linenum, args[0]);
++			err_code |= ERR_FATAL;
++			goto out;
++		}
++
++		global.server_state_base = strdup(args[1]);
++	}
+ 	else if (!strcmp(args[0], "log-tag")) {  /* tag to report to syslog */
+ 		if (alertif_too_many_args(1, file, linenum, args, &err_code))
+ 			goto out;
+-- 
+2.4.9
+

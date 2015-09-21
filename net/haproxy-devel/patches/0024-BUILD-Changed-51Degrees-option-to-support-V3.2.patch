@@ -1,0 +1,34 @@
+From 3670eb1d7458fd6d9080191a7ff0c8f66cb147b0 Mon Sep 17 00:00:00 2001
+From: James Rosewell <james@51degrees.com>
+Date: Fri, 18 Sep 2015 17:24:29 +0100
+Subject: [PATCH 24/28] BUILD: Changed 51Degrees option to support V3.2
+
+Added support for city hash method, turned off multi threading support
+and included maths library. Removed reference to compression library
+which was never needed.
+---
+ Makefile | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 74a4272..a7da80b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -625,11 +625,12 @@ ifneq ($(USE_51DEGREES),)
+ 51DEGREES_SRC =
+ 51DEGREES_INC = $(51DEGREES_SRC)
+ 51DEGREES_LIB = $(51DEGREES_SRC)
++OPTIONS_OBJS    += $(51DEGREES_LIB)/../cityhash/city.o
+ OPTIONS_OBJS    += $(51DEGREES_LIB)/51Degrees.o
+ OPTIONS_OBJS    += src/51d.o
+-OPTIONS_CFLAGS  += -DUSE_51DEGREES $(if $(51DEGREES_INC),-I$(51DEGREES_INC))
++OPTIONS_CFLAGS  += -DUSE_51DEGREES -DFIFTYONEDEGREES_NO_THREADING $(if $(51DEGREES_INC),-I$(51DEGREES_INC))
+ BUILD_OPTIONS   += $(call ignore_implicit,USE_51DEGREES)
+-OPTIONS_LDFLAGS += $(if $(51DEGREES_LIB),-L$(51DEGREES_LIB)) -lz
++OPTIONS_LDFLAGS += $(if $(51DEGREES_LIB),-L$(51DEGREES_LIB)) -lm
+ endif
+ 
+ ifneq ($(USE_PCRE)$(USE_STATIC_PCRE)$(USE_PCRE_JIT),)
+-- 
+2.4.9
+
