@@ -1,0 +1,30 @@
+From ae459f3b9f9810d18aaa090264398dee2d4de23b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 29 Sep 2015 18:19:32 +0200
+Subject: [PATCH 06/10] BUILD: tcp: use IPPROTO_IP when SOL_IP is not available
+
+Dmitry Sivachenko reported a build failure on FreeBSD due to SOL_IP not
+being defined. IPPROTO_IP must be used there instead.
+---
+ include/common/compat.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/include/common/compat.h b/include/common/compat.h
+index 07dd01d..b2e16af 100644
+--- a/include/common/compat.h
++++ b/include/common/compat.h
+@@ -129,6 +129,11 @@
+ #endif
+ #endif
+ 
++/* FreeBSD doesn't define SOL_IP and prefers IPPROTO_IP */
++#ifndef SOL_IP
++#define SOL_IP IPPROTO_IP
++#endif
++
+ /* If IPv6 is supported, define IN6_IS_ADDR_V4MAPPED() if missing. */
+ #if defined(IPV6_TCLASS) && !defined(IN6_IS_ADDR_V4MAPPED)
+ #define IN6_IS_ADDR_V4MAPPED(a) \
+-- 
+2.4.9
+

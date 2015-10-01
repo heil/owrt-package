@@ -1,0 +1,51 @@
+From bee90aeda1f118e0c5ff21c1ec86e7c360ac8225 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <tfournier@arpalert.org>
+Date: Tue, 29 Sep 2015 01:41:25 +0200
+Subject: [PATCH 09/10] MINOR: lua: remove the run flag
+
+Only the main execution function can set the run flag, because it is
+the last function before the execution time.
+
+This patch removes the flag set by another function. It will be used
+by the new lua timeout counter.
+---
+ src/hlua.c | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/src/hlua.c b/src/hlua.c
+index 12ffe75..a7cbdc7 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -5163,9 +5163,6 @@ static int hlua_sample_conv_wrapper(const struct arg *arg_p, struct sample *smp,
+ 
+ 		/* At this point the execution is safe. */
+ 		RESET_SAFE_LJMP(stream->hlua.T);
+-
+-		/* Set the currently running flag. */
+-		HLUA_SET_RUN(&stream->hlua);
+ 	}
+ 
+ 	/* Execute the function. */
+@@ -5268,9 +5265,6 @@ static int hlua_sample_fetch_wrapper(const struct arg *arg_p, struct sample *smp
+ 
+ 		/* At this point the execution is safe. */
+ 		RESET_SAFE_LJMP(stream->hlua.T);
+-
+-		/* Set the currently running flag. */
+-		HLUA_SET_RUN(&stream->hlua);
+ 	}
+ 
+ 	/* Execute the function. */
+@@ -5508,9 +5502,6 @@ static enum act_return hlua_action(struct act_rule *rule, struct proxy *px,
+ 
+ 		/* We must initialize the execution timeouts. */
+ 		s->hlua.expire = tick_add_ifset(now_ms, hlua_timeout_session);
+-
+-		/* Set the currently running flag. */
+-		HLUA_SET_RUN(&s->hlua);
+ 	}
+ 
+ 	/* Execute the function. */
+-- 
+2.4.9
+

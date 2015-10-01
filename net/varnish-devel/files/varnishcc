@@ -1,0 +1,11 @@
+#!/bin/ash
+
+#/usr/bin/pts-tcc $1 -r -o $2.o
+#/usr/bin/ld $2.o -shared -o $2
+#rm -f $2.o
+#
+
+#/usr/bin/i686-cc -fpic -shared -Wl,-x -o $2 $1
+/usr/bin/gcc -fpic -shared -Wl,-x -o $2 $1
+
+exit 0

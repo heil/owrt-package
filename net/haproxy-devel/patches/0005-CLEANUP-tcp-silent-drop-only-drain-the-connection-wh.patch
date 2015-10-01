@@ -1,0 +1,34 @@
+From fc2a2d97d6855e9a00a22bc26623e4f2f2c1aeda Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 29 Sep 2015 18:15:01 +0200
+Subject: [PATCH 05/10] CLEANUP: tcp: silent-drop: only drain the connection
+ when quick-ack is disabled
+
+The conn_sock_drain() call is only there to force the system to ACK
+pending data in case of TCP_QUICKACK so that the client doesn't retransmit,
+otherwise it leads to a real RST making the feature useless. There's no
+point in draining the connection when quick ack cannot be disabled, so
+let's move the call inside the ifdef part.
+---
+ src/proto_tcp.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/proto_tcp.c b/src/proto_tcp.c
+index 4c5005e..0655b0d 100644
+--- a/src/proto_tcp.c
++++ b/src/proto_tcp.c
+@@ -1431,8 +1431,10 @@ static enum act_return tcp_exec_action_silent_drop(struct act_rule *rule, struct
+ 	if (!conn_ctrl_ready(conn))
+ 		goto out;
+ 
+-	conn_sock_drain(conn);
+ #ifdef TCP_QUICKACK
++	/* drain is needed only to send the quick ACK */
++	conn_sock_drain(conn);
++
+ 	/* re-enable quickack if it was disabled to ack all data and avoid
+ 	 * retransmits from the client that might trigger a real reset.
+ 	 */
+-- 
+2.4.9
+
