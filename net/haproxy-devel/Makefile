@@ -9,11 +9,11 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
-PKG_VERSION:=1.6-dev6
-PKG_RELEASE:=28
+PKG_VERSION:=1.6.2
+PKG_RELEASE:=19
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.6/src/devel
-PKG_MD5SUM:=66f1a6b055161a63cd62443f4d0f09db
+PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.6/src/
+PKG_MD5SUM:=d0ebd3d123191a8136e2e5eb8aaff039
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/haproxy-$(PKG_VERSION)
 PKG_SOURCE_SUBDIR:=haproxy-$(PKG_VERSION)
@@ -30,18 +30,17 @@ define Package/haproxy-devel
   MAINTAINER:=Thomas Heil <heil@terminal-consulting.de>
 endef
 
-define Download/lua531
-	FILE:=lua-5.3.1.tar.gz
+define Download/lua532
+	FILE:=lua-5.3.2.tar.gz
 	URL:=http://www.lua.org/ftp/
-	EBTREE=$(FILE)
-	MD5SUM:=797adacada8d85761c079390ff1d9961
+	MD5SUM:=33278c2ab5ee3c1a875be8d55c1ca2a1
 endef
-$(eval $(call Download,lua531))
+$(eval $(call Download,lua532))
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	tar -zxvf $(DL_DIR)/lua-5.3.1.tar.gz -C $(PKG_BUILD_DIR)
-	ln -s $(PKG_BUILD_DIR)/lua-5.3.1 $(PKG_BUILD_DIR)/lua
+	tar -zxvf $(DL_DIR)/lua-5.3.2.tar.gz -C $(PKG_BUILD_DIR)
+	ln -s $(PKG_BUILD_DIR)/lua-5.3.2 $(PKG_BUILD_DIR)/lua
 endef
 
 
@@ -60,7 +59,7 @@ else
 endif
 
 define Build/Compile
-	make TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR)/lua INSTALL_TOP="$(STAGING_DIR)/lua531/" linux install 
+	make TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR)/lua INSTALL_TOP="$(STAGING_DIR)/lua532/" linux install 
 
 	$(MAKE) TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR) \
 		DESTDIR="$(PKG_INSTALL_DIR)" \
@@ -72,8 +71,8 @@ define Build/Compile
 		USE_LUA=1 \
 		LUA_LIB_NAME="lua" \
 		PCREDIR="$(STAGING_DIR)/usr/include" \
-	        LUA_INC="$(STAGING_DIR)/lua531/include" \
-		LUA_LIB="$(STAGING_DIR)/lua531/lib" \
+	        LUA_INC="$(STAGING_DIR)/lua532/include" \
+		LUA_LIB="$(STAGING_DIR)/lua532/lib" \
 		SMALL_OPTS="-DBUFSIZE=16384 -DMAXREWRITE=1030 -DSYSTEM_MAXCONN=165530 " \
 		USE_LINUX_TPROXY=1 USE_LINUX_SPLICE=1 USE_REGPARM=1 USE_OPENSSL=1 \
 		USE_ZLIB=yes USE_PCRE=1 \

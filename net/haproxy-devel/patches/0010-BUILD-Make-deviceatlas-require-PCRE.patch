@@ -1,0 +1,41 @@
+From ca2f333880c7fe5d924e177ed233c4d2b99d871b Mon Sep 17 00:00:00 2001
+From: David CARLIER <dcarlier@afilias.info>
+Date: Fri, 6 Nov 2015 15:13:06 +0000
+Subject: [PATCH 10/19] BUILD: Make deviceatlas require PCRE
+
+Makefile deviceatlas throwing an error if the necessary pcre flag
+is not passed avoiding surprising bunch of 'undefined reference'
+for the user. Plus a tiny typo in OPENSSL area.
+
+[wt: backport to 1.6]
+(cherry picked from commit 7385f65283cf223baa14f69a42e2e77eb8c02182)
+---
+ Makefile | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 84b1f78..d15be04 100644
+--- a/Makefile
++++ b/Makefile
+@@ -562,7 +562,7 @@ OPTIONS_OBJS  += src/dlmalloc.o
+ endif
+ 
+ ifneq ($(USE_OPENSSL),)
+-# OpenSSL is packaged in various forms and with various dependences.
++# OpenSSL is packaged in various forms and with various dependencies.
+ # In general -lssl is enough, but on some platforms, -lcrypto may be needed,
+ # reason why it's added by default. Some even need -lz, then you'll need to
+ # pass it in the "ADDLIB" variable if needed. If your SSL libraries are not
+@@ -607,6 +607,9 @@ OPTIONS_OBJS    += src/hlua.o
+ endif
+ 
+ ifneq ($(USE_DEVICEATLAS),)
++ifeq ($(USE_PCRE),)
++$(error the DeviceAtlas module needs the PCRE library in order to compile)
++endif
+ # Use DEVICEATLAS_SRC and possibly DEVICEATLAS_INC and DEVICEATLAS_LIB to force path
+ # to DeviceAtlas headers and libraries if needed.
+ DEVICEATLAS_SRC =
+-- 
+2.4.10
+

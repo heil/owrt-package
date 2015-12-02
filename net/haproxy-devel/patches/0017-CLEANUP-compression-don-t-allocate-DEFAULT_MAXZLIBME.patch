@@ -1,0 +1,30 @@
+From 8e4790ae7b93e03c28c49039dba677af15e38a6d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 26 Nov 2015 16:34:56 +0100
+Subject: [PATCH 17/19] CLEANUP: compression: don't allocate DEFAULT_MAXZLIBMEM
+ without USE_ZLIB
+
+It's pointless to reserve this amount of memory when zlib is not used.
+Adding the condition will make build scripts easier to manage. This may
+be backported to 1.6.
+(cherry picked from commit ed9dddd237a699f1eb961b80586ac8c76e9dd996)
+---
+ src/haproxy.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/haproxy.c b/src/haproxy.c
+index 93423a9..604a09d 100644
+--- a/src/haproxy.c
++++ b/src/haproxy.c
+@@ -134,7 +134,7 @@ struct global global = {
+ 	.nbproc = 1,
+ 	.req_count = 0,
+ 	.logsrvs = LIST_HEAD_INIT(global.logsrvs),
+-#ifdef DEFAULT_MAXZLIBMEM
++#if defined(USE_ZLIB) && defined(DEFAULT_MAXZLIBMEM)
+ 	.maxzlibmem = DEFAULT_MAXZLIBMEM * 1024U * 1024U,
+ #else
+ 	.maxzlibmem = 0,
+-- 
+2.4.10
+

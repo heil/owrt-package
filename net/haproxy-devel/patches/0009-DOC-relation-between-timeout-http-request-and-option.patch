@@ -1,0 +1,57 @@
+From 0e947985f2bc546170378b8f511949ea951e60bc Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Wed, 28 Oct 2015 13:49:01 +0100
+Subject: [PATCH 09/19] DOC: relation between timeout http-request and option
+ http-buffer-request
+
+The documentation missed the explanation and relation between the
+timeout http-request and option http-buffer-request.
+Combined together, it helps protecting against slow POST types of
+attacks.
+
+[wt: backport to 1.6]
+(cherry picked from commit eccdf43eec0fc07f0e7c36c612d0a60622418f6a)
+---
+ doc/configuration.txt | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index cd8c6b4..45d1aac 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -5059,7 +5059,7 @@ no option http-buffer-request
+   the frontend and the backend, so this should definitely not be used by
+   default.
+ 
+-  See also : "option http-no-delay"
++  See also : "option http-no-delay", "timeout http-request"
+ 
+ 
+ option http-ignore-probes
+@@ -9133,9 +9133,11 @@ timeout http-request <timeout>
+   code using "option http-ignore-probes" or "errorfile 408 /dev/null". See
+   more details in the explanations of the "cR" termination code in section 8.5.
+ 
+-  Note that this timeout only applies to the header part of the request, and
+-  not to any data. As soon as the empty line is received, this timeout is not
+-  used anymore. It is used again on keep-alive connections to wait for a second
++  By default, this timeout only applies to the header part of the request,
++  and not to any data. As soon as the empty line is received, this timeout is
++  not used anymore. When combined with "option http-buffer-request", this
++  timeout also applies to the body of the request..
++  It is used again on keep-alive connections to wait for a second
+   request if "timeout http-keep-alive" is not set.
+ 
+   Generally it is enough to set it to a few seconds, as most clients send the
+@@ -9150,7 +9152,7 @@ timeout http-request <timeout>
+   timeout will be used.
+ 
+   See also : "errorfile", "http-ignore-probes", "timeout http-keep-alive", and
+-             "timeout client".
++             "timeout client", "option http-buffer-request".
+ 
+ 
+ timeout queue <timeout>
+-- 
+2.4.10
+
