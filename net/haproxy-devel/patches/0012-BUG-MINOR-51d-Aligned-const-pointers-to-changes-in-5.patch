@@ -1,7 +1,7 @@
 From ca355c438b2a733cd65899077af231d0093d747f Mon Sep 17 00:00:00 2001
 From: "ben@51degrees.com" <ben@51degrees.com>
 Date: Fri, 8 Jan 2016 13:49:32 +0000
-Subject: [PATCH 12/28] BUG/MINOR: 51d: Aligned const pointers to changes in
+Subject: [PATCH 12/67] BUG/MINOR: 51d: Aligned const pointers to changes in
  51Degrees.
 
 Parameters provided to 51Degrees methods that have changed to require

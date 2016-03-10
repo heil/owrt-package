@@ -1,7 +1,7 @@
 From 88cb10e3f13c3278e3d1fb84c13dd5171ebe0d2c Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 4 Jan 2016 20:21:33 +0100
-Subject: [PATCH 04/28] MINOR: chunks: ensure that chunk_strcpy() adds a
+Subject: [PATCH 04/67] MINOR: chunks: ensure that chunk_strcpy() adds a
  trailing zero
 
 Since thus function bears the name of a well-known string function, it

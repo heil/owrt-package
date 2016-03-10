@@ -1,7 +1,7 @@
 From eb393120f7721d1a367da2b1820ecf23a270f44b Mon Sep 17 00:00:00 2001
 From: "ben@51degrees.com" <ben@51degrees.com>
 Date: Fri, 8 Jan 2016 13:52:32 +0000
-Subject: [PATCH 13/28] CLEANUP: 51d: Aligned if statements with HAProxy best
+Subject: [PATCH 13/67] CLEANUP: 51d: Aligned if statements with HAProxy best
  practices and removed casts from malloc.
 
 Changes to if statements do not affect code operation, just layout of

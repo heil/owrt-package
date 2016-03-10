@@ -1,7 +1,7 @@
 From be579a50b815fb03ad312eed662a28850ee4c5b7 Mon Sep 17 00:00:00 2001
 From: Chris Short <chris@chrisshort.net>
 Date: Mon, 18 Jan 2016 09:11:04 -0500
-Subject: [PATCH 16/28] BUG/MINOR: examples: Fixing haproxy.spec to remove
+Subject: [PATCH 16/67] BUG/MINOR: examples: Fixing haproxy.spec to remove
  references to .cfg files
 
 Building RPMs from the provided haproxy.spec fails due to references to

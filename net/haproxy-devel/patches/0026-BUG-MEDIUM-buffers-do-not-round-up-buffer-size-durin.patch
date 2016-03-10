@@ -1,7 +1,7 @@
 From 89d1f414bdfa116a200187912e5090083688d75c Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 25 Jan 2016 02:23:25 +0100
-Subject: [PATCH 26/28] BUG/MEDIUM: buffers: do not round up buffer size during
+Subject: [PATCH 26/67] BUG/MEDIUM: buffers: do not round up buffer size during
  allocation
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

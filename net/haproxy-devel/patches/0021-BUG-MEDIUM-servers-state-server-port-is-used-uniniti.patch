@@ -1,7 +1,7 @@
 From 7b4c82b1562a9c7633ebc1241a5f6ff1b0377584 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Thu, 21 Jan 2016 13:51:56 +0100
-Subject: [PATCH 21/28] BUG/MEDIUM: servers state: server port is used
+Subject: [PATCH 21/67] BUG/MEDIUM: servers state: server port is used
  uninitialized
 
 Nenad spotted that the last fix was unfortunately wrong. Needs to be

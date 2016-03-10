@@ -1,7 +1,7 @@
 From fed3c4efe837d2201c1bb6be7ad532227451b8ed Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 25 Jan 2016 01:09:11 +0100
-Subject: [PATCH 24/28] BUG/MEDIUM: channel: fix miscalculation of available
+Subject: [PATCH 24/67] BUG/MEDIUM: channel: fix miscalculation of available
  buffer space.
 
 The function channel_recv_limit() relies on channel_reserved() which

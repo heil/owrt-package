@@ -1,7 +1,7 @@
 From 5af7b4f06c74cf79fd01c5e98e1825985bd3ab22 Mon Sep 17 00:00:00 2001
 From: Christopher Faulet <cfaulet@qualys.com>
 Date: Fri, 19 Jun 2015 09:00:58 +0200
-Subject: [PATCH 02/28] BUG/MINOR: http: Be sure to process all the data
+Subject: [PATCH 02/67] BUG/MINOR: http: Be sure to process all the data
  received from a server
 
 When the response body is forwarded, if the server closes the input before the

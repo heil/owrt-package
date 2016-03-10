@@ -1,7 +1,7 @@
 From d005682283c369c8170edb8ecb7e67450d9dcbd6 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 13 Jan 2016 07:58:44 +0100
-Subject: [PATCH 27/28] BUG/MINOR: stream: don't force retries if the server is
+Subject: [PATCH 27/67] BUG/MINOR: stream: don't force retries if the server is
  DOWN
 
 Arkadiy Kulev noticed that if a server is marked down while a connection

@@ -1,7 +1,7 @@
 From 1ef23b5d406ebf5ec0b28b1b3d54661882ff3577 Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Thu, 21 Jan 2016 00:20:50 +0100
-Subject: [PATCH 18/28] MINOR: server state: missing LF (\n) on error message
+Subject: [PATCH 18/67] MINOR: server state: missing LF (\n) on error message
  printed when parsing server state file
 
 There is no LF characters printed at the end of the error message

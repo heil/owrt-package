@@ -1,7 +1,7 @@
 From c45963d2f5b9b175475b8e67e7c6065bb27fb4fc Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 25 Jan 2016 14:54:45 +0100
-Subject: [PATCH 28/28] BUG/MINOR: counters: make the sc-inc-gpc0 and
+Subject: [PATCH 28/67] BUG/MINOR: counters: make the sc-inc-gpc0 and
  sc-set-gpt0 touch the table
 
 These two actions don't touch the table so the entry will expire and

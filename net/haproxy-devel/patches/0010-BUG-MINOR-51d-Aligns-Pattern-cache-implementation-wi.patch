@@ -1,7 +1,7 @@
 From 789c958671f725e7d216f667effd74c7b396475b Mon Sep 17 00:00:00 2001
 From: "ben@51degrees.com" <ben@51degrees.com>
 Date: Fri, 8 Jan 2016 13:47:46 +0000
-Subject: [PATCH 10/28] BUG/MINOR: 51d: Aligns Pattern cache implementation
+Subject: [PATCH 10/67] BUG/MINOR: 51d: Aligns Pattern cache implementation
  with HAProxy best practices.
 
 Malloc continues to be used for the creation of cache entries. The

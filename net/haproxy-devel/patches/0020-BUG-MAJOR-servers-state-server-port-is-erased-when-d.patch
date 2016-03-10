@@ -1,7 +1,7 @@
 From 7bd3d26f911731a4ad944b08a8e952136b4e3533 Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Thu, 21 Jan 2016 00:17:09 +0100
-Subject: [PATCH 20/28] BUG/MAJOR: servers state: server port is erased when
+Subject: [PATCH 20/67] BUG/MAJOR: servers state: server port is erased when
  dns resolution is enabled on a server
 
 Servers state function save and apply server IP when DNS resolution is

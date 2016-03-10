@@ -1,7 +1,7 @@
 From e8921f8cd797f3f3199dcd3aea46cf5953749b6d Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Fri, 15 Jan 2016 10:26:26 +0100
-Subject: [PATCH 15/28] DOC: fix "workaround" spelling
+Subject: [PATCH 15/67] DOC: fix "workaround" spelling
 
 "a workaround", "to work around", and not "to walk around".
 Thanks to Lukas for reporting.

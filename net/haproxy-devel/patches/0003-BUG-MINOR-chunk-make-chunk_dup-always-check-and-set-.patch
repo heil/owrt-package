@@ -1,7 +1,7 @@
 From b513fcf83fb6da15952bf2f8b00129d837f7d92f Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 4 Jan 2016 20:36:59 +0100
-Subject: [PATCH 03/28] BUG/MINOR: chunk: make chunk_dup() always check and set
+Subject: [PATCH 03/67] BUG/MINOR: chunk: make chunk_dup() always check and set
  dst->size
 
 chunk_dup() was affected by two bugs at once related to dst->size :

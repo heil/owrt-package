@@ -1,7 +1,7 @@
 From 81c0599bb878e8a6fe7ddf3d318aba9e365ad1de Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 4 Jan 2016 20:13:55 +0100
-Subject: [PATCH 05/28] MINOR: chunks: add chunk_strcat() and chunk_newstr()
+Subject: [PATCH 05/67] MINOR: chunks: add chunk_strcat() and chunk_newstr()
 
 These two new functions will make it easier to manipulate small strings
 from within functions, because at many places, multiple short strings

@@ -1,7 +1,7 @@
 From da593758e01e1623295721f574d39aea4d1490cc Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Mon, 25 Jan 2016 02:19:13 +0100
-Subject: [PATCH 25/28] MEDIUM: pools: add a new flag to avoid rounding pool
+Subject: [PATCH 25/67] MEDIUM: pools: add a new flag to avoid rounding pool
  size up
 
 Usually it's desirable to merge similarly sized pools, which is the

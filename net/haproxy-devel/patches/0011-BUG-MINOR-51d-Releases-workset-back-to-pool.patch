@@ -1,7 +1,7 @@
 From 428ee4e30ee45de0967ba1daed8808a2ce3148a6 Mon Sep 17 00:00:00 2001
 From: "ben@51degrees.com" <ben@51degrees.com>
 Date: Fri, 8 Jan 2016 13:48:37 +0000
-Subject: [PATCH 11/28] BUG/MINOR: 51d: Releases workset back to pool.
+Subject: [PATCH 11/67] BUG/MINOR: 51d: Releases workset back to pool.
 
 The workset is now released correctly when a cache hit occurs.
 

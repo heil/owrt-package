@@ -1,7 +1,7 @@
 From e72bdaaf349e1b8cba02c98d925348da3dc40912 Mon Sep 17 00:00:00 2001
 From: Thiago Farina <tfarina@chromium.org>
 Date: Wed, 20 Jan 2016 23:46:34 +0100
-Subject: [PATCH 17/28] MINOR: fix the return type for
+Subject: [PATCH 17/67] MINOR: fix the return type for
  dns_response_get_query_id() function
 
 This function should return a 16-bit type as that is the type for

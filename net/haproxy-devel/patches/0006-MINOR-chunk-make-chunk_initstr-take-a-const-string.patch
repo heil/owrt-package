@@ -1,7 +1,7 @@
 From 7d16f278c6f2332439c7ddfbd939fbc48ddb5450 Mon Sep 17 00:00:00 2001
 From: Willy Tarreau <w@1wt.eu>
 Date: Wed, 6 Jan 2016 20:45:03 +0100
-Subject: [PATCH 06/28] MINOR: chunk: make chunk_initstr() take a const string
+Subject: [PATCH 06/67] MINOR: chunk: make chunk_initstr() take a const string
 
 chunk_initstr() prepares a read-only chunk from a string of
 fixed length. Thus it must be prepared to accept a read-only

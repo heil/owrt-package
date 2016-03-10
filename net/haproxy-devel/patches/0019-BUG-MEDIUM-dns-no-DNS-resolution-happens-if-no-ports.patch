@@ -1,7 +1,7 @@
 From 584f5609f7082b741076525e1d8de2eb9db3b51f Mon Sep 17 00:00:00 2001
 From: Baptiste Assmann <bedis9@gmail.com>
 Date: Thu, 21 Jan 2016 00:59:46 +0100
-Subject: [PATCH 19/28] BUG/MEDIUM: dns: no DNS resolution happens if no ports
+Subject: [PATCH 19/67] BUG/MEDIUM: dns: no DNS resolution happens if no ports
  provided to the nameserver
 
 Erez reported a bug on discourse.haproxy.org about DNS resolution not

@@ -1,7 +1,7 @@
 From e58222e266493477ae7590852c1a8daa3baaa612 Mon Sep 17 00:00:00 2001
 From: Ben Cabot <ben@loadbalancer.org>
 Date: Wed, 20 Jan 2016 09:44:39 +0000
-Subject: [PATCH 22/28] BUG/MEDIUM: config: Adding validation to stick-table
+Subject: [PATCH 22/67] BUG/MEDIUM: config: Adding validation to stick-table
  expire value.
 
 If the expire value exceedes the maximum value clients are not added

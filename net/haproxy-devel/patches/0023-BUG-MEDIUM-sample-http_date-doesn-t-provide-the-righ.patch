@@ -1,7 +1,7 @@
 From d63db172aa92ea1895da27d374e5da1b76ce6546 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Cyril=20Bont=C3=83=C2=A9?= <cyril.bonte@free.fr>
 Date: Fri, 22 Jan 2016 19:40:28 +0100
-Subject: [PATCH 23/28] BUG/MEDIUM: sample: http_date() doesn't provide the
+Subject: [PATCH 23/67] BUG/MEDIUM: sample: http_date() doesn't provide the
  right day of the week
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
