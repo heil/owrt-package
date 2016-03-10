@@ -1,0 +1,29 @@
+From 7b4c82b1562a9c7633ebc1241a5f6ff1b0377584 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 21 Jan 2016 13:51:56 +0100
+Subject: [PATCH 21/28] BUG/MEDIUM: servers state: server port is used
+ uninitialized
+
+Nenad spotted that the last fix was unfortunately wrong. Needs to be
+backported to 1.6 as well.
+(cherry picked from commit f3c7a83accebeaf1ac66f9b30238e8db4e6cd278)
+---
+ src/server.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/server.c b/src/server.c
+index efa3747..874ddf2 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -2151,7 +2151,7 @@ static void srv_update_state(struct server *srv, int version, char **params)
+ 					int port;
+ 
+ 					/* save the port, applies the new IP then reconfigure the port */
+-					get_host_port(&srv->addr);
++					port = get_host_port(&srv->addr);
+ 					srv->addr.ss_family = addr.ss_family;
+ 					str2ip2(params[0], &srv->addr, srv->addr.ss_family);
+ 					set_host_port(&srv->addr, port);
+-- 
+2.4.10
+

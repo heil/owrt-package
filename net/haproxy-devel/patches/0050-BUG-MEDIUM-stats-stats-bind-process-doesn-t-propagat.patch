@@ -1,0 +1,42 @@
+From 4e86b751caa89f4a459884d913ce8d19738cbffa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Wed, 24 Feb 2016 00:14:54 +0100
+Subject: [PATCH 50/67] BUG/MEDIUM: stats: stats bind-process doesn't propagate
+ the process mask correctly
+
+With nbproc > 1, it is possible to specify on which process the stats socket
+will be bound using "stats bind-process", but the behaviour was not correct,
+ignoring the value in some configurations.
+
+Example :
+global
+  nbproc 4
+  stats bind-process 1
+  stats socket /var/run/haproxy.sock
+
+With such a configuration, all the processes will listen on the stats socket.
+As a workaround, it is also possible to declare a "process" keyword on
+the "stats stocket" line.
+
+The patch must be applied to 1.7, 1.6 and 1.5
+(cherry picked from commit 0618195a114098c93e2712b5507dc9a3eeae8e8b)
+---
+ src/cfgparse.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 3e37eb4..4285fc7 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -8555,7 +8555,7 @@ out_uri_auth_compat:
+ 		list_for_each_entry(bind_conf, &global.stats_fe->conf.bind, by_fe) {
+ 			unsigned long mask;
+ 
+-			mask = bind_conf->bind_proc ? bind_conf->bind_proc : nbits(global.nbproc);
++			mask = bind_conf->bind_proc ? bind_conf->bind_proc : 0;
+ 			global.stats_fe->bind_proc |= mask;
+ 		}
+ 		if (!global.stats_fe->bind_proc)
+-- 
+2.4.10
+

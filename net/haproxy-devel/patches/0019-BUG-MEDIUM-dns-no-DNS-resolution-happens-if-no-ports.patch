@@ -1,0 +1,41 @@
+From 584f5609f7082b741076525e1d8de2eb9db3b51f Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Thu, 21 Jan 2016 00:59:46 +0100
+Subject: [PATCH 19/28] BUG/MEDIUM: dns: no DNS resolution happens if no ports
+ provided to the nameserver
+
+Erez reported a bug on discourse.haproxy.org about DNS resolution not
+occuring when no port is specified on the nameserver directive.
+
+This patch prevent this behavior by returning an error explaining this
+issue when parsing the configuration file.
+That said, later, we may want to force port 53 when client did not
+provide any.
+
+backport: 1.6
+(cherry picked from commit 7f43fa9b2ca1a981d89636416f49f2405290c7aa)
+---
+ src/cfgparse.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 97f4243..ef2ce3e 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2307,6 +2307,13 @@ int cfg_parse_resolvers(const char *file, int linenum, char **args, int kwm)
+ 			goto out;
+ 		}
+ 
++		if (!port1 && !port2) {
++			Alert("parsing [%s:%d] : '%s %s' : no UDP port specified\n",
++				file, linenum, args[0], args[1]);
++			err_code |= ERR_ALERT | ERR_FATAL;
++			goto out;
++		}
++
+ 		newnameserver->addr = *sk;
+ 	}
+ 	else if (strcmp(args[0], "hold") == 0) { /* hold periods */
+-- 
+2.4.10
+

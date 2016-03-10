@@ -1,0 +1,77 @@
+From eb393120f7721d1a367da2b1820ecf23a270f44b Mon Sep 17 00:00:00 2001
+From: "ben@51degrees.com" <ben@51degrees.com>
+Date: Fri, 8 Jan 2016 13:52:32 +0000
+Subject: [PATCH 13/28] CLEANUP: 51d: Aligned if statements with HAProxy best
+ practices and removed casts from malloc.
+
+Changes to if statements do not affect code operation, just layout of
+the code. Type casts from malloc returns have been removed as this cast
+happens automatically from the void* type.
+
+This may be backported to 1.6.
+(cherry picked from commit d3842523ffbbaf817f44ac60114a7499dfba63ba)
+---
+ src/51d.c | 16 +++++++---------
+ 1 file changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/src/51d.c b/src/51d.c
+index 0a70d7a..212d9b8 100644
+--- a/src/51d.c
++++ b/src/51d.c
+@@ -329,9 +329,9 @@ static void _51d_process_match(const struct arg *args, struct sample *smp)
+ 			}
+ 		}
+ #endif
+-		if (!found) {
++		if (!found)
+ 			chunk_appendf(temp, "%s", no_data);
+-		}
++
+ 		/* Add separator. */
+ 		chunk_appendf(temp, "%c", global._51degrees.property_separator);
+ 		++i;
+@@ -408,9 +408,8 @@ static int _51d_fetch(const struct arg *args, struct sample *smp, const char *kw
+ 
+ #ifdef FIFTYONEDEGREES_H_PATTERN_INCLUDED
+ 	fiftyoneDegreesWorksetPoolRelease(global._51degrees.pool, ws);
+-	if (lru) {
++	if (lru)
+ 		_51d_insert_cache_entry(smp, lru, (void*)args);
+-	}
+ #endif
+ 
+ 	return 1;
+@@ -465,9 +464,8 @@ static int _51d_conv(const struct arg *args, struct sample *smp, void *private)
+ 
+ #ifdef FIFTYONEDEGREES_H_PATTERN_INCLUDED
+ 	fiftyoneDegreesWorksetPoolRelease(global._51degrees.pool, ws);
+-	if (lru) {
++	if (lru)
+ 		_51d_insert_cache_entry(smp, lru, (void*)args);
+-	}
+ #endif
+ 
+ 	return 1;
+@@ -480,7 +478,7 @@ void _51d_init_http_headers()
+ 	const fiftyoneDegreesAsciiString *headerName;
+ 	fiftyoneDegreesDataSet *ds = &global._51degrees.data_set;
+ 	global._51degrees.header_count = ds->httpHeadersCount;
+-	global._51degrees.header_names = (struct chunk*)malloc(global._51degrees.header_count * sizeof(struct chunk));
++	global._51degrees.header_names = malloc(global._51degrees.header_count * sizeof(struct chunk));
+ 	for (index = 0; index < global._51degrees.header_count; index++) {
+ 		headerName = fiftyoneDegreesGetString(ds, ds->httpHeaders[index].headerNameOffset);
+ 		(global._51degrees.header_names + index)->str = (char*)&headerName->firstByte;
+@@ -497,8 +495,8 @@ void _51d_init_http_headers()
+ 	global._51degrees.header_count = fiftyoneDegreesGetHttpHeaderCount();
+ 	global._51degrees.device_offsets.firstOffset = (fiftyoneDegreesDeviceOffset*)malloc(
+ 		global._51degrees.header_count * sizeof(fiftyoneDegreesDeviceOffset));
+-	global._51degrees.header_names = (struct chunk*)malloc(global._51degrees.header_count * sizeof(struct chunk));
+-	global._51degrees.header_offsets = (int32_t*)malloc(global._51degrees.header_count * sizeof(int32_t));
++	global._51degrees.header_names = malloc(global._51degrees.header_count * sizeof(struct chunk));
++	global._51degrees.header_offsets = malloc(global._51degrees.header_count * sizeof(int32_t));
+ 	for (index = 0; index < global._51degrees.header_count; index++) {
+ 		global._51degrees.header_offsets[index] = fiftyoneDegreesGetHttpHeaderNameOffset(index);
+ 		global._51degrees.header_names[index].str = (char*)fiftyoneDegreesGetHttpHeaderNamePointer(index);
+-- 
+2.4.10
+

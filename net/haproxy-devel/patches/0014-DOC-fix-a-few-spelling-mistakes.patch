@@ -1,0 +1,40 @@
+From 40749b4882fdc3be3c2a447f70397da37435adb2 Mon Sep 17 00:00:00 2001
+From: fengpeiyuan <fengpeiyuan@gmail.com>
+Date: Fri, 15 Jan 2016 16:40:53 +0800
+Subject: [PATCH 14/28] DOC: fix a few spelling mistakes (cherry picked from
+ commit cc123c66c2075add8524a6a9925382927daa6ab0)
+
+---
+ doc/architecture.txt | 2 +-
+ doc/management.txt   | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/doc/architecture.txt b/doc/architecture.txt
+index 6135f80..12dda8d 100644
+--- a/doc/architecture.txt
++++ b/doc/architecture.txt
+@@ -1307,7 +1307,7 @@ persistent connections per user).
+ 
+ Even if you disable keep-alive, if the server takes a long time to respond,
+ you still have a high risk of multiple users clicking at the same time and
+-having their requests unserved because of server saturation. To workaround
++having their requests unserved because of server saturation. To walk around
+ the problem, you increase the concurrent connection limit on the servers,
+ but their performance stalls under higher loads.
+ 
+diff --git a/doc/management.txt b/doc/management.txt
+index e56806a..7695b76 100644
+--- a/doc/management.txt
++++ b/doc/management.txt
+@@ -755,7 +755,7 @@ one first layer running on multiple processes and in charge for the heavy
+ processing, passing the traffic to a second layer running in a single process.
+ This mechanism is suited to SSL and compression which are the two CPU-heavy
+ features. Instances can easily be chained over UNIX sockets (which are cheaper
+-than TCP sockets and which do not waste ports), adn the proxy protocol which is
++than TCP sockets and which do not waste ports), and the proxy protocol which is
+ useful to pass client information to the next stage. When doing so, it is
+ generally a good idea to bind all the single-process tasks to process number 1
+ and extra tasks to next processes, as this will make it easier to generate
+-- 
+2.4.10
+

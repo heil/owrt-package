@@ -1,0 +1,67 @@
+From da593758e01e1623295721f574d39aea4d1490cc Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 25 Jan 2016 02:19:13 +0100
+Subject: [PATCH 25/28] MEDIUM: pools: add a new flag to avoid rounding pool
+ size up
+
+Usually it's desirable to merge similarly sized pools, which is the
+reason why their size is rounded up to the next multiple of 16. But
+for the buffers this is problematic because we add the size of
+struct buffer to the user-requested size, and the rounding results
+in 8 extra bytes that are usable in the end. So the user gets more
+bytes than asked for, and in case of SSL it results in short writes
+for the extra bytes that are sent above multiples of 16 kB.
+
+So we add a new flag MEM_F_EXACT to request that the size is not
+rounded up when creating the entry. Thus it doesn't disable merging.
+(cherry picked from commit 581bf81d34ee312fce1fe4d28b6d1f03995b350c)
+
+[wt: patch needed for next one, adjusted context, no pool debugging in 1.6]
+---
+ include/common/memory.h |  1 +
+ src/memory.c            | 10 +++++++---
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/include/common/memory.h b/include/common/memory.h
+index c76b4ca..51a3a7e 100644
+--- a/include/common/memory.h
++++ b/include/common/memory.h
+@@ -29,6 +29,7 @@
+ #include <common/mini-clist.h>
+ 
+ #define MEM_F_SHARED	0x1
++#define MEM_F_EXACT	0x2
+ 
+ struct pool_head {
+ 	void **free_list;
+diff --git a/src/memory.c b/src/memory.c
+index d9cef64..f36c8ef 100644
+--- a/src/memory.c
++++ b/src/memory.c
+@@ -24,7 +24,9 @@ int mem_poison_byte = -1;
+ 
+ /* Try to find an existing shared pool with the same characteristics and
+  * returns it, otherwise creates this one. NULL is returned if no memory
+- * is available for a new creation.
++ * is available for a new creation. Two flags are supported :
++ *   - MEM_F_SHARED to indicate that the pool may be shared with other users
++ *   - MEM_F_EXACT to indicate that the size must not be rounded up
+  */
+ struct pool_head *create_pool(char *name, unsigned int size, unsigned int flags)
+ {
+@@ -39,8 +41,10 @@ struct pool_head *create_pool(char *name, unsigned int size, unsigned int flags)
+ 	 * ease merging of entries. Note that the rounding is a power of two.
+ 	 */
+ 
+-	align = 16;
+-	size  = (size + align - 1) & -align;
++	if (!(flags & MEM_F_EXACT)) {
++		align = 16;
++		size  = (size + align - 1) & -align;
++	}
+ 
+ 	start = &pools;
+ 	pool = NULL;
+-- 
+2.4.10
+

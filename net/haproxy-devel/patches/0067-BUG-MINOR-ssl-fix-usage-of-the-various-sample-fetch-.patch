@@ -1,0 +1,185 @@
+From 079e349d7da1c50cee391cca6f4a845141cd231d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 10 Mar 2016 17:05:28 +0100
+Subject: [PATCH 67/67] BUG/MINOR: ssl: fix usage of the various sample fetch
+ functions
+
+Technically speaking, many SSL sample fetch functions act on the
+connection and depend on USE_L5CLI on the client side, which means
+they're usable as soon as a handshake is completed on a connection.
+This means that the test consisting in refusing to call them when
+the stream is NULL will prevent them from working when we implement
+the tcp-request session ruleset. Better fix this now. The fix consists
+in using smp->sess->origin when they're called for the front connection,
+and smp->strm->si[1].end when called for the back connection.
+
+There is currently no known side effect for this issue, though it would
+better be backported into 1.6 so that the code base remains consistend.
+(cherry picked from commit e237fe1172a6e9c562617ccdd38a4a8d58f7ab6a)
+---
+ src/ssl_sock.c | 68 +++++++++++++++-------------------------------------------
+ 1 file changed, 17 insertions(+), 51 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index e7a5e46..e6aec1d 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -3963,8 +3963,8 @@ smp_fetch_ssl_x_key_alg(const struct arg *args, struct sample *smp, const char *
+ static int
+ smp_fetch_ssl_fc(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn = smp->strm ? objt_conn(smp->strm->si[back_conn].end) : NULL;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+ 	smp->data.type = SMP_T_BOOL;
+ 	smp->data.u.sint = (conn && conn->xprt == &ssl_sock);
+@@ -4008,14 +4008,10 @@ smp_fetch_ssl_fc_is_resumed(const struct arg *args, struct sample *smp, const ch
+ static int
+ smp_fetch_ssl_fc_cipher(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn;
+-
+-	if (!smp->strm)
+-		return 0;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+ 	smp->flags = 0;
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -4038,16 +4034,12 @@ smp_fetch_ssl_fc_cipher(const struct arg *args, struct sample *smp, const char *
+ static int
+ smp_fetch_ssl_fc_alg_keysize(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn;
+-	int sint;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+-	if (!smp->strm)
+-		return 0;
++	int sint;
+ 
+ 	smp->flags = 0;
+-
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -4067,15 +4059,10 @@ smp_fetch_ssl_fc_alg_keysize(const struct arg *args, struct sample *smp, const c
+ static int
+ smp_fetch_ssl_fc_use_keysize(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn;
+-
+-	if (!smp->strm)
+-		return 0;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+ 	smp->flags = 0;
+-
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -4094,9 +4081,6 @@ smp_fetch_ssl_fc_npn(const struct arg *args, struct sample *smp, const char *kw,
+ {
+ 	struct connection *conn;
+ 
+-	if (!smp->strm)
+-		return 0;
+-
+ 	smp->flags = SMP_F_CONST;
+ 	smp->data.type = SMP_T_STR;
+ 
+@@ -4121,9 +4105,6 @@ smp_fetch_ssl_fc_alpn(const struct arg *args, struct sample *smp, const char *kw
+ {
+ 	struct connection *conn;
+ 
+-	if (!smp->strm)
+-		return 0;
+-
+ 	smp->flags = SMP_F_CONST;
+ 	smp->data.type = SMP_T_STR;
+ 
+@@ -4149,15 +4130,10 @@ smp_fetch_ssl_fc_alpn(const struct arg *args, struct sample *smp, const char *kw
+ static int
+ smp_fetch_ssl_fc_protocol(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn;
+-
+-	if (!smp->strm)
+-		return 0;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+ 	smp->flags = 0;
+-
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -4180,17 +4156,14 @@ static int
+ smp_fetch_ssl_fc_session_id(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+ #if OPENSSL_VERSION_NUMBER > 0x0090800fL
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	SSL_SESSION *ssl_sess;
+-	struct connection *conn;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
+ 
+-	if (!smp->strm)
+-		return 0;
++	SSL_SESSION *ssl_sess;
+ 
+ 	smp->flags = SMP_F_CONST;
+ 	smp->data.type = SMP_T_BIN;
+ 
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+@@ -4214,9 +4187,6 @@ smp_fetch_ssl_fc_sni(const struct arg *args, struct sample *smp, const char *kw,
+ #ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
+ 	struct connection *conn;
+ 
+-	if (!smp->strm)
+-		return 0;
+-
+ 	smp->flags = SMP_F_CONST;
+ 	smp->data.type = SMP_T_STR;
+ 
+@@ -4239,17 +4209,13 @@ static int
+ smp_fetch_ssl_fc_unique_id(const struct arg *args, struct sample *smp, const char *kw, void *private)
+ {
+ #if OPENSSL_VERSION_NUMBER > 0x0090800fL
+-	int back_conn = (kw[4] == 'b') ? 1 : 0;
+-	struct connection *conn;
++	struct connection *conn = objt_conn((kw[4] != 'b') ? smp->sess->origin :
++	                                    smp->strm ? smp->strm->si[1].end : NULL);
++
+ 	int finished_len;
+ 	struct chunk *finished_trash;
+ 
+-	if (!smp->strm)
+-		return 0;
+-
+ 	smp->flags = 0;
+-
+-	conn = objt_conn(smp->strm->si[back_conn].end);
+ 	if (!conn || !conn->xprt_ctx || conn->xprt != &ssl_sock)
+ 		return 0;
+ 
+-- 
+2.4.10
+

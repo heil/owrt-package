@@ -1,0 +1,33 @@
+From 1ef23b5d406ebf5ec0b28b1b3d54661882ff3577 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Thu, 21 Jan 2016 00:20:50 +0100
+Subject: [PATCH 18/28] MINOR: server state: missing LF (\n) on error message
+ printed when parsing server state file
+
+There is no LF characters printed at the end of the error message
+returned by the function when applying server state found in a file.
+(cherry picked from commit 0821bb9ec05abb7192c660963e4a055d151705f4)
+---
+ src/server.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/server.c b/src/server.c
+index d93f70f..7f88a12 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -2156,9 +2156,11 @@ static void srv_update_state(struct server *srv, int version, char **params)
+ 	}
+ 
+  out:
+-	if (msg->len)
++	if (msg->len) {
++		chunk_appendf(msg, "\n");
+ 		Warning("server-state application failed for server '%s/%s'%s",
+ 		        srv->proxy->id, srv->id, msg->str);
++	}
+ }
+ 
+ /* This function parses all the proxies and only take care of the backends (since we're looking for server)
+-- 
+2.4.10
+

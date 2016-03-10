@@ -1,0 +1,37 @@
+From 7d16f278c6f2332439c7ddfbd939fbc48ddb5450 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 6 Jan 2016 20:45:03 +0100
+Subject: [PATCH 06/28] MINOR: chunk: make chunk_initstr() take a const string
+
+chunk_initstr() prepares a read-only chunk from a string of
+fixed length. Thus it must be prepared to accept a read-only
+string on the input, otherwise the caller has to force-cast
+some const char* and that's not a good idea.
+(cherry picked from commit 70af633ebe8627fdf6b448f96c0e457adc93b1d1)
+
+[wt: not strictly needed but backported to ensure that any future patch
+ relying on it works as expected]
+---
+ include/common/chunk.h | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/include/common/chunk.h b/include/common/chunk.h
+index 35bf219..851c7a6 100644
+--- a/include/common/chunk.h
++++ b/include/common/chunk.h
+@@ -77,9 +77,10 @@ static inline int chunk_initlen(struct chunk *chk, char *str, size_t size, int l
+ 	return 1;
+ }
+ 
+-static inline void chunk_initstr(struct chunk *chk, char *str)
++/* this is only for temporary manipulation, the chunk is read-only */
++static inline void chunk_initstr(struct chunk *chk, const char *str)
+ {
+-	chk->str = str;
++	chk->str = (char *)str;
+ 	chk->len = strlen(str);
+ 	chk->size = 0;			/* mark it read-only */
+ }
+-- 
+2.4.10
+

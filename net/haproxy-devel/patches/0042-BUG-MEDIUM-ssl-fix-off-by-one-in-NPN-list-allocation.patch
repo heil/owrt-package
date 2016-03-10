@@ -1,0 +1,35 @@
+From 28cc8f12890a05934a99d7620b482896486b8a21 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Fri, 12 Feb 2016 17:11:12 +0100
+Subject: [PATCH 42/67] BUG/MEDIUM: ssl: fix off-by-one in NPN list allocation
+
+After seeing previous ALPN fix, I suspected that NPN code was wrong
+as well, and indeed it was since ALPN was copied from it. This fix
+must be backported into 1.6 and 1.5.
+(cherry picked from commit 3724da126115d6ad0ccecbbcea05c54b4accaac4)
+---
+ src/ssl_sock.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 506684a..579bc46 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -4621,9 +4621,12 @@ static int bind_parse_npn(char **args, int cur_arg, struct proxy *px, struct bin
+ 
+ 	free(conf->npn_str);
+ 
+-	/* the NPN string is built as a suite of (<len> <name>)* */
++	/* the NPN string is built as a suite of (<len> <name>)*,
++	 * so we reuse each comma to store the next <len> and need
++	 * one more for the end of the string.
++	 */
+ 	conf->npn_len = strlen(args[cur_arg + 1]) + 1;
+-	conf->npn_str = calloc(1, conf->npn_len);
++	conf->npn_str = calloc(1, conf->npn_len + 1);
+ 	memcpy(conf->npn_str + 1, args[cur_arg + 1], conf->npn_len);
+ 
+ 	/* replace commas with the name length */
+-- 
+2.4.10
+

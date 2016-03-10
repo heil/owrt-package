@@ -1,0 +1,31 @@
+From 502674bb0856618b227b57604f14298b8f3ad29d Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 27 Feb 2016 08:20:17 +0100
+Subject: [PATCH 55/67] BUG/MINOR: systemd: propagate the correct signal to
+ haproxy
+
+Some people report that sometimes there's a collection of old processes
+after a restart of the systemd wrapper. It's not surprizing when reading
+the code, the SIGTERM is propagated as a SIGINT which asks for a graceful
+stop instead. If people ask for termination, we should terminate.
+(cherry picked from commit 6c2f7955e7300fb2cf0596fa5210cdeb3a2aea5f)
+---
+ src/haproxy-systemd-wrapper.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/haproxy-systemd-wrapper.c b/src/haproxy-systemd-wrapper.c
+index 42b0b07..0c076a6 100644
+--- a/src/haproxy-systemd-wrapper.c
++++ b/src/haproxy-systemd-wrapper.c
+@@ -147,7 +147,7 @@ static void do_shutdown(int sig)
+ 		if (pid > 0) {
+ 			fprintf(stderr, SD_DEBUG "haproxy-systemd-wrapper: %s -> %d.\n",
+ 			        sig == SIGTERM ? "SIGTERM" : "SIGINT", pid);
+-			kill(pid, SIGINT);
++			kill(pid, sig);
+ 			free(pid_strv[i]);
+ 		}
+ 	}
+-- 
+2.4.10
+

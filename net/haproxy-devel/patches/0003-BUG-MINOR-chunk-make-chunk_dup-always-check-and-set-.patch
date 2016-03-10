@@ -1,0 +1,72 @@
+From b513fcf83fb6da15952bf2f8b00129d837f7d92f Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 4 Jan 2016 20:36:59 +0100
+Subject: [PATCH 03/28] BUG/MINOR: chunk: make chunk_dup() always check and set
+ dst->size
+
+chunk_dup() was affected by two bugs at once related to dst->size :
+  - first, it didn't check dst->size to know if it could free(dst->str),
+    so using it on a statically allocated chunk would cause a free(constant)
+    and crash the process ;
+
+  - second, it didn't properly set dst->size, possibly causing smaller
+    strings not to be properly reported in a chunk that was previously
+    used for something else.
+
+Fortunately, neither of these situations ever happened since the function
+is rarely used.
+
+In the process of doing this, we even allocate one more byte for a
+trailing zero if the input chunk was not full, so that the copied
+string can safely be reused by standard string functions.
+
+The bug was introduced in 1.3.4 nine years ago with this commit :
+
+  0f77253 ("[MINOR] store HTTP error messages into a chunk array")
+
+It's better to backport this fix in case a future fix relies on it.
+(cherry picked from commit f9476a5a308df570239ab0a57de2759600dd9cc2)
+---
+ include/common/chunk.h | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/include/common/chunk.h b/include/common/chunk.h
+index 8225d96..35e47fb 100644
+--- a/include/common/chunk.h
++++ b/include/common/chunk.h
+@@ -117,18 +117,28 @@ static inline void chunk_destroy(struct chunk *chk)
+ 
+ /*
+  * frees the destination chunk if already allocated, allocates a new string,
+- * and copies the source into it. The pointer to the destination string is
+- * returned, or NULL if the allocation fails or if any pointer is NULL..
++ * and copies the source into it. The new chunk will have extra room for a
++ * trailing zero unless the source chunk was actually full. The pointer to
++ * the destination string is returned, or NULL if the allocation fails or if
++ * any pointer is NULL.
+  */
+ static inline char *chunk_dup(struct chunk *dst, const struct chunk *src)
+ {
+ 	if (!dst || !src || !src->str)
+ 		return NULL;
+-	if (dst->str)
++
++	if (dst->size)
+ 		free(dst->str);
+ 	dst->len = src->len;
+-	dst->str = (char *)malloc(dst->len);
++	dst->size = src->len;
++	if (dst->size < src->size || !src->size)
++		dst->size++;
++
++	dst->str = (char *)malloc(dst->size);
+ 	memcpy(dst->str, src->str, dst->len);
++	if (dst->len < dst->size)
++		dst->str[dst->len] = 0;
++
+ 	return dst->str;
+ }
+ 
+-- 
+2.4.10
+

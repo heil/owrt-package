@@ -1,0 +1,41 @@
+From c0561008f1aec5a0a04483b17bbe2d80b841f8d0 Mon Sep 17 00:00:00 2001
+From: Thierry Fournier <tfournier@arpalert.org>
+Date: Mon, 22 Feb 2016 16:08:58 +0100
+Subject: [PATCH 48/67] BUG/MINOR: server: some prototypes are renamed
+
+The commit 87b096 renames the functions srv_shutdown_backup_sessions()
+and srv_shutdown_sessions() to srv_shutdown_backup_streams() and
+srv_shutdown_streams().
+
+The header file <proto/servers.h> does not repport these changes.
+
+This bug should be repported in the 1.6 branch, even if it is useless
+because new dev are frozen.
+(cherry picked from commit 9f72555b6576d516cf185f48b2d722d9ac1ec7a1)
+---
+ include/proto/server.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/proto/server.h b/include/proto/server.h
+index af749d7..d75cc9f 100644
+--- a/include/proto/server.h
++++ b/include/proto/server.h
+@@ -124,13 +124,13 @@ static inline int server_is_draining(const struct server *s)
+  * code in <why>, which must be one of SF_ERR_* indicating the reason for the
+  * shutdown.
+  */
+-void srv_shutdown_sessions(struct server *srv, int why);
++void srv_shutdown_streams(struct server *srv, int why);
+ 
+ /* Shutdown all connections of all backup servers of a proxy. The caller must
+  * pass a termination code in <why>, which must be one of SF_ERR_* indicating
+  * the reason for the shutdown.
+  */
+-void srv_shutdown_backup_sessions(struct proxy *px, int why);
++void srv_shutdown_backup_streams(struct proxy *px, int why);
+ 
+ /* Appends some information to a message string related to a server going UP or
+  * DOWN.  If both <forced> and <reason> are null and the server tracks another
+-- 
+2.4.10
+

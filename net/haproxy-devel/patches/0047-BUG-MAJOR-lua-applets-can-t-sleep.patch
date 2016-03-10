@@ -1,0 +1,43 @@
+From 741058cf3127ee08adead67ecb3d52384212480f Mon Sep 17 00:00:00 2001
+From: Thierry Fournier <tfournier@arpalert.org>
+Date: Sat, 20 Feb 2016 17:47:43 +0100
+Subject: [PATCH 47/67] BUG/MAJOR: lua: applets can't sleep.
+
+This patch must be backported in 1.6
+
+hlua_yield() function returns the required sleep time. The Lua core must
+be resume the execution after the required time. The core dedicated to
+the http and tcp applet doesn't implement the wake up function. It is a
+miss.
+
+This patch fix this.
+(cherry picked from commit 0164f200ab75c51a55e097a5a2175f0168ea61a0)
+---
+ src/hlua.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/hlua.c b/src/hlua.c
+index 2985530..991edf1 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -5713,6 +5713,8 @@ static void hlua_applet_tcp_fct(struct appctx *ctx)
+ 
+ 	/* yield. */
+ 	case HLUA_E_AGAIN:
++		if (hlua->wake_time != TICK_ETERNITY)
++			task_schedule(ctx->ctx.hlua_apptcp.task, hlua->wake_time);
+ 		return;
+ 
+ 	/* finished with error. */
+@@ -5936,6 +5938,8 @@ static void hlua_applet_http_fct(struct appctx *ctx)
+ 
+ 		/* yield. */
+ 		case HLUA_E_AGAIN:
++			if (hlua->wake_time != TICK_ETERNITY)
++				task_schedule(ctx->ctx.hlua_apphttp.task, hlua->wake_time);
+ 			return;
+ 
+ 		/* finished with error. */
+-- 
+2.4.10
+

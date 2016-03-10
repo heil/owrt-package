@@ -16,14 +16,14 @@ PKG_MD5SUM:=e98267ebd5648a39f881d66797122fb6
 include $(INCLUDE_DIR)/package.mk
 
 PKG_INSTALL:=1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 define Package/libmpc
     TITLE:=libmpc
     SECTION:=libs
     CATEGORY:=Libraries
     URL:=http://www.multiprecision.org
-    DEPENDS:=+libgmp +mpfr
+    DEPENDS:=+libgmp +libmpfr
 endef
 
 

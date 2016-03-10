@@ -1,0 +1,28 @@
+From 428ee4e30ee45de0967ba1daed8808a2ce3148a6 Mon Sep 17 00:00:00 2001
+From: "ben@51degrees.com" <ben@51degrees.com>
+Date: Fri, 8 Jan 2016 13:48:37 +0000
+Subject: [PATCH 11/28] BUG/MINOR: 51d: Releases workset back to pool.
+
+The workset is now released correctly when a cache hit occurs.
+
+This should be backported to 1.6.
+(cherry picked from commit 6baceb9f64893f017b449b3d310153a526214bde)
+---
+ src/51d.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/51d.c b/src/51d.c
+index 9bba94e..0211dd7 100644
+--- a/src/51d.c
++++ b/src/51d.c
+@@ -384,6 +384,7 @@ static int _51d_fetch(const struct arg *args, struct sample *smp, const char *kw
+ 		lru = lru64_get(_51d_req_hash(args, ws),
+ 		                _51d_lru_tree, (void*)args, 0);
+ 		if (lru && lru->domain) {
++			fiftyoneDegreesWorksetPoolRelease(global._51degrees.pool, ws);
+ 			_51d_retrieve_cache_entry(smp, lru);
+ 			return 1;
+ 		}
+-- 
+2.4.10
+

@@ -1,0 +1,36 @@
+From d63db172aa92ea1895da27d374e5da1b76ce6546 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=83=C2=A9?= <cyril.bonte@free.fr>
+Date: Fri, 22 Jan 2016 19:40:28 +0100
+Subject: [PATCH 23/28] BUG/MEDIUM: sample: http_date() doesn't provide the
+ right day of the week
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Gregor KovaÄ reported that http_date() did not return the right day of the
+week. For example "Sat, 22 Jan 2016 17:43:38 GMT" instead of "Fri, 22 Jan
+2016 17:43:38 GMT". Indeed, gmtime() returns a 'struct tm' result, where
+tm_wday begins on Sunday, whereas the code assumed it began on Monday.
+
+This patch must be backported to haproxy 1.5 and 1.6.
+(cherry picked from commit f78d8967d791064c1148fe4efc07dee28e79d0db)
+---
+ src/proto_http.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 46b304f..f566874 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -11967,7 +11967,7 @@ int val_hdr(struct arg *arg, char **err_msg)
+  */
+ static int sample_conv_http_date(const struct arg *args, struct sample *smp, void *private)
+ {
+-	const char day[7][4] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
++	const char day[7][4] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+ 	const char mon[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+ 	struct chunk *temp;
+ 	struct tm *tm;
+-- 
+2.4.10
+

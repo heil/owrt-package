@@ -1,0 +1,45 @@
+From e0b34723827fea8290682e486194777268829cb1 Mon Sep 17 00:00:00 2001
+From: Pieter Baauw <piba.nl.dev@gmail.com>
+Date: Sat, 13 Feb 2016 16:27:35 +0100
+Subject: [PATCH 46/67] MINOR: mailers: use <CRLF> for all line endings
+
+Not doing so causes issues with Exchange2013 not processing the message
+body from the email. Specification seems to specify that as correct
+behavior : https://www.ietf.org/rfc/rfc2821.txt # 2.3.7 Lines
+
+ > SMTP client implementations MUST NOT transmit "bare" "CR" or "LF" characters.
+
+This patch should be backported to 1.6.
+
+Acked-by: Simon Horman <horms@verge.net.au>
+(cherry picked from commit 5e0964ed01a27566183f19a57ac2c3357b39acee)
+---
+ src/checks.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/checks.c b/src/checks.c
+index e165010..ad1ba7b 100644
+--- a/src/checks.c
++++ b/src/checks.c
+@@ -3245,12 +3245,12 @@ static int enqueue_one_email_alert(struct email_alertq *q, const char *msg)
+ 		struct tm tm;
+ 		char datestr[48];
+ 		const char * const strs[18] = {
+-			"From: ", p->email_alert.from, "\n",
+-			"To: ", p->email_alert.to, "\n",
+-			"Date: ", datestr, "\n",
+-			"Subject: [HAproxy Alert] ", msg, "\n",
+-			"\n",
+-			msg, "\n",
++			"From: ", p->email_alert.from, "\r\n",
++			"To: ", p->email_alert.to, "\r\n",
++			"Date: ", datestr, "\r\n",
++			"Subject: [HAproxy Alert] ", msg, "\r\n",
++			"\r\n",
++			msg, "\r\n",
+ 			"\r\n",
+ 			".\r\n",
+ 			NULL
+-- 
+2.4.10
+

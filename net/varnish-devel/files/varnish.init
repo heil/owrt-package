@@ -1,0 +1,97 @@
+#!/bin/bash /etc/rc.common
+# Copyright (C) 2009-2010 OpenWrt.org
+
+START=99
+STOP=80
+
+VARNISH_BIN="/usr/sbin/varnishd"
+VARNISH_PID="/var/run/varnish.pid"
+
+load_globals () {
+	local section="$1"
+	config_get nfiles "$section" nfiles
+	config_get memlock "$section" memlock
+	config_get corelimit daemon_corefiles_limit corelimit
+	# Open files (usually 1024, which is way too small for varnish)
+	ulimit -n ${nfiles:-131072}
+	# Varnish wants to lock shared memory log in memory.
+	ulimit -l ${memlock:-82000}
+	ulimit -c ${corelimit:-0}
+}
+
+start_service () {
+    local section="$1"
+
+    config_get listen_address "$section" listen_address
+    config_get listen_port "$section" listen_port
+    config_get listen_proxy_address "$section" listen_proxy_address
+    config_get listen_proxy_port "$section" listen_proxy_port
+    config_get admin_listen_address "$section" admin_listen_address
+    config_get admin_listen_port "$section" admin_listen_port
+    config_get secret_file "$section" secret_file
+    config_get min_threads "$section" min_threads
+    config_get max_threads "$section" max_threads
+    config_get secret "$section" secret
+    config_get thread_timeout "$section" thread_timeout
+    config_get storage_engine "$section" storage_engine
+    config_get storage_file "$section" storage_file
+    config_get storage_size "$section" storage_size
+    config_get vcl_conf "$section" vcl_conf
+    config_get ttl "$section" ttl
+    config_get reload_vcl "$section" reload_vcl
+    config_get pid "$section" pid
+    config_get thread_pools "$section" thread_pools
+
+	[ -z ${storage_engine} ] || [ ${storage_engine} = "malloc" ] &&
+		varnish_storage="malloc,${storage_size}"
+
+	[ -z ${storage_engine} ] || [ ${storage_engine} = "file" ] &&
+		varnish_storage="file,${storage_file},${storage_size}"
+
+	[ -z ${listen_address} ] && [ -z ${listen_proxy_port} ] &&
+		varnish_proxy="-a ${listen_proxy_address}:${listen_proxy_port},PROXY"
+
+        varnish_opts="-a ${listen_address}:${listen_port} ${varnish_proxy::} \
+        -f ${vcl_conf} \
+        -T ${admin_listen_address}:${admin_listen_port} \
+        -t ${ttl:-0} \
+        -w ${min_threads},${max_threads},${thread_timeout} \
+	   ${thread_pools:+-p thread_pools=$thread_pools} \
+        -u nobody -g nogroup \
+        -s ${varnish_storage}"
+
+		[ -z ${secret_file} ] ||
+			varnish_opts="$varnish_opts -S ${secret_file:-/etc/varnish.secret}"
+
+	[ -z ${storage_file} ] || {
+		x=${storage_file%/*}
+		[ -d "$x" ] || {
+			mkdir -p "$x"
+		}
+		chown -R nobody:nogroup "$x"
+	}
+	[ -d /var/varnish ] || mkdir /var/varnish
+
+	[ -z ${secret_file} ] || [ -s "${secret_file}" ] || dd if=/dev/urandom of=/"${secret_file}" bs=4096 count=1
+
+	#echo start-stop-daemon -S -x $VARNISH_BIN -- -P $VARNISH_PID $varnish_opts
+	start-stop-daemon -S -x $VARNISH_BIN -- -P $VARNISH_PID $varnish_opts
+}
+
+start() {
+
+    [ -x "$VARNISH_BIN" ] || return 1
+
+    config_load "varnish"
+    config_foreach load_globals global
+    config_foreach start_service varnish
+}
+
+boot() {
+	start
+}
+
+stop() {
+	service_stop ${VARNISH_BIN}
+	rm -f $VARNISH_PID
+}

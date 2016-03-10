@@ -1,0 +1,35 @@
+From f999c4eeca43524fc25e509142961a1fb06eaecd Mon Sep 17 00:00:00 2001
+From: Andreas Seltenreich <andreas.seltenreich@credativ.de>
+Date: Thu, 3 Mar 2016 20:08:35 +0100
+Subject: [PATCH 59/67] CLEANUP: pattern: Ignore unknown samples in
+ pat_match_ip().
+
+Ignore samples that are neither SMP_T_IPV4 nor SMP_T_IPV6 instead of
+matching with an uninitialized value in this case.
+
+This situation should not occur in the current codebase but triggers
+warnings in static code analysis tools.
+
+Found in haproxy 1.5.
+(cherry picked from commit f0653192e31d3baa95ead5501b5cda467ab15b6d)
+---
+ src/pattern.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/pattern.c b/src/pattern.c
+index 254c106..ba161a4 100644
+--- a/src/pattern.c
++++ b/src/pattern.c
+@@ -990,6 +990,9 @@ struct pattern *pat_match_ip(struct sample *smp, struct pattern_expr *expr, int
+ 			}
+ 			else
+ 				continue;
++		} else {
++		  /* impossible */
++		  continue;
+ 		}
+ 
+ 		/* Check if the input sample match the current pattern. */
+-- 
+2.4.10
+

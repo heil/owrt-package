@@ -1,0 +1,67 @@
+From aa0558aabdd33fd635db7923340c8671f524e0f7 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Tue, 2 Feb 2016 18:29:05 +0100
+Subject: [PATCH 34/67] BUG/MAJOR: http-reuse: fix risk of orphaned connections
+
+There is a bug in connect_server() : we use si_attach_conn() to offer
+the current session's connection to the session we're stealing the
+connection from. Unfortunately, si_attach_conn() uses the standard data
+connection operations while here we need to use the idle connection
+operations.
+
+This results in a situation where when the server's idle timeout strikes,
+the read0 is silently ignored, causes the response channel to be shut down
+for reads, and the connection remains attached. Next attempt to send a
+request when using this connection simply results in nothing being done
+because we try to send over an already closed connection. Worse, if the
+client aborts, then no timeout remains at all and the session waits
+forever and remains assigned to the server.
+
+A more-or-less easy way to reproduce this bug is to have two concurrent
+streams each connecting to a different server with "http-reuse aggressive",
+typically a cache farm using a URL hash :
+
+   stream1: GET /1 HTTP/1.1
+   stream2: GET /2 HTTP/1.1
+   stream1: GET /2 HTTP/1.1
+   wait for the server 1's connection to timeout
+   stream2: GET /1 HTTP/1.1
+
+The connection hangs here, and "show sess all" shows a closed connection
+with a SHUTR on the response channel.
+
+The fix is very simple though not optimal. It consists in calling
+si_idle_conn() again after attaching the connection. But in practise
+it should not be done like this. The real issue is that there's no way
+to cleanly attach a connection to a stream interface without changing
+the connection's operations. So the API clearly needs to be revisited
+to make such operations easier.
+
+Many thanks to Yves Lafon from W3C for providing lots of useful dumps
+and testing patches to help figure the root cause!
+
+This fix must be backported to 1.6.
+(cherry picked from commit 0aae4806a326ce15fd74607ebecc1fec327259f1)
+---
+ src/backend.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/backend.c b/src/backend.c
+index 6f0175c..4503d0e 100644
+--- a/src/backend.c
++++ b/src/backend.c
+@@ -1088,8 +1088,10 @@ int connect_server(struct stream *s)
+ 
+ 			if (srv_conn->owner) {
+ 				si_detach_endpoint(srv_conn->owner);
+-				if (old_conn && !(old_conn->flags & CO_FL_PRIVATE))
++				if (old_conn && !(old_conn->flags & CO_FL_PRIVATE)) {
+ 					si_attach_conn(srv_conn->owner, old_conn);
++					si_idle_conn(srv_conn->owner, NULL);
++				}
+ 			}
+ 			si_attach_conn(&s->si[1], srv_conn);
+ 			reuse = 1;
+-- 
+2.4.10
+

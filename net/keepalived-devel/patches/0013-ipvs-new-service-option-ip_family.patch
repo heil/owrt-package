@@ -1,0 +1,177 @@
+From 1ba7180bce855445175d9a3cc1a7644b6042aaa9 Mon Sep 17 00:00:00 2001
+From: Alexey Andriyanov <alan@al-an.info>
+Date: Fri, 14 Aug 2015 19:12:01 +0400
+Subject: [PATCH 13/17] ipvs: new service option "ip_family"
+
+This option explicitly specifies the address family of a
+fwmark IPVS service entry. Previously it was determined by
+the AF of the first real server. This logic is kept as a fallback
+when the "ip_family" option is missing.
+
+Also, now it is possible to create two different services
+for v4 and v6 with the same fwmark number.
+---
+ doc/man/man5/keepalived.conf.5  |  3 +++
+ keepalived/check/check_data.c   |  7 +++++++
+ keepalived/check/check_parser.c | 21 +++++++++++++++++++++
+ keepalived/check/ipvswrapper.c  | 19 +++++--------------
+ keepalived/include/check_data.h |  2 ++
+ 5 files changed, 38 insertions(+), 14 deletions(-)
+
+diff --git a/doc/man/man5/keepalived.conf.5 b/doc/man/man5/keepalived.conf.5
+index e9b6138..19707fc 100644
+--- a/doc/man/man5/keepalived.conf.5
++++ b/doc/man/man5/keepalived.conf.5
+@@ -358,6 +358,9 @@ A virtual_server can be a declaration of one of
+     # Script to launch when quorum is lost.
+     quorum_down <STRING>|<QUOTED-STRING>
+ 
++    # IP family for a fwmark service (optional)
++    ip_family inet|inet6
++
+ 
+     # setup realserver(s)
+ 
+diff --git a/keepalived/check/check_data.c b/keepalived/check/check_data.c
+index 5cc2ed8..2f73088 100644
+--- a/keepalived/check/check_data.c
++++ b/keepalived/check/check_data.c
+@@ -236,6 +236,7 @@ alloc_vs(char *ip, char *port)
+ 		new->vfwmark = atoi(port);
+ 	} else {
+ 		inet_stosockaddr(ip, port, &new->addr);
++		new->af = new->addr.ss_family;
+ 	}
+ 
+ 	new->delay_loop = KEEPALIVED_DEFAULT_DELAY;
+@@ -262,6 +263,9 @@ alloc_ssvr(char *ip, char *port)
+ 	vs->s_svr->weight = 1;
+ 	vs->s_svr->iweight = 1;
+ 	inet_stosockaddr(ip, port, &vs->s_svr->addr);
++
++	if (! vs->af)
++		vs->af = vs->s_svr->addr.ss_family;
+ }
+ 
+ /* Real server facility functions */
+@@ -315,6 +319,9 @@ alloc_rs(char *ip, char *port)
+ 	if (LIST_ISEMPTY(vs->rs))
+ 		vs->rs = alloc_list(free_rs, dump_rs);
+ 	list_add(vs->rs, new);
++
++	if (! vs->af)
++		vs->af = new->addr.ss_family;
+ }
+ 
+ /* data facility functions */
+diff --git a/keepalived/check/check_parser.c b/keepalived/check/check_parser.c
+index cc270ab..555def9 100644
+--- a/keepalived/check/check_parser.c
++++ b/keepalived/check/check_parser.c
+@@ -74,6 +74,24 @@ vs_handler(vector_t *strvec)
+ 	alloc_vs(vector_slot(strvec, 1), vector_slot(strvec, 2));
+ }
+ static void
++vs_end_handler(void)
++{
++	virtual_server_t *vs = LIST_TAIL_DATA(check_data->vs);
++	if (! vs->af)
++		vs->af = AF_INET;
++}
++static void
++ip_family_handler(vector_t *strvec)
++{
++	virtual_server_t *vs = LIST_TAIL_DATA(check_data->vs);
++	if (vs->af)
++		return;
++	if (0 == strcmp(vector_slot(strvec, 1), "inet"))
++		vs->af = AF_INET;
++	else if (0 == strcmp(vector_slot(strvec, 1), "inet6"))
++		vs->af = AF_INET6;
++}
++static void
+ delay_handler(vector_t *strvec)
+ {
+ 	virtual_server_t *vs = LIST_TAIL_DATA(check_data->vs);
+@@ -299,6 +317,7 @@ check_init_keywords(void)
+ 	/* Virtual server mapping */
+ 	install_keyword_root("virtual_server_group", &vsg_handler);
+ 	install_keyword_root("virtual_server", &vs_handler);
++	install_keyword("ip_family", &ip_family_handler);
+ 	install_keyword("delay_loop", &delay_handler);
+ 	install_keyword("lb_algo", &lbalgo_handler);
+ 	install_keyword("lvs_sched", &lbalgo_handler);
+@@ -334,6 +353,8 @@ check_init_keywords(void)
+ 	install_keyword("notify_up", &notify_up_handler);
+ 	install_keyword("notify_down", &notify_down_handler);
+ 
++	install_sublevel_end_handler(&vs_end_handler);
++
+ 	/* Checkers mapping */
+ 	install_checkers_keyword();
+ 	install_sublevel_end();
+diff --git a/keepalived/check/ipvswrapper.c b/keepalived/check/ipvswrapper.c
+index 3bda7d4..947f28b 100644
+--- a/keepalived/check/ipvswrapper.c
++++ b/keepalived/check/ipvswrapper.c
+@@ -559,13 +559,9 @@ ipvs_group_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 	srule->port = 0;
+ 	for (e = LIST_HEAD(l); e; ELEMENT_NEXT(e)) {
+ 		vsg_entry = ELEMENT_DATA(e);
+-		srule->af = AF_INET;
+-		/* Need to get address family from first real server */
+-		if (vs->rs && !LIST_ISEMPTY(vs->rs) &&
+-		    (((real_server_t *)ELEMENT_DATA(LIST_HEAD(vs->rs)))->addr.ss_family == AF_INET6)) {
+-			srule->af = AF_INET6;
++		srule->af = vs->af;
++		if (vs->af == AF_INET6)
+ 			srule->netmask = 128;
+-		}
+ 		srule->fwmark = vsg_entry->vfwmark;
+ 
+ 		/* Talk to the IPVS channel */
+@@ -667,18 +663,13 @@ ipvs_cmd(int cmd, virtual_server_t * vs, real_server_t * rs)
+ 	if (vs->vsgname) {
+ 		err = ipvs_group_cmd(cmd, vs, rs);
+ 	} else {
++		srule->af = vs->af;
+ 		if (vs->vfwmark) {
+-			srule->af = AF_INET;
+-			/* Need to get address family from first real server */
+-			if (vs->rs && !LIST_ISEMPTY(vs->rs) &&
+-			    (((real_server_t *)ELEMENT_DATA(LIST_HEAD(vs->rs)))->addr.ss_family == AF_INET6)) {
+-				srule->af = AF_INET6;
++			if (vs->af == AF_INET6)
+ 				srule->netmask = 128;
+-			}
+ 			srule->fwmark = vs->vfwmark;
+ 		} else {
+-			srule->af = vs->addr.ss_family;
+-			if (vs->addr.ss_family == AF_INET6)
++			if (vs->af == AF_INET6)
+ 				inet_sockaddrip6(&vs->addr, &srule->addr.in6);
+ 			else
+ 				srule->addr.ip = inet_sockaddrip4(&vs->addr);
+diff --git a/keepalived/include/check_data.h b/keepalived/include/check_data.h
+index 4a6d49f..7537abb 100644
+--- a/keepalived/include/check_data.h
++++ b/keepalived/include/check_data.h
+@@ -118,6 +118,7 @@ typedef struct _virtual_server {
+ 	struct sockaddr_storage		addr;
+ 	real_server_t			*s_svr;
+ 	uint32_t			vfwmark;
++	uint16_t			af;
+ 	uint16_t			service_type;
+ 	long				delay_loop;
+ 	int				ha_suspend;
+@@ -219,6 +220,7 @@ static inline int inaddr_equal(sa_family_t family, void *addr1, void *addr2)
+ 
+ #define VS_ISEQ(X,Y)	(sockstorage_equal(&(X)->addr,&(Y)->addr)			&&\
+ 			 (X)->vfwmark                 == (Y)->vfwmark			&&\
++			 (X)->af                      == (Y)->af                        &&\
+ 			 (X)->service_type            == (Y)->service_type		&&\
+ 			 (X)->loadbalancing_kind      == (Y)->loadbalancing_kind	&&\
+ 			 (X)->nat_mask                == (Y)->nat_mask			&&\
+-- 
+2.4.6
+

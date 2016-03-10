@@ -1,0 +1,34 @@
+From 81b394f75eab23044e0729dd9386bf860481ee3a Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Sat, 27 Feb 2016 07:58:50 +0100
+Subject: [PATCH 53/67] BUG/MINOR: systemd: ensure we don't miss signals
+
+There's a race condition in the systemd wrapper. People who restart it
+too fast report old processes remaining there. Here if the signal is
+caught before entering the "while" loop we block indefinitely on the
+wait() call. Let's check the caught signal before calling wait(). It
+doesn't completely close the race, a window still exists between the
+test of the flag and the call to wait(), but it's much smaller. A
+safer solution could involve pselect() to wait for the signal
+delivery.
+(cherry picked from commit 1ab5e8642a3537006db8eeed4a3b1bdca2458b33)
+---
+ src/haproxy-systemd-wrapper.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/haproxy-systemd-wrapper.c b/src/haproxy-systemd-wrapper.c
+index e588af9..10396ae 100644
+--- a/src/haproxy-systemd-wrapper.c
++++ b/src/haproxy-systemd-wrapper.c
+@@ -197,7 +197,7 @@ int main(int argc, char **argv)
+ 	}
+ 
+ 	status = -1;
+-	while (-1 != wait(&status) || errno == EINTR) {
++	while (caught_signal || wait(&status) != -1 || errno == EINTR) {
+ 		if (caught_signal == SIGUSR2 || caught_signal == SIGHUP) {
+ 			caught_signal = 0;
+ 			do_restart();
+-- 
+2.4.10
+

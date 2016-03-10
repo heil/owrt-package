@@ -87,6 +87,6 @@ boot() {
 }
 
 stop() {
-	service_kill ${VARNISH_BIN##*/} $VARNISH_PID
+	service_stop ${VARNISH_BIN}
 	rm -f $VARNISH_PID
 }

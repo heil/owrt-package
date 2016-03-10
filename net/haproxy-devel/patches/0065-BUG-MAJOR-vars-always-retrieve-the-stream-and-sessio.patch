@@ -1,0 +1,476 @@
+From 3ccfa5d592364d52bb8513d384d1a919e4d3f6e9 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Thu, 10 Mar 2016 16:33:04 +0100
+Subject: [PATCH 65/67] BUG/MAJOR: vars: always retrieve the stream and session
+ from the sample
+
+This is the continuation of previous patch called "BUG/MAJOR: samples:
+check smp->strm before using it".
+
+It happens that variables may have a session-wide scope, and that their
+session is retrieved by dereferencing the stream. But nothing prevents them
+from being used from a streamless context such as tcp-request connection,
+thus crashing the process. Example :
+
+    tcp-request connection accept if { src,set-var(sess.foo) -m found }
+
+In order to fix this, we have to always ensure that variable manipulation
+only happens via the sample, which contains the correct owner and context,
+and that we never use one from a different source. This results in quite a
+large change since a lot of functions are inderctly involved in the call
+chain, but the change is easy to follow.
+
+This fix must be backported to 1.6, and requires the last two patches.
+(cherry picked from commit 6204cd9f278c4e4733328a78dead6f3d0e69740f)
+---
+ include/proto/vars.h |  8 ++---
+ src/hlua.c           |  4 +--
+ src/proto_http.c     |  4 +--
+ src/sample.c         | 22 +++++++-------
+ src/stream.c         |  6 ++--
+ src/vars.c           | 83 ++++++++++++++++++++++++++++------------------------
+ 6 files changed, 66 insertions(+), 61 deletions(-)
+
+diff --git a/include/proto/vars.h b/include/proto/vars.h
+index 9299b9f..de0987d 100644
+--- a/include/proto/vars.h
++++ b/include/proto/vars.h
+@@ -4,11 +4,11 @@
+ #include <types/vars.h>
+ 
+ void vars_init(struct vars *vars, enum vars_scope scope);
+-void vars_prune(struct vars *vars, struct stream *strm);
++void vars_prune(struct vars *vars, struct session *sess, struct stream *strm);
+ void vars_prune_per_sess(struct vars *vars);
+-int vars_get_by_name(const char *name, size_t len, struct stream *strm, struct sample *smp);
+-void vars_set_by_name(const char *name, size_t len, struct stream *strm, struct sample *smp);
+-int vars_get_by_desc(const struct var_desc *var_desc, struct stream *strm, struct sample *smp);
++int vars_get_by_name(const char *name, size_t len, struct sample *smp);
++void vars_set_by_name(const char *name, size_t len, struct sample *smp);
++int vars_get_by_desc(const struct var_desc *var_desc, struct sample *smp);
+ int vars_check_arg(struct arg *arg, char **err);
+ 
+ #endif
+diff --git a/src/hlua.c b/src/hlua.c
+index 0bc6ae3..42f1a14 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -4535,7 +4535,7 @@ __LJMP static int hlua_set_var(lua_State *L)
+ 
+ 	/* Store the sample in a variable. */
+ 	smp_set_owner(&smp, htxn->p, htxn->s->sess, htxn->s, htxn->dir & SMP_OPT_DIR);
+-	vars_set_by_name(name, len, htxn->s, &smp);
++	vars_set_by_name(name, len, &smp);
+ 	return 0;
+ }
+ 
+@@ -4555,7 +4555,7 @@ __LJMP static int hlua_get_var(lua_State *L)
+ 	name = MAY_LJMP(luaL_checklstring(L, 2, &len));
+ 
+ 	smp_set_owner(&smp, htxn->p, htxn->s->sess, htxn->s, htxn->dir & SMP_OPT_DIR);
+-	if (!vars_get_by_name(name, len, htxn->s, &smp)) {
++	if (!vars_get_by_name(name, len, &smp)) {
+ 		lua_pushnil(L);
+ 		return 1;
+ 	}
+diff --git a/src/proto_http.c b/src/proto_http.c
+index 2c8b5f5..389d836 100644
+--- a/src/proto_http.c
++++ b/src/proto_http.c
+@@ -8962,8 +8962,8 @@ void http_end_txn(struct stream *s)
+ 		memset(s->res_cap, 0, fe->nb_rsp_cap * sizeof(void *));
+ 	}
+ 
+-	vars_prune(&s->vars_txn, s);
+-	vars_prune(&s->vars_reqres, s);
++	vars_prune(&s->vars_txn, s->sess, s);
++	vars_prune(&s->vars_reqres, s->sess, s);
+ }
+ 
+ /* to be used at the end of a transaction to prepare a new one */
+diff --git a/src/sample.c b/src/sample.c
+index 6dc62fb..fc42610 100644
+--- a/src/sample.c
++++ b/src/sample.c
+@@ -2057,14 +2057,14 @@ static int check_operator(struct arg *args, struct sample_conv *conv,
+ 	return 1;
+ }
+ 
+-/* This fucntion returns a sample struct filled with a arg content.
++/* This function returns a sample struct filled with an arg content.
+  * If the arg contain an integer, the integer is returned in the
+  * sample. If the arg contains a variable descriptor, it returns the
+  * variable value.
+  *
+  * This function returns 0 if an error occurs, otherwise it returns 1.
+  */
+-static inline int sample_conv_var2smp(const struct arg *arg, struct stream *strm, struct sample *smp)
++static inline int sample_conv_var2smp(const struct arg *arg, struct sample *smp)
+ {
+ 	switch (arg->type) {
+ 	case ARGT_SINT:
+@@ -2072,7 +2072,7 @@ static inline int sample_conv_var2smp(const struct arg *arg, struct stream *strm
+ 		smp->data.u.sint = arg->data.sint;
+ 		return 1;
+ 	case ARGT_VAR:
+-		if (!vars_get_by_desc(&arg->data.var, strm, smp))
++		if (!vars_get_by_desc(&arg->data.var, smp))
+ 			return 0;
+ 		if (!sample_casts[smp->data.type][SMP_T_SINT])
+ 			return 0;
+@@ -2101,7 +2101,7 @@ static int sample_conv_binary_and(const struct arg *arg_p, struct sample *smp, v
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 	smp->data.u.sint &= tmp.data.u.sint;
+ 	return 1;
+@@ -2115,7 +2115,7 @@ static int sample_conv_binary_or(const struct arg *arg_p, struct sample *smp, vo
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 	smp->data.u.sint |= tmp.data.u.sint;
+ 	return 1;
+@@ -2129,7 +2129,7 @@ static int sample_conv_binary_xor(const struct arg *arg_p, struct sample *smp, v
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 	smp->data.u.sint ^= tmp.data.u.sint;
+ 	return 1;
+@@ -2169,7 +2169,7 @@ static int sample_conv_arith_add(const struct arg *arg_p, struct sample *smp, vo
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 	smp->data.u.sint = arith_add(smp->data.u.sint, tmp.data.u.sint);
+ 	return 1;
+@@ -2184,7 +2184,7 @@ static int sample_conv_arith_sub(const struct arg *arg_p,
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 
+ 	/* We cannot represent -LLONG_MIN because abs(LLONG_MIN) is greater
+@@ -2217,7 +2217,7 @@ static int sample_conv_arith_mul(const struct arg *arg_p,
+ 	long long int c;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 
+ 	/* prevent divide by 0 during the check */
+@@ -2261,7 +2261,7 @@ static int sample_conv_arith_div(const struct arg *arg_p,
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 
+ 	if (tmp.data.u.sint) {
+@@ -2289,7 +2289,7 @@ static int sample_conv_arith_mod(const struct arg *arg_p,
+ 	struct sample tmp;
+ 
+ 	smp_set_owner(&tmp, smp->px, smp->sess, smp->strm, smp->opt);
+-	if (!sample_conv_var2smp(arg_p, smp->strm, &tmp))
++	if (!sample_conv_var2smp(arg_p, &tmp))
+ 		return 0;
+ 
+ 	if (tmp.data.u.sint) {
+diff --git a/src/stream.c b/src/stream.c
+index db10acf..f5bf394 100644
+--- a/src/stream.c
++++ b/src/stream.c
+@@ -312,8 +312,8 @@ static void stream_free(struct stream *s)
+ 	}
+ 
+ 	/* Cleanup all variable contexts. */
+-	vars_prune(&s->vars_txn, s);
+-	vars_prune(&s->vars_reqres, s);
++	vars_prune(&s->vars_txn, s->sess, s);
++	vars_prune(&s->vars_reqres, s->sess, s);
+ 
+ 	stream_store_counters(s);
+ 
+@@ -2149,7 +2149,7 @@ struct task *process_stream(struct task *t)
+ 
+ 		/* prune the request variables and swap to the response variables. */
+ 		if (s->vars_reqres.scope != SCOPE_RES) {
+-			vars_prune(&s->vars_reqres, s);
++			vars_prune(&s->vars_reqres, s->sess, s);
+ 			vars_init(&s->vars_reqres, SCOPE_RES);
+ 		}
+ 
+diff --git a/src/vars.c b/src/vars.c
+index a20dc8b..d79f317 100644
+--- a/src/vars.c
++++ b/src/vars.c
+@@ -33,16 +33,18 @@ static unsigned int var_reqres_limit = 0;
+ /* This function adds or remove memory size from the accounting. The inner
+  * pointers may be null when setting the outer ones only.
+  */
+-static void var_accounting_diff(struct vars *vars, struct vars *per_sess, struct vars *per_strm, struct vars *per_chn, int size)
++static void var_accounting_diff(struct vars *vars, struct session *sess, struct stream *strm, int size)
+ {
+ 	switch (vars->scope) {
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+-		per_chn->size += size;
++		strm->vars_reqres.size += size;
++		/* fall through */
+ 	case SCOPE_TXN:
+-		per_strm->size += size;
++		strm->vars_txn.size += size;
++		/* fall through */
+ 	case SCOPE_SESS:
+-		per_sess->size += size;
++		sess->vars.size += size;
+ 		var_global_size += size;
+ 	}
+ }
+@@ -50,32 +52,36 @@ static void var_accounting_diff(struct vars *vars, struct vars *per_sess, struct
+ /* This function returns 1 if the <size> is available in the var
+  * pool <vars>, otherwise returns 0. If the space is avalaible,
+  * the size is reserved. The inner pointers may be null when setting
+- * the outer ones only.
++ * the outer ones only. The accounting uses either <sess> or <strm>
++ * depending on the scope. <strm> may be NULL when no stream is known
++ * and only the session exists (eg: tcp-request connection).
+  */
+-static int var_accounting_add(struct vars *vars, struct vars *per_sess, struct vars *per_strm, struct vars *per_chn, int size)
++static int var_accounting_add(struct vars *vars, struct session *sess, struct stream *strm, int size)
+ {
+ 	switch (vars->scope) {
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+-		if (var_reqres_limit && per_chn->size + size > var_reqres_limit)
++		if (var_reqres_limit && strm->vars_reqres.size + size > var_reqres_limit)
+ 			return 0;
++		/* fall through */
+ 	case SCOPE_TXN:
+-		if (var_txn_limit && per_strm->size + size > var_txn_limit)
++		if (var_txn_limit && strm->vars_txn.size + size > var_txn_limit)
+ 			return 0;
++		/* fall through */
+ 	case SCOPE_SESS:
+-		if (var_sess_limit && per_sess->size + size > var_sess_limit)
++		if (var_sess_limit && sess->vars.size + size > var_sess_limit)
+ 			return 0;
+ 		if (var_global_limit && var_global_size + size > var_global_limit)
+ 			return 0;
+ 	}
+-	var_accounting_diff(vars, per_sess, per_strm, per_chn, size);
++	var_accounting_diff(vars, sess, strm, size);
+ 	return 1;
+ }
+ 
+ /* This function free all the memory used by all the varaibles
+  * in the list.
+  */
+-void vars_prune(struct vars *vars, struct stream *strm)
++void vars_prune(struct vars *vars, struct session *sess, struct stream *strm)
+ {
+ 	struct var *var, *tmp;
+ 	unsigned int size = 0;
+@@ -94,7 +100,7 @@ void vars_prune(struct vars *vars, struct stream *strm)
+ 		pool_free2(var_pool, var);
+ 		size += sizeof(struct var);
+ 	}
+-	var_accounting_diff(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, -size);
++	var_accounting_diff(vars, sess, strm, -size);
+ }
+ 
+ /* This function frees all the memory used by all the session variables in the
+@@ -234,7 +240,7 @@ static int smp_fetch_var(const struct arg *args, struct sample *smp, const char
+ 
+ 	/* Check the availibity of the variable. */
+ 	switch (var_desc->scope) {
+-	case SCOPE_SESS: vars = &smp->strm->sess->vars;  break;
++	case SCOPE_SESS: vars = &smp->sess->vars;  break;
+ 	case SCOPE_TXN:  vars = &smp->strm->vars_txn;    break;
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+@@ -259,7 +265,7 @@ static int smp_fetch_var(const struct arg *args, struct sample *smp, const char
+  * create it. The function stores a copy of smp> if the variable.
+  * It returns 0 if fails, else returns 1.
+  */
+-static int sample_store(struct vars *vars, const char *name, struct stream *strm, struct sample *smp)
++static int sample_store(struct vars *vars, const char *name, struct sample *smp)
+ {
+ 	struct var *var;
+ 
+@@ -271,16 +277,16 @@ static int sample_store(struct vars *vars, const char *name, struct stream *strm
+ 		if (var->data.type == SMP_T_STR ||
+ 		    var->data.type == SMP_T_BIN) {
+ 			free(var->data.u.str.str);
+-			var_accounting_diff(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, -var->data.u.str.len);
++			var_accounting_diff(vars, smp->sess, smp->strm, -var->data.u.str.len);
+ 		}
+ 		else if (var->data.type == SMP_T_METH) {
+ 			free(var->data.u.meth.str.str);
+-			var_accounting_diff(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, -var->data.u.meth.str.len);
++			var_accounting_diff(vars, smp->sess, smp->strm, -var->data.u.meth.str.len);
+ 		}
+ 	} else {
+ 
+ 		/* Check memory avalaible. */
+-		if (!var_accounting_add(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, sizeof(struct var)))
++		if (!var_accounting_add(vars, smp->sess, smp->strm, sizeof(struct var)))
+ 			return 0;
+ 
+ 		/* Create new entry. */
+@@ -308,13 +314,13 @@ static int sample_store(struct vars *vars, const char *name, struct stream *strm
+ 		break;
+ 	case SMP_T_STR:
+ 	case SMP_T_BIN:
+-		if (!var_accounting_add(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, smp->data.u.str.len)) {
++		if (!var_accounting_add(vars, smp->sess, smp->strm, smp->data.u.str.len)) {
+ 			var->data.type = SMP_T_BOOL; /* This type doesn't use additional memory. */
+ 			return 0;
+ 		}
+ 		var->data.u.str.str = malloc(smp->data.u.str.len);
+ 		if (!var->data.u.str.str) {
+-			var_accounting_diff(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, -smp->data.u.str.len);
++			var_accounting_diff(vars, smp->sess, smp->strm, -smp->data.u.str.len);
+ 			var->data.type = SMP_T_BOOL; /* This type doesn't use additional memory. */
+ 			return 0;
+ 		}
+@@ -322,13 +328,13 @@ static int sample_store(struct vars *vars, const char *name, struct stream *strm
+ 		memcpy(var->data.u.str.str, smp->data.u.str.str, var->data.u.str.len);
+ 		break;
+ 	case SMP_T_METH:
+-		if (!var_accounting_add(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, smp->data.u.meth.str.len)) {
++		if (!var_accounting_add(vars, smp->sess, smp->strm, smp->data.u.meth.str.len)) {
+ 			var->data.type = SMP_T_BOOL; /* This type doesn't use additional memory. */
+ 			return 0;
+ 		}
+ 		var->data.u.meth.str.str = malloc(smp->data.u.meth.str.len);
+ 		if (!var->data.u.meth.str.str) {
+-			var_accounting_diff(vars, &strm->sess->vars, &strm->vars_txn, &strm->vars_reqres, -smp->data.u.meth.str.len);
++			var_accounting_diff(vars, smp->sess, smp->strm, -smp->data.u.meth.str.len);
+ 			var->data.type = SMP_T_BOOL; /* This type doesn't use additional memory. */
+ 			return 0;
+ 		}
+@@ -342,27 +348,26 @@ static int sample_store(struct vars *vars, const char *name, struct stream *strm
+ }
+ 
+ /* Returns 0 if fails, else returns 1. */
+-static inline int sample_store_stream(const char *name, enum vars_scope scope,
+-                                      struct stream *strm, struct sample *smp)
++static inline int sample_store_stream(const char *name, enum vars_scope scope, struct sample *smp)
+ {
+ 	struct vars *vars;
+ 
+ 	switch (scope) {
+-	case SCOPE_SESS: vars = &strm->sess->vars;  break;
+-	case SCOPE_TXN:  vars = &strm->vars_txn;    break;
++	case SCOPE_SESS: vars = &smp->sess->vars;  break;
++	case SCOPE_TXN:  vars = &smp->strm->vars_txn;    break;
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+-	default:         vars = &strm->vars_reqres; break;
++	default:         vars = &smp->strm->vars_reqres; break;
+ 	}
+ 	if (vars->scope != scope)
+ 		return 0;
+-	return sample_store(vars, name, strm, smp);
++	return sample_store(vars, name, smp);
+ }
+ 
+ /* Returns 0 if fails, else returns 1. */
+ static int smp_conv_store(const struct arg *args, struct sample *smp, void *private)
+ {
+-	return sample_store_stream(args[0].data.var.name, args[1].data.var.scope, smp->strm, smp);
++	return sample_store_stream(args[0].data.var.name, args[1].data.var.scope, smp);
+ }
+ 
+ /* This fucntions check an argument entry and fill it with a variable
+@@ -395,7 +400,7 @@ int vars_check_arg(struct arg *arg, char **err)
+ /* This function store a sample in a variable.
+  * In error case, it fails silently.
+  */
+-void vars_set_by_name(const char *name, size_t len, struct stream *strm, struct sample *smp)
++void vars_set_by_name(const char *name, size_t len, struct sample *smp)
+ {
+ 	enum vars_scope scope;
+ 
+@@ -404,14 +409,14 @@ void vars_set_by_name(const char *name, size_t len, struct stream *strm, struct
+ 	if (!name)
+ 		return;
+ 
+-	sample_store_stream(name, scope, strm, smp);
++	sample_store_stream(name, scope, smp);
+ }
+ 
+ /* this function fills a sample with the
+  * variable content. Returns 1 if the sample
+  * is filled, otherwise it returns 0.
+  */
+-int vars_get_by_name(const char *name, size_t len, struct stream *strm, struct sample *smp)
++int vars_get_by_name(const char *name, size_t len, struct sample *smp)
+ {
+ 	struct vars *vars;
+ 	struct var *var;
+@@ -424,11 +429,11 @@ int vars_get_by_name(const char *name, size_t len, struct stream *strm, struct s
+ 
+ 	/* Select "vars" pool according with the scope. */
+ 	switch (scope) {
+-	case SCOPE_SESS: vars = &strm->sess->vars;  break;
+-	case SCOPE_TXN:  vars = &strm->vars_txn;    break;
++	case SCOPE_SESS: vars = &smp->sess->vars;  break;
++	case SCOPE_TXN:  vars = &smp->strm->vars_txn;    break;
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+-	default:         vars = &strm->vars_reqres; break;
++	default:         vars = &smp->strm->vars_reqres; break;
+ 	}
+ 
+ 	/* Check if the scope is avalaible a this point of processing. */
+@@ -450,18 +455,18 @@ int vars_get_by_name(const char *name, size_t len, struct stream *strm, struct s
+  * content of the varaible described by <var_desc>. Returns 1
+  * if the sample is filled, otherwise it returns 0.
+  */
+-int vars_get_by_desc(const struct var_desc *var_desc, struct stream *strm, struct sample *smp)
++int vars_get_by_desc(const struct var_desc *var_desc, struct sample *smp)
+ {
+ 	struct vars *vars;
+ 	struct var *var;
+ 
+ 	/* Select "vars" pool according with the scope. */
+ 	switch (var_desc->scope) {
+-	case SCOPE_SESS: vars = &strm->sess->vars;  break;
+-	case SCOPE_TXN:  vars = &strm->vars_txn;    break;
++	case SCOPE_SESS: vars = &smp->sess->vars;  break;
++	case SCOPE_TXN:  vars = &smp->strm->vars_txn;    break;
+ 	case SCOPE_REQ:
+ 	case SCOPE_RES:
+-	default:         vars = &strm->vars_reqres; break;
++	default:         vars = &smp->strm->vars_reqres; break;
+ 	}
+ 
+ 	/* Check if the scope is avalaible a this point of processing. */
+@@ -505,7 +510,7 @@ static enum act_return action_store(struct act_rule *rule, struct proxy *px,
+ 		return ACT_RET_CONT;
+ 
+ 	/* Store the sample, and ignore errors. */
+-	sample_store_stream(rule->arg.vars.name, rule->arg.vars.scope, s, &smp);
++	sample_store_stream(rule->arg.vars.name, rule->arg.vars.scope, &smp);
+ 	return ACT_RET_CONT;
+ }
+ 
+-- 
+2.4.10
+

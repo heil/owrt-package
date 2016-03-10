@@ -1,0 +1,66 @@
+From 919919977033a4573a708d6be6271a6fb1e34b7e Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Thu, 7 Jan 2016 02:28:50 +0100
+Subject: [PATCH 07/28] MINOR: lru: new function to delete <nb> least recently
+ used keys
+
+Introduction of a new function in the LRU cache source file.
+Purpose of this function is to be used to delete a number of entries in
+the cache. 'number' is defined by the caller and the key removed are
+taken at the tail of the tree
+(cherry picked from commit 22c4ed69372d677061fb1f400311c57a8d4ce2cf)
+
+[wt: needed in 1.6 for the few subsequent 51d fixes]
+---
+ include/import/lru.h |  1 +
+ src/lru.c            | 25 +++++++++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/include/import/lru.h b/include/import/lru.h
+index 220cb17..7427fd6 100644
+--- a/include/import/lru.h
++++ b/include/import/lru.h
+@@ -72,3 +72,4 @@ struct lru64 *lru64_get(unsigned long long key, struct lru64_head *lru, void *do
+ void lru64_commit(struct lru64 *elem, void *data, void *domain, unsigned long long revision, void (*free)(void *));
+ struct lru64_head *lru64_new(int size);
+ int lru64_destroy(struct lru64_head *lru);
++void lru64_kill_oldest(struct lru64_head *lru, unsigned long int nb);
+diff --git a/src/lru.c b/src/lru.c
+index 719fe07..84442a4 100644
+--- a/src/lru.c
++++ b/src/lru.c
+@@ -199,6 +199,31 @@ int lru64_destroy(struct lru64_head *lru)
+ 	return 0;
+ }
+ 
++/* kill the <nb> least used entries from the <lru> cache */
++void lru64_kill_oldest(struct lru64_head *lru, unsigned long int nb)
++{
++	struct lru64 *elem, *next;
++
++	for (elem = container_of(lru->list.p, typeof(*elem), lru);
++	     nb && (&elem->lru != &lru->list);
++	     elem = next) {
++		next = container_of(elem->lru.p, typeof(*next), lru);
++		if (!elem->domain)
++			continue; /* locked entry */
++
++		LIST_DEL(&elem->lru);
++		eb64_delete(&elem->node);
++		if (elem->data && elem->free)
++			elem->free(elem->data);
++		if (!lru->spare)
++			lru->spare = elem;
++		else
++			free(elem);
++		lru->cache_usage--;
++		nb--;
++	}
++}
++
+ /* The code below is just for validation and performance testing. It's an
+  * example of a function taking some time to return results that could be
+  * cached.
+-- 
+2.4.10
+

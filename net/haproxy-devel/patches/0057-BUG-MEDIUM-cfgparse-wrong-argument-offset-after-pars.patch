@@ -1,0 +1,62 @@
+From 222efbb9f8b281339365c35e44df07e48ead6949 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cyril=20Bont=C3=A9?= <cyril.bonte@free.fr>
+Date: Mon, 7 Mar 2016 22:13:22 +0100
+Subject: [PATCH 57/67] BUG/MEDIUM: cfgparse: wrong argument offset after
+ parsing server "sni" keyword
+
+Owen Marshall reported an issue depending on the server keywords order in the
+configuration.
+
+Working line :
+  server dev1 <ip>:<port> check inter 5000 ssl verify none sni req.hdr(Host)
+
+Non working line :
+  server dev1 <ip>:<port> check inter 5000 ssl sni req.hdr(Host) verify none
+
+Indeed, both parse_server() and srv_parse_sni() modified the current argument
+offset at the same time. To fix the issue, srv_parse_sni() can work on a local
+copy ot the offset, leaving parse_server() responsible of the actual value.
+
+This fix must be backported to 1.6.
+(cherry picked from commit 23d19d669b263ef3878eb7c03a26c6c1dc45ec9e)
+---
+ src/ssl_sock.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/ssl_sock.c b/src/ssl_sock.c
+index 579bc46..ce86283 100644
+--- a/src/ssl_sock.c
++++ b/src/ssl_sock.c
+@@ -5031,6 +5031,7 @@ static int srv_parse_sni(char **args, int *cur_arg, struct proxy *px, struct ser
+ 	memprintf(err, "'%s' : the current SSL library doesn't support the SNI TLS extension", args[*cur_arg]);
+ 	return ERR_ALERT | ERR_FATAL;
+ #else
++	int idx;
+ 	struct sample_expr *expr;
+ 
+ 	if (!*args[*cur_arg + 1]) {
+@@ -5038,10 +5039,10 @@ static int srv_parse_sni(char **args, int *cur_arg, struct proxy *px, struct ser
+ 		return ERR_ALERT | ERR_FATAL;
+ 	}
+ 
+-	(*cur_arg)++;
++	idx = (*cur_arg) + 1;
+ 	proxy->conf.args.ctx = ARGC_SRV;
+ 
+-	expr = sample_parse_expr((char **)args, cur_arg, px->conf.file, px->conf.line, err, &proxy->conf.args);
++	expr = sample_parse_expr((char **)args, &idx, px->conf.file, px->conf.line, err, &proxy->conf.args);
+ 	if (!expr) {
+ 		memprintf(err, "error detected while parsing sni expression : %s", *err);
+ 		return ERR_ALERT | ERR_FATAL;
+@@ -5050,7 +5051,7 @@ static int srv_parse_sni(char **args, int *cur_arg, struct proxy *px, struct ser
+ 	if (!(expr->fetch->val & SMP_VAL_BE_SRV_CON)) {
+ 		memprintf(err, "error detected while parsing sni expression : "
+ 		          " fetch method '%s' extracts information from '%s', none of which is available here.\n",
+-		          args[*cur_arg-1], sample_src_names(expr->fetch->use));
++		          args[idx-1], sample_src_names(expr->fetch->use));
+ 		return ERR_ALERT | ERR_FATAL;
+ 	}
+ 
+-- 
+2.4.10
+

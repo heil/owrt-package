@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nginx
-PKG_VERSION:=1.4.7
+PKG_VERSION:=1.6.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://nginx.org/download/
-PKG_MD5SUM:=aee151d298dcbfeb88b3f7dd3e7a4d17
+PKG_MD5SUM:=d1b55031ae6e4bce37f8776b94d8b930
 
 PKG_BUILD_PARALLEL:=1
 PKG_INSTALL:=1
@@ -170,9 +170,6 @@ endif
 ifneq ($(CONFIG_NGINX_HTTP_UPSTREAM_IP_HASH),y)
   ADDITIONAL_MODULES += --without-http_upstream_ip_hash_module
 endif
-ifeq ($(CONFIG_NGINX_PROXYPROTOCOL),y)
-  ADDITIONAL_MODULES += --with-proxy-protocol
-endif
 ifeq ($(CONFIG_NGINX_SYSLOG),y)
   ADDITIONAL_MODULES += --add-module=$(PKG_BUILD_DIR)/nginx-syslog
 endif
@@ -281,7 +278,7 @@ define Package/nginx-syslog/description
 endef
 
 define Download/nginx-naxsi
-	VERSION:=34dcb45fe4fdcb144c5258d83672f8e1e1c8db2e
+	VERSION:=0d53a64ed856e694fcb4038748c8cf6d5551a603
 	SUBDIR:=nginx-naxsi
 	FILE:=nginx-naxsi-module-$(PKG_VERSION)-$$(VERSION).tar.gz
 	URL:=https://github.com/nbs-system/naxsi.git

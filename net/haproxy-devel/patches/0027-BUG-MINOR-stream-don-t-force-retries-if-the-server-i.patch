@@ -1,0 +1,36 @@
+From d005682283c369c8170edb8ecb7e67450d9dcbd6 Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 13 Jan 2016 07:58:44 +0100
+Subject: [PATCH 27/28] BUG/MINOR: stream: don't force retries if the server is
+ DOWN
+
+Arkadiy Kulev noticed that if a server is marked down while a connection
+is being trying to establish, we still insist on performing retries on
+the same server, which is absurd. Better perform the redispatch if we
+already know the server is down. Because of this, it's likely that the
+observe-l4 and sudden-death mechanisms are not optimal an cannot help
+much the connection which was used to detect the problem.
+
+The fix should be backported to 1.6 and 1.5 at least.
+(cherry picked from commit 49008c157e762c7ed31f9c88ad54b6d6c42fbd77)
+---
+ src/stream.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/stream.c b/src/stream.c
+index 0d18f9c..fe48be4 100644
+--- a/src/stream.c
++++ b/src/stream.c
+@@ -667,7 +667,8 @@ static int sess_update_st_cer(struct stream *s)
+ 	 */
+ 	if (objt_server(s->target) &&
+ 	    (s->be->options & PR_O_REDISP) && !(s->flags & SF_FORCE_PRST) &&
+-	    ((((s->be->redispatch_after > 0) &&
++	    ((__objt_server(s->target)->state < SRV_ST_RUNNING) ||
++	     (((s->be->redispatch_after > 0) &&
+ 	       ((s->be->conn_retries - si->conn_retries) %
+ 	        s->be->redispatch_after == 0)) ||
+ 	      ((s->be->redispatch_after < 0) &&
+-- 
+2.4.10
+

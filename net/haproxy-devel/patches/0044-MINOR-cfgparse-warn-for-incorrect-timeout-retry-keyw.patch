@@ -1,0 +1,44 @@
+From 09b533164c8a0b807f20735a91473885e2cab1c7 Mon Sep 17 00:00:00 2001
+From: PiBa-NL <pba_2k3@yahoo.com>
+Date: Tue, 16 Feb 2016 21:33:02 +0100
+Subject: [PATCH 44/67] MINOR: cfgparse: warn for incorrect 'timeout retry'
+ keyword spelling in resolvers
+
+If for example it was written as 'timeout retri 1s' or 'timeout wrong 1s'
+this would be used for the retry timeout value. Resolvers section only
+timeout setting currently is 'retry', others are still parsed as before
+this patch to not break existing configurations.
+
+This should only be applied as a backport to 1.6, for 1.7 a different
+patch is provided to abort if a wrong keyword is used (commit 7a91a0e1).
+---
+ src/cfgparse.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index 693e9f3..3e37eb4 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -2356,13 +2356,17 @@ int cfg_parse_resolvers(const char *file, int linenum, char **args, int kwm)
+ 	else if (strcmp(args[0], "timeout") == 0) {
+ 		const char *res;
+ 		unsigned int timeout_retry;
+-
+-		if (!*args[2]) {
++		if (!*args[1] || !*args[2]) {
+ 			Alert("parsing [%s:%d] : '%s' expects 'retry' and <time> as arguments.\n",
+ 				file, linenum, args[0]);
+ 			err_code |= ERR_ALERT | ERR_FATAL;
+ 			goto out;
+ 		}
++		else if (strcmp(args[1], "retry") != 0) {
++			Warning("parsing [%s:%d] : '%s' expects 'retry' and <time> as arguments, got '%s'.\n",
++				file, linenum, args[0], args[1]);
++			err_code |= ERR_WARN;
++		}
+ 		res = parse_time_err(args[2], &timeout_retry, TIME_UNIT_MS);
+ 		if (res) {
+ 			Alert("parsing [%s:%d]: unexpected character '%c' in argument to <%s>.\n",
+-- 
+2.4.10
+

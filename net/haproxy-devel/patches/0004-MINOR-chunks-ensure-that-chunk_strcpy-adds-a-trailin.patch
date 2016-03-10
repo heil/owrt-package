@@ -1,0 +1,48 @@
+From 88cb10e3f13c3278e3d1fb84c13dd5171ebe0d2c Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Mon, 4 Jan 2016 20:21:33 +0100
+Subject: [PATCH 04/28] MINOR: chunks: ensure that chunk_strcpy() adds a
+ trailing zero
+
+Since thus function bears the name of a well-known string function, it
+must at least promise compatible semantics. Here it means always adding
+the trailing zero so that anyone willing to use chunk->str as a regular
+string can do it. Of course the zero is not counted in the chunk's length.
+(cherry picked from commit 0b6044fa241386d21994e496bc9e29851b5863dc)
+
+[wt: not strictly needed but backported to ensure that any future patch
+ relying on it works as expected]
+---
+ include/common/chunk.h | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/include/common/chunk.h b/include/common/chunk.h
+index 35e47fb..00f0489 100644
+--- a/include/common/chunk.h
++++ b/include/common/chunk.h
+@@ -84,17 +84,20 @@ static inline void chunk_initstr(struct chunk *chk, char *str)
+ 	chk->size = 0;			/* mark it read-only */
+ }
+ 
++/* copies str into <chk> followed by a trailing zero. Returns 0 in
++ * case of failure.
++ */
+ static inline int chunk_strcpy(struct chunk *chk, const char *str)
+ {
+ 	size_t len;
+ 
+ 	len = strlen(str);
+ 
+-	if (unlikely(len > chk->size))
++	if (unlikely(len >= chk->size))
+ 		return 0;
+ 
+ 	chk->len  = len;
+-	memcpy(chk->str, str, len);
++	memcpy(chk->str, str, len + 1);
+ 
+ 	return 1;
+ }
+-- 
+2.4.10
+
