@@ -1,0 +1,49 @@
+From 52cd3f2f5dee810386a80c7afeefc0361d2a7c2f Mon Sep 17 00:00:00 2001
+From: Dragan Dosen <ddosen@haproxy.com>
+Date: Wed, 4 Nov 2015 23:03:26 +0100
+Subject: [PATCH 02/19] BUG/MINOR: server: check return value of fgets() in
+ apply_server_state()
+
+fgets() can return NULL on error or when EOF occurs. This patch adds a
+check of fgets() return value and displays a warning if the first line of
+the server state file can not be read. Additionally, we make sure to close
+the previously opened file descriptor.
+(cherry picked from commit cf4fb036a47042c86c9e3138ef01a6136fd5db87)
+---
+ src/server.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/server.c b/src/server.c
+index c92623d..6f09225 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -2319,12 +2319,16 @@ void apply_server_state(void)
+ 		version = 0;
+ 
+ 		/* first character of first line of the file must contain the version of the export */
+-		fgets(mybuf, SRV_STATE_LINE_MAXLEN, f);
++		if (fgets(mybuf, SRV_STATE_LINE_MAXLEN, f) == NULL) {
++			Warning("Can't read first line of the server state file '%s'\n", filepath);
++			goto fileclose;
++		}
++
+ 		cur = mybuf;
+ 		version = atoi(cur);
+ 		if ((version < SRV_STATE_FILE_VERSION_MIN) ||
+ 		    (version > SRV_STATE_FILE_VERSION_MAX))
+-			continue;
++			goto fileclose;
+ 
+ 		while (fgets(mybuf, SRV_STATE_LINE_MAXLEN, f)) {
+ 			int bk_f_forced_id = 0;
+@@ -2451,6 +2455,7 @@ void apply_server_state(void)
+ 			/* now we can proceed with server's state update */
+ 			srv_update_state(srv, version, srv_params);
+ 		}
++fileclose:
+ 		fclose(f);
+ 	}
+ }
+-- 
+2.4.10
+

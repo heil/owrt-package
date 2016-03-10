@@ -1,0 +1,113 @@
+From 3e7d15e744d5f0137dd266efba1f317895a31273 Mon Sep 17 00:00:00 2001
+From: Baptiste Assmann <bedis9@gmail.com>
+Date: Tue, 3 Nov 2015 23:31:35 +0100
+Subject: [PATCH 01/19] BUG/MINOR: http rule: http capture 'id' rule points to
+ a non existing id
+
+It is possible to create a http capture rule which points to a capture slot
+id which does not exist.
+
+Current patch prevent this when parsing configuration and prevent running
+configuration which contains such rules.
+
+This configuration is now invalid:
+
+  frontend f
+   bind :8080
+   http-request capture req.hdr(User-Agent) id 0
+   default_backend b
+
+this one as well:
+
+  frontend f
+   bind :8080
+   declare capture request len 32 # implicit id is 0 here
+   http-request capture req.hdr(User-Agent) id 1
+   default_backend b
+
+It applies of course to both http-request and http-response rules.
+(cherry picked from commit e9544935e86278dfa3d49fb4b97b860774730625)
+---
+ doc/configuration.txt      |  4 ++++
+ include/proto/proto_http.h |  5 +++++
+ src/cfgparse.c             | 26 ++++++++++++++++++++++++++
+ 3 files changed, 35 insertions(+)
+
+diff --git a/doc/configuration.txt b/doc/configuration.txt
+index c2624be..cd8c6b4 100644
+--- a/doc/configuration.txt
++++ b/doc/configuration.txt
+@@ -3655,6 +3655,8 @@ http-request { allow | deny | tarpit | auth [realm <realm>] | redirect <rule> |
+       the captured string in a previously declared capture slot. This is useful
+       to run captures in backends. The slot id can be declared by a previous
+       directive "http-request capture" or with the "declare capture" keyword.
++      If the slot <id> doesn't exist, then HAProxy fails parsing the
++      configuration to prevent unexpected behavior at run time.
+ 
+     - { track-sc0 | track-sc1 | track-sc2 } <key> [table <table>] :
+       enables tracking of sticky counters from current request. These rules
+@@ -4003,6 +4005,8 @@ http-response { allow | deny | add-header <name> <fmt> | set-nice <nice> |
+       This is useful to run captures in backends. The slot id can be declared by
+       a previous directive "http-response capture" or with the "declare capture"
+       keyword.
++      If the slot <id> doesn't exist, then HAProxy fails parsing the
++      configuration to prevent unexpected behavior at run time.
+ 
+     - "redirect" : this performs an HTTP redirection based on a redirect rule.
+       This supports a format string similarly to "http-request redirect" rules,
+diff --git a/include/proto/proto_http.h b/include/proto/proto_http.h
+index 0446b45..a1b0cb3 100644
+--- a/include/proto/proto_http.h
++++ b/include/proto/proto_http.h
+@@ -147,6 +147,11 @@ int val_hdr(struct arg *arg, char **err_msg);
+ int smp_prefetch_http(struct proxy *px, struct stream *s, unsigned int opt,
+                   const struct arg *args, struct sample *smp, int req_vol);
+ 
++enum act_return http_action_req_capture_by_id(struct act_rule *rule, struct proxy *px,
++                                              struct session *sess, struct stream *s, int flags);
++enum act_return http_action_res_capture_by_id(struct act_rule *rule, struct proxy *px,
++                                              struct session *sess, struct stream *s, int flags);
++
+ /* Note: these functions *do* modify the sample. Even in case of success, at
+  * least the type and uint value are modified.
+  */
+diff --git a/src/cfgparse.c b/src/cfgparse.c
+index f4bc503..44070a5 100644
+--- a/src/cfgparse.c
++++ b/src/cfgparse.c
+@@ -7751,6 +7751,32 @@ int check_config_validity()
+ 			}
+ 		}
+ 
++		/* parse http-request capture rules to ensure id really exists */
++		list_for_each_entry(hrqrule, &curproxy->http_req_rules, list) {
++			if (hrqrule->action  != ACT_CUSTOM ||
++			    hrqrule->action_ptr != http_action_req_capture_by_id)
++				continue;
++
++			if (hrqrule->arg.capid.idx >= curproxy->nb_req_cap) {
++				Alert("Proxy '%s': unable to find capture id '%d' referenced by http-request capture rule.\n",
++				      curproxy->id, hrqrule->arg.capid.idx);
++				cfgerr++;
++			}
++		}
++
++		/* parse http-response capture rules to ensure id really exists */
++		list_for_each_entry(hrqrule, &curproxy->http_res_rules, list) {
++			if (hrqrule->action  != ACT_CUSTOM ||
++			    hrqrule->action_ptr != http_action_res_capture_by_id)
++				continue;
++
++			if (hrqrule->arg.capid.idx >= curproxy->nb_rsp_cap) {
++				Alert("Proxy '%s': unable to find capture id '%d' referenced by http-response capture rule.\n",
++				      curproxy->id, hrqrule->arg.capid.idx);
++				cfgerr++;
++			}
++		}
++
+ 		/* find the target table for 'http-request' layer 7 rules */
+ 		list_for_each_entry(hrqrule, &curproxy->http_req_rules, list) {
+ 			struct proxy *target;
+-- 
+2.4.10
+

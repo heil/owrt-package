@@ -1,0 +1,28 @@
+From 7eb95d84f7ae5871044e8451f341071f5353bb4b Mon Sep 17 00:00:00 2001
+From: Willy Tarreau <w@1wt.eu>
+Date: Wed, 25 Nov 2015 11:29:47 +0100
+Subject: [PATCH 14/19] BUILD/MINOR: http: proto_http.h needs sample.h
+
+Since commit fd7edd3 ("MINOR: Move http method enum from proto_http to sample")
+proto_http.h needs to include sample.h. This can be backported to 1.6 though
+it doesn't affect existing code.
+(cherry picked from commit 9579d12f2ee88a00dc418730e315edfc2a8b536d)
+---
+ include/types/proto_http.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/types/proto_http.h b/include/types/proto_http.h
+index a208239..e5e9667 100644
+--- a/include/types/proto_http.h
++++ b/include/types/proto_http.h
+@@ -28,6 +28,7 @@
+ #include <common/regex.h>
+ 
+ #include <types/hdr_idx.h>
++#include <types/sample.h>
+ 
+ /* These are the flags that are found in txn->flags */
+ 
+-- 
+2.4.10
+
