@@ -8,18 +8,19 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=varnish-devel
-PKG_VERSION:=4.1.0
+PKG_VERSION:=4.1.3
 PKG_RELEASE:=1
 
 PKG_SOURCE:=varnish-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://repo.varnish-cache.org/source/
-PKG_MD5SUM:=d93e32b59c0c7487180a37781aae13f7
+PKG_MD5SUM:=f9c761a54324ad02c4fe44ce1d291d70
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/varnish-$(PKG_VERSION)
 PKG_SOURCE_SUBDIR:=varnish-$(PKG_VERSION)
 
 
-PKG_FIXUP:=autoreconf
+#PKG_FIXUP:=libtool
+#PKG_FIXUP:=autoreconf
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -29,7 +30,8 @@ define Package/varnish-devel
   CATEGORY:=Network
   TITLE:=VARNISH CACHE 4.1.x make Websites fly
   URL:=http://www.varnish-cache.org/
-  DEPENDS:=+libpcre +libltdl +libncurses +logrotate +librt +bash +gcc-native +zlib  +libelf +libreadline +libncursesw
+  DEPENDS:=+libpcre +libltdl +libncurses +logrotate +librt +bash +zlib  +libelf +libreadline +libncursesw
+  USERID:=varnish=199:varnish=199
 endef
 
 define Package/varnish-devel/description
@@ -42,21 +44,41 @@ CONFIGURE_VARS += \
 	ac_cv_so_sendfile_works=no \
 	ac_cv_lib_jemalloc_malloc_conf=no \
 	ac_cv_have_tcp_keep=yes \
+	ac_cv_have_tcp_fastopen=no \
+	ac_cv_prog_cc_c99=yes \
+	ac_cv_prog_cc_stdc=yes \
+	ac_cv_c_compiler_gnu=yes \
 	ac_cv_have_viz=no \
 	VCC_CC="varnishcc %s %o" 
 
-CONFIGURE_ARGS := \
-	$(filter-out --disable-nls,$(CONFIGURE_ARGS)) \
-	--program-transform-name=""
+
+define Build/Configure
+        (cd $(PKG_BUILD_DIR); rm -f config.cache; \
+		VCC_CC="x86_64-openwrt-linux-gnu-gcc -std=gnu99 -O2 -march=x86-64 -pipe -fomit-frame-pointer -fno-caller-saves  -fhonour-copts -Wno-error=unused-but-set-variable -Wno-error=unused-result -Wformat -Werror=format-security -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro -Wall -Werror -Wno-error=unused-result -pthread -fpic -shared -Wl,-x -o %o %s" \
+                $(TARGET_CONFIGURE_OPTS) \
+                CFLAGS="$(TARGET_CFLAGS)" \
+                CPPFLAGS="$(TARGET_CPPFLAGS)" \
+                LDFLAGS="$(TARGET_LDFLAGS)" \
+                ./configure \
+	        --host=$(REAL_GNU_TARGET_NAME) \
+       		--target=$(REAL_GNU_TARGET_NAME) \
+		-disable-nls \
+		--prefix=/usr \
+		--exec-prefix=/usr \
+		--disable-pcre-jit \
+		--program-transform-name="" \
+	);
+endef
 
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) \
+
+	$(MAKE) -j4 -C $(PKG_BUILD_DIR) \
 		CC="$(TARGET_CC)" \
 		CFLAGS="$(TARGET_CFLAGS) -std=gnu99" \
 		LD="$(TARGET_CC)" \
 		LDFLAGS="$(TARGET_LDFLAGS) -lpcre -lpthread" \
-		DESTDIR="$(PKG_INSTALL_DIR)" \
-	install
+		DESTDIR="$(PKG_INSTALL_DIR)"  \
+		install
 
 	mkdir -p $(PKG_INSTALL_DIR)/etc
 	$(CP) $(PKG_BUILD_DIR)/etc/builtin.vcl $(PKG_INSTALL_DIR)/etc
@@ -67,7 +89,7 @@ define Build/Compile
 		LD="$(TARGET_CC)" \
 		LDFLAGS="$(TARGET_LDFLAGS) -lpcre -lpthread" \
 		DESTDIR="$(PKG_INSTALL_DIR)" \
-	install
+		install
 endef
 
 define Package/varnish-devel/conffiles
@@ -78,6 +100,8 @@ endef
 define Package/varnish-devel/install
 	$(INSTALL_DIR) $(1)/etc/varnish
 	$(INSTALL_CONF) $(PKG_INSTALL_DIR)/etc/builtin.vcl $(1)/etc/varnish
+	$(INSTALL_CONF) ./files/config.vcl $(1)/etc/varnish
+	chmod 0754 $(1)/etc/varnish/config.vcl
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/varnish.init $(1)/etc/init.d/varnish
 	chmod 0750 $(1)/etc/init.d/varnish

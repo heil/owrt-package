@@ -24,15 +24,13 @@ start_service () {
 
     config_get listen_address "$section" listen_address
     config_get listen_port "$section" listen_port
-    config_get listen_proxy_address "$section" listen_proxy_address
-    config_get listen_proxy_port "$section" listen_proxy_port
     config_get admin_listen_address "$section" admin_listen_address
     config_get admin_listen_port "$section" admin_listen_port
     config_get secret_file "$section" secret_file
-    config_get min_threads "$section" min_threads
-    config_get max_threads "$section" max_threads
+    config_get thread_pool_min "$section" thread_pool_min
+    config_get thread_pool_max "$section" thread_pool_max
+    config_get thread_pool_timeout "$section" thread_pool_timeout
     config_get secret "$section" secret
-    config_get thread_timeout "$section" thread_timeout
     config_get storage_engine "$section" storage_engine
     config_get storage_file "$section" storage_file
     config_get storage_size "$section" storage_size
@@ -55,9 +53,10 @@ start_service () {
         -f ${vcl_conf} \
         -T ${admin_listen_address}:${admin_listen_port} \
         -t ${ttl:-0} \
-        -w ${min_threads},${max_threads},${thread_timeout} \
-	   ${thread_pools:+-p thread_pools=$thread_pools} \
-        -u nobody -g nogroup \
+	${thread_pools:+-p thread_pools=$thread_pools} \
+	${thread_pool_min:+-p thread_pool_min=$thread_pool_min} \
+	${thread_pool_max:+-p thread_pool_max=$thread_pool_max} \
+	${thread_pool_timeout:+-p thread_pool_timeout=$thread_pool_timeout} \
         -s ${varnish_storage}"
 
 		[ -z ${secret_file} ] ||

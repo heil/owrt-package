@@ -9,11 +9,11 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=haproxy-devel
-PKG_VERSION:=1.6.3
-PKG_RELEASE:=67
+PKG_VERSION:=1.6.9
+PKG_RELEASE:=00
 PKG_SOURCE:=haproxy-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://haproxy.1wt.eu/download/1.6/src/
-PKG_MD5SUM:=3362d1e268c78155c2474cb73e7f03f9
+PKG_MD5SUM:=c52eee40eb66f290d6f089c339b9d2b3
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/haproxy-$(PKG_VERSION)
 PKG_SOURCE_SUBDIR:=haproxy-$(PKG_VERSION)
@@ -30,17 +30,17 @@ define Package/haproxy-devel
   MAINTAINER:=Thomas Heil <heil@terminal-consulting.de>
 endef
 
-define Download/lua532
-	FILE:=lua-5.3.2.tar.gz
+define Download/lua533
+	FILE:=lua-5.3.3.tar.gz
 	URL:=http://www.lua.org/ftp/
-	MD5SUM:=33278c2ab5ee3c1a875be8d55c1ca2a1
+	MD5SUM:=703f75caa4fdf4a911c1a72e67a27498 
 endef
-$(eval $(call Download,lua532))
+$(eval $(call Download,lua533))
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	tar -zxvf $(DL_DIR)/lua-5.3.2.tar.gz -C $(PKG_BUILD_DIR)
-	ln -s $(PKG_BUILD_DIR)/lua-5.3.2 $(PKG_BUILD_DIR)/lua
+	tar -zxvf $(DL_DIR)/lua-5.3.3.tar.gz -C $(PKG_BUILD_DIR)
+	ln -s $(PKG_BUILD_DIR)/lua-5.3.3 $(PKG_BUILD_DIR)/lua
 endef
 
 
@@ -59,7 +59,9 @@ else
 endif
 
 define Build/Compile
-	make TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR)/lua INSTALL_TOP="$(STAGING_DIR)/lua532/" linux install 
+	make TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR)/lua INSTALL_TOP="$(STAGING_DIR)/lua-5.3.3/" linux install 
+
+	mv $(STAGING_DIR)/lua-5.3.3/lib/liblua.a $(STAGING_DIR)/lua-5.3.3/lib/liblua533.a 
 
 	$(MAKE) TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR) \
 		DESTDIR="$(PKG_INSTALL_DIR)" \
@@ -67,17 +69,20 @@ define Build/Compile
 		CFLAGS="$(TARGET_CFLAGS) -fno-align-jumps -fno-align-functions -fno-align-labels -fno-align-loops -pipe -fomit-frame-pointer -fhonour-copts" \
 		LD="$(TARGET_CC)" \
 		LDFLAGS="$(TARGET_LDFLAGS)" \
-		ADDLIB="-lcrypto" \
+		ADDLIB="-lcrypto -lm" \
 		USE_LUA=1 \
-		LUA_LIB_NAME="lua" \
+		LUA_LIB_NAME="lua533" \
 		PCREDIR="$(STAGING_DIR)/usr/include" \
-	        LUA_INC="$(STAGING_DIR)/lua532/include" \
-		LUA_LIB="$(STAGING_DIR)/lua532/lib" \
+	        LUA_INC="$(STAGING_DIR)/lua-5.3.3/include" \
+		LUA_LIB="$(STAGING_DIR)/lua-5.3.3/lib" \
 		SMALL_OPTS="-DBUFSIZE=16384 -DMAXREWRITE=1030 -DSYSTEM_MAXCONN=165530 " \
 		USE_LINUX_TPROXY=1 USE_LINUX_SPLICE=1 USE_REGPARM=1 USE_OPENSSL=1 \
 		USE_ZLIB=yes USE_PCRE=1 \
 		VERSION="$(PKG_VERSION)-patch$(PKG_RELEASE)" \
-		IGNOREGIT=1 \
+		IGNOREGIT=1 
+
+	$(MAKE) TARGET=$(LINUX_TARGET) -C $(PKG_BUILD_DIR) \
+		DESTDIR="$(PKG_INSTALL_DIR)" \
 		install
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/contrib/halog \

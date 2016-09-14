@@ -1,0 +1,12 @@
+Index: varnish-4.1.3/Makefile.am
+===================================================================
+--- varnish-4.1.3.orig/Makefile.am
++++ varnish-4.1.3/Makefile.am
+@@ -1,6 +1,6 @@
+ ACLOCAL_AMFLAGS = -I m4
+ 
+-SUBDIRS = include lib bin etc doc man
++SUBDIRS = include lib bin etc
+ 
+ pkgconfigdir = $(libdir)/pkgconfig
+ pkgconfig_DATA = varnishapi.pc

@@ -1,5 +1,6 @@
 # 
 # Copyright (C) 2006-2008 OpenWrt.org
+# Copyright (C) 2012 Xiangfu <xiangfu@openmobilefree.net>
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -9,15 +10,18 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=kbd
 PKG_RELEASE:=1
-PKG_VERSION:=1.15.3
-PKG_SOURCE_URL:=http://ftp.altlinux.org/pub/people/legion/kbd/
-#PKG_SOURCE_URL:=http://ftp.uni-frankfurt.de/kernel/linux/utils/kbd/
+PKG_VERSION:=1.15.5
+PKG_SOURCE_URL:=ftp://ftp.altlinux.org/pub/people/legion/kbd/
 PKG_SOURCE:=kbd-$(PKG_VERSION).tar.gz
-PKG_MD5SUM:=8143e179a0f3c25646ce5085e8777200
 
 include $(INCLUDE_DIR)/package.mk
 
+CONFIGURE_VARS += \
+	ac_cv_lib_pam_misc_misc_conv=no \
+	ac_cv_lib_pam_pam_start=no
+
 define Package/kbd/Default
+  MAINTAINER:="Xiangfu Liu" <xiangfu@openmobilefree.net>
   SECTION:=utils
   CATEGORY:=Utilities
   URL:=ftp://ftp.kernel.org/pub/linux/utils/kbd
@@ -62,8 +66,6 @@ endef
 define Package/kbd-console-maps/install
 	$(INSTALL_DIR) $(1)/usr/share/kbd/keymaps/
 	$(CP) $(PKG_BUILD_DIR)/data/keymaps/i386/ $(1)/usr/share/kbd/keymaps/
-	$(INSTALL_DIR) $(1)/usr/share/kbd/keymaps/include
-	$(CP) $(PKG_BUILD_DIR)/data/keymaps/include/* $(1)/usr/share/kbd/keymaps/include/
 endef
 
 $(eval $(call BuildPackage,kbd))

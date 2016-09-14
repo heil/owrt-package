@@ -1,0 +1,12 @@
+Index: keepalived-1.2.24/keepalived/vrrp/vrrp.c
+===================================================================
+--- keepalived-1.2.24.orig/keepalived/vrrp/vrrp.c
++++ keepalived-1.2.24/keepalived/vrrp/vrrp.c
+@@ -26,7 +26,6 @@
+ #include "config.h"
+ 
+ /* local include */
+-#include "vrrp_arp.h"
+ #include "vrrp_ndisc.h"
+ #include "vrrp_scheduler.h"
+ #include "vrrp_notify.h"

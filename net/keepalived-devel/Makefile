@@ -8,14 +8,16 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=keepalived-devel
-PKG_VERSION:=1.2.19
-PKG_RELEASE:=17
+PKG_VERSION:=1.2.16
+PKG_RELEASE:=03
 
 PKG_SOURCE:=keepalived-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:= http://www.keepalived.org/software
-PKG_MD5SUM:=5c98b06639dd50a6bff76901b53febb6
+PKG_MD5SUM:=f834ab2cfc2e7300edf1bafaf4a5d83e
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/keepalived-$(PKG_VERSION)
+
+PKG_FIXUP:=autoreconf 
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/kernel.mk
@@ -28,7 +30,7 @@ define Package/keepalived-devel
   DEPENDS:=+libopenssl +libpcre +libltdl +libpopt +ipvsadm +kmod-ipvs-core +kmod-ipvs-dh +kmod-ipvs-ftp +kmod-ipvs-lblc +kmod-ipvs-lblcr \
 	+kmod-ipvs-lc +kmod-ipvs-nq +kmod-ipvs-pe-sip +kmod-ipvs-rr +kmod-ipvs-sed +kmod-ipvs-sh +kmod-ipvs-wlc +kmod-ipvs-wrr +kmod-nf-nathelper-extra \
 	+iptables-mod-nat-extra \
-	+libnl-tiny
+	+libnl-genl
 
 endef
 
@@ -43,10 +45,13 @@ endef
 acvar=$(subst -,_,$(subst .,_,$(subst /,_,$(1))))
 
 CONFIGURE_ARGS+= \
+	--enable-vrrp \
 	--enable-shared \
-	--disable-static \
+	--enable-sha1 \
+	--disable-lvs-64bit-stats \
 	--disable-debug \
-	--with-kernel-dir=/usr/src/linux-does-not-exist \
+	--disable-profile \
+	--with-kernel-dir="$(LINUX_DIR)/$(LINUX_UAPI_DIR)" \
 	--disable-strip 
 
 CONFIGURE_VARS+= \
